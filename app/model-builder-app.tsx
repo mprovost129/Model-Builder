@@ -280,6 +280,7 @@ import {
 import {
   automaticWallJoinCount,
   buildAutomaticWallJoinPlan,
+  unresolvedWallJunctionCount,
   wallLayerFootprint,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
@@ -1316,6 +1317,7 @@ function updateWallView(
   wallType: LayeredAssembly,
   joinPlan: AutomaticWallJoinPlan,
   linesById: ReadonlyMap<string, LineObject>,
+  wallTypesById: ReadonlyMap<string, LayeredAssembly>,
 ) {
   clearWallView(view);
   const dx = line.end.x - line.start.x;
@@ -1324,7 +1326,7 @@ function updateWallView(
   if (length < 1 / 16) return;
   wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
-    const footprint = wallLayerFootprint(line, wallType, index, joinPlan, linesById);
+    const footprint = wallLayerFootprint(line, wallType, index, joinPlan, linesById, wallTypesById);
     const shape = new THREE.Shape();
     shape.moveTo(footprint.startExterior.x, footprint.startExterior.y);
     shape.lineTo(footprint.startInterior.x, footprint.startInterior.y);
@@ -6225,8 +6227,9 @@ function Viewport({
       }
     });
     const wallLines = document.lines.filter((line) => line.architecturalRole === "wall");
-    const wallJoinPlan = buildAutomaticWallJoinPlan(wallLines);
+    const wallJoinPlan = buildAutomaticWallJoinPlan(wallLines, document.building.wallTypes);
     const wallLinesById = new Map(wallLines.map((line) => [line.id, line]));
+    const wallTypesById = new Map(document.building.wallTypes.map((wallType) => [wallType.id, wallType]));
     wallLines.forEach((line) => {
       let view = wallViewsRef.current.get(line.id);
       if (!view) {
@@ -6235,7 +6238,7 @@ function Viewport({
       }
       const story = document.building.stories.find((candidate) => candidate.id === line.storyId);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (story && wallType) updateWallView(view, line, story, wallType, wallJoinPlan, wallLinesById);
+      if (story && wallType) updateWallView(view, line, story, wallType, wallJoinPlan, wallLinesById, wallTypesById);
       view.group.visible = Boolean(story && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
@@ -8404,11 +8407,21 @@ export function ModelBuilderApp() {
   const selectedBox = findBoxObject(editor.present, selectedObjectId);
   const selectedLine = findLineObject(editor.present, selectedLineId);
   const selectedWallJoinPlan = selectedLine?.architecturalRole === "wall"
-    ? buildAutomaticWallJoinPlan(editor.present.lines)
-    : new Map();
+    ? buildAutomaticWallJoinPlan(editor.present.lines, editor.present.building.wallTypes)
+    : { endpointJoins: new Map(), passThroughCounts: new Map(), unresolvedCounts: new Map() };
   const selectedWallJoinCount = selectedLine
     ? automaticWallJoinCount(selectedLine.id, selectedWallJoinPlan)
     : 0;
+  const selectedWallUnresolvedCount = selectedLine
+    ? unresolvedWallJunctionCount(selectedLine.id, selectedWallJoinPlan)
+    : 0;
+  const selectedWallJunctionLabel = selectedWallJoinCount && selectedWallUnresolvedCount
+    ? `${selectedWallJoinCount} automatic · ${selectedWallUnresolvedCount} unresolved`
+    : selectedWallUnresolvedCount
+      ? `${selectedWallUnresolvedCount} unresolved`
+      : selectedWallJoinCount
+        ? `${selectedWallJoinCount} automatic`
+        : "Open ends";
   const selectedLineIsEditable = Boolean(selectedLine && lineIsEditable(editor.present, selectedLine));
   const selectedPolyline = findPolylineObject(editor.present, selectedPolylineId);
   const selectedPolylineIsEditable = Boolean(selectedPolyline && polylineIsEditable(editor.present, selectedPolyline));
@@ -12098,7 +12111,7 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Thickness"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(editor.present.building.wallTypes.find((wallType) => wallType.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]))}</span></PropertyGridRow>
                 <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "wall-center"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
-                <PropertyGridRow label="Joins"><span className="property-readout">{selectedWallJoinCount ? `${selectedWallJoinCount} automatic corner${selectedWallJoinCount === 1 ? "" : "s"}` : "Open or unresolved ends"}</span></PropertyGridRow>
+                <PropertyGridRow label="Junctions"><span className="property-readout">{selectedWallJunctionLabel}</span></PropertyGridRow>
               </> : null}
               <PropertyGridRow label="Locked"><button className={selectedLine.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedLineLock}>{selectedLine.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>
               <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>{selectedLine.architecturalRole === "wall" ? "Convert to Line" : "Create Wall"}</button></div>

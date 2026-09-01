@@ -122,12 +122,15 @@ belongs to Main.
   or interior face of Main as its stable reference. Its exterior side can be
   flipped without reversing or moving the drawn path. Changing the Wall type
   rebuilds layers around the selected reference line.
-- Two compatible straight Walls on the same Story automatically clean up a
-  shared endpoint when they use the same Wall type. Each corresponding layer is
-  mitered from its exterior and interior boundaries while the editable reference
-  paths remain unchanged. Properties reports the number of automatic corners.
-  Straight continuations, shallow angles, mixed Wall types, and nodes shared by
-  three or more Walls remain square-ended and explicitly unresolved.
+- Straight Walls on the same Story automatically clean up supported corners and
+  T-junctions without changing their editable reference paths. Corners between
+  different Wall types derive one shared miter plane from the two Main cores, so
+  finish layers do not need to correspond. A branch that meets the middle of a
+  through-wall, or two aligned host segments, stops at the host's near Main face
+  while the host remains continuous. Properties reports automatic and unresolved
+  junction counts. Straight continuations remain square and clean; shallow
+  angles, Y-junctions, crossing ambiguities, and four-or-more-Wall nodes remain
+  square-ended and explicitly unresolved.
 - Manage > Wall Types edits reusable exterior-to-interior layered assemblies in
   three explicit groups. Group totals are calculated independently, layer order
   is constrained within each group, and the last Main layer cannot be removed.
@@ -142,9 +145,8 @@ belongs to Main.
 
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Extend the conservative two-Wall corner cleanup into a full Main-layer-aware
-   junction solver for T-junctions, multi-Wall nodes, and mixed Wall types, then
-   add openings.
+3. Add explicit junction priorities and finish-wrap controls for advanced
+   multi-Wall nodes, then add Wall openings.
 4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions
