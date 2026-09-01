@@ -473,6 +473,7 @@ button { color: inherit; }
 .story-assembly > header span { color: #8f9ba7; font-size: 7px; }
 .story-assembly > header b { margin-left: auto; color: #f0c978; font: 10px var(--font-geist-mono), monospace; }
 .story-layer-grid { display: grid; grid-template-columns: 26px minmax(180px, 1.5fr) minmax(120px, .8fr) minmax(145px, .8fr) 86px; align-items: center; min-height: 36px; border-bottom: 1px solid #333e48; }
+.story-layer-grid.has-wall-group { grid-template-columns: 26px minmax(170px, 1.45fr) minmax(105px, .75fr) minmax(105px, .75fr) minmax(135px, .8fr) 86px; }
 .story-layer-grid > * { min-width: 0; }
 .story-layer-grid > span { color: #85929d; font: 8px var(--font-geist-mono), monospace; text-align: center; }
 .story-layer-head { min-height: 24px; background: #222b34; }
@@ -486,6 +487,18 @@ button { color: inherit; }
 .story-layer-actions button:last-child { color: #df8d87; }
 .story-layer-actions button:disabled { opacity: .3; }
 .story-add-layer { margin: 5px; padding: 0 9px; }
+.story-wall-layer-group { border-bottom: 1px solid #46525e; }
+.story-wall-layer-group:last-of-type { border-bottom: 0; }
+.story-wall-group-heading { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 31px; padding: 5px 9px; border-bottom: 1px solid #394550; background: #252e37; }
+.story-wall-group-heading::before { width: 4px; height: 18px; border-radius: 1px; background: #75828e; content: ""; }
+.story-wall-group-heading.is-exterior::before { background: #6aa9c7; }
+.story-wall-group-heading.is-main::before { background: #d3aa55; }
+.story-wall-group-heading.is-interior::before { background: #9d86ba; }
+.story-wall-group-heading strong { font-size: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.story-wall-group-heading span { color: #84919c; font-size: 7px; }
+.story-wall-group-heading b { color: #cbd4db; font: 8px var(--font-geist-mono), monospace; }
+.story-add-wall-layers { display: flex; flex-wrap: wrap; padding: 0 2px; }
+.story-add-wall-layers .story-add-layer { flex: 1 1 120px; }
 .story-pole { display: flex; flex-direction: column; padding: 18px 14px 12px; }
 .story-pole-level { position: relative; display: grid; place-items: center; min-height: 94px; padding: 20px 8px; border: 0; border-right: 1px solid #66737e; border-left: 1px solid #66737e; background: #26313b; color: #d9e1e7; cursor: pointer; }
 .story-pole-level:hover,

@@ -21,6 +21,7 @@ test("uses rough framing rather than finishes to calculate the next Story datum"
 
   const changedFinishes = cloneBuildingStructure(withSecond);
   changedFinishes.stories[0].floorFinish.layers[0].thickness = 2;
+  changedFinishes.stories[0].ceilingStructure.layers.push({ id: "story-01-ceiling-structure-01", material: "Lumber", name: "Dropped Furring", role: "framing", thickness: 2 });
   changedFinishes.stories[0].ceilingFinish.layers[0].thickness = 2;
   assert.equal(calculateStoryElevations(changedFinishes)[1].roughFloorElevation, 121.125);
 });
@@ -33,6 +34,16 @@ test("derives finished elevations and clear height from finish layers", () => {
   assert.equal(elevation.roughCeilingElevation, 109.125);
   assert.equal(elevation.finishedCeilingElevation, 107.875);
   assert.equal(elevation.finishedClearHeight, 107.125);
+});
+
+test("ceiling structure lowers the finished ceiling without moving the rough ceiling", () => {
+  const building = createDefaultBuildingStructure();
+  building.stories[0].ceilingStructure.layers.push({ id: "story-01-ceiling-structure-01", material: "Lumber", name: "Dropped Furring", role: "framing", thickness: 3.5 });
+  const [elevation] = calculateStoryElevations(building);
+  assert.equal(elevation.roughCeilingElevation, 109.125);
+  assert.equal(elevation.ceilingStructureBottomElevation, 105.625);
+  assert.equal(elevation.finishedCeilingElevation, 104.375);
+  assert.equal(elevation.finishedClearHeight, 103.625);
 });
 
 test("sums every layer in a rough floor assembly", () => {
@@ -51,6 +62,25 @@ test("defines reusable exterior-to-interior layered wall types", () => {
   assert.equal(assemblyTotalThickness(building.wallTypes[0]), 4.9375);
   assert.equal(building.wallTypes[0].layers[0].name, "Exterior Finish");
   assert.equal(building.wallTypes[0].layers.at(-1)?.name, "Interior Finish");
+  assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.wallGroup), ["exterior", "exterior", "main", "interior"]);
+});
+
+test("requires an ordered positive-thickness Main group in every wall type", () => {
+  const outOfOrder = createDefaultBuildingStructure();
+  outOfOrder.wallTypes[0].layers[0].wallGroup = "interior";
+  assert.equal(buildingStructureIsValid(outOfOrder), false);
+
+  const missingMain = createDefaultBuildingStructure();
+  for (const layer of missingMain.wallTypes[0].layers) {
+    layer.wallGroup = layer.wallGroup === "main" ? "interior" : layer.wallGroup;
+  }
+  assert.equal(buildingStructureIsValid(missingMain), false);
+
+  const zeroDepthMain = createDefaultBuildingStructure();
+  const mainLayer = zeroDepthMain.wallTypes[0].layers.find((layer) => layer.wallGroup === "main");
+  assert.ok(mainLayer);
+  mainLayer.thickness = 0;
+  assert.equal(buildingStructureIsValid(zeroDepthMain), false);
 });
 
 test("calculates Stories below the anchored First Floor downward", () => {

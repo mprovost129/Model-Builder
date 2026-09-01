@@ -22,7 +22,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 15
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 17
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs
@@ -75,8 +75,10 @@ polylines, rectangles, Circles, and Arcs.
   Story drawing plane, and calculated rough and finished elevations
 - Spreadsheet-style Story and Assembly Manager with add-above/add-below, datum
   anchoring, live section preview, and editable structural and finish layers
-- Layered floor structure, floor finish, and ceiling finish assemblies; only
+- Layered floor structure, floor finish, ceiling structure, and ceiling finish assemblies; only
   rough structure controls dependent Story elevations
+- Reusable wall types with explicitly ordered Exterior, Main, and Interior layer
+  groups, per-group thickness totals, and a required structural Main core
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an
@@ -160,7 +162,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-14 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-16 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -305,7 +307,7 @@ open Polyline, or `C` to close it back to the first point. Escape immediately ex
 preserving an open Polyline when at least two vertices have been placed. Enter repeats the command afterward.
 Selecting a Polyline exposes vertex grips and an editable elevation in Properties.
 Polylines participate in Fit View, Undo/Redo, local recovery, and current
-version-15 `.mbproj` files. Versions 1 through 14 open through the compatibility upgrader.
+version-16 `.mbproj` files. Versions 1 through 15 open through the compatibility upgrader.
 
 Press `C`, or enter `CIRCLE`, to start Circle. Choose Center-Radius,
 Center-Diameter, 2-Point, 3-Point, Tangent-Tangent-Radius, or

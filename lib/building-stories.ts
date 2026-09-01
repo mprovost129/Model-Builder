@@ -1,6 +1,6 @@
 import { snapToSixteenth } from "./architectural-units.ts";
 
-export type AssemblyKind = "ceiling-finish" | "floor-finish" | "floor-structure" | "wall-structure";
+export type AssemblyKind = "ceiling-finish" | "ceiling-structure" | "floor-finish" | "floor-structure" | "wall-structure";
 export type AssemblyLayerRole =
   | "air-gap"
   | "finish"
@@ -9,12 +9,17 @@ export type AssemblyLayerRole =
   | "sheathing"
   | "substrate";
 
+export const WALL_LAYER_GROUPS = ["exterior", "main", "interior"] as const;
+export type WallLayerGroup = (typeof WALL_LAYER_GROUPS)[number];
+
 export type AssemblyLayer = {
   id: string;
   material: string;
   name: string;
   role: AssemblyLayerRole;
   thickness: number;
+  /** Required for wall assemblies; omitted for horizontal assemblies. */
+  wallGroup?: WallLayerGroup;
 };
 
 export type LayeredAssembly = {
@@ -26,6 +31,7 @@ export type LayeredAssembly = {
 
 export type BuildingStory = {
   ceilingFinish: LayeredAssembly;
+  ceilingStructure: LayeredAssembly;
   floorFinish: LayeredAssembly;
   floorStructure: LayeredAssembly;
   id: string;
@@ -44,6 +50,8 @@ export type BuildingStructure = {
 
 export type CalculatedStoryElevations = {
   ceilingFinishThickness: number;
+  ceilingStructureBottomElevation: number;
+  ceilingStructureThickness: number;
   finishedCeilingElevation: number;
   finishedClearHeight: number;
   finishedFloorElevation: number;
@@ -114,6 +122,15 @@ function defaultFloorFinish(storyId: string): LayeredAssembly {
   };
 }
 
+export function createDefaultCeilingStructure(storyId: string): LayeredAssembly {
+  return {
+    id: `${storyId}-ceiling-structure`,
+    kind: "ceiling-structure",
+    name: "Ceiling Structure",
+    layers: [],
+  };
+}
+
 function defaultCeilingFinish(storyId: string): LayeredAssembly {
   return {
     id: `${storyId}-ceiling-finish`,
@@ -137,10 +154,10 @@ export function createDefaultWallType(): LayeredAssembly {
     kind: "wall-structure",
     name: "2x4 Exterior Wall",
     layers: [
-      { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", role: "finish", thickness: 0.5 },
-      { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", role: "sheathing", thickness: 0.4375 },
-      { id: "wall-type-01-03", material: "Lumber", name: "2x4 Stud Framing", role: "framing", thickness: 3.5 },
-      { id: "wall-type-01-04", material: "Gypsum Board", name: "Interior Finish", role: "finish", thickness: 0.5 },
+      { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", role: "finish", thickness: 0.5, wallGroup: "exterior" },
+      { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", role: "sheathing", thickness: 0.4375, wallGroup: "exterior" },
+      { id: "wall-type-01-03", material: "Lumber", name: "2x4 Stud Framing", role: "framing", thickness: 3.5, wallGroup: "main" },
+      { id: "wall-type-01-04", material: "Gypsum Board", name: "Interior Finish", role: "finish", thickness: 0.5, wallGroup: "interior" },
     ],
   };
 }
@@ -148,6 +165,7 @@ export function createDefaultWallType(): LayeredAssembly {
 export function createBuildingStory(id: string, name: string): BuildingStory {
   return {
     ceilingFinish: defaultCeilingFinish(id),
+    ceilingStructure: createDefaultCeilingStructure(id),
     floorFinish: defaultFloorFinish(id),
     floorStructure: defaultFloorStructure(id),
     id,
@@ -179,6 +197,7 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
   return {
     ...story,
     ceilingFinish: cloneLayeredAssembly(story.ceilingFinish),
+    ceilingStructure: cloneLayeredAssembly(story.ceilingStructure),
     floorFinish: cloneLayeredAssembly(story.floorFinish),
     floorStructure: cloneLayeredAssembly(story.floorStructure),
   };
@@ -191,6 +210,12 @@ export function cloneBuildingStructure(building: BuildingStructure): BuildingStr
 export function assemblyTotalThickness(assembly: LayeredAssembly): number {
   return snapToSixteenth(
     assembly.layers.reduce((total, layer) => total + layer.thickness, 0),
+  );
+}
+
+export function wallLayerGroupThickness(assembly: LayeredAssembly, group: WallLayerGroup): number {
+  return snapToSixteenth(
+    assembly.layers.reduce((total, layer) => total + (layer.wallGroup === group ? layer.thickness : 0), 0),
   );
 }
 
@@ -217,6 +242,7 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
         { value: layer.material, limit: MATERIAL_NAME_LIMIT },
       ]) ||
       !["air-gap", "finish", "framing", "membrane", "sheathing", "substrate"].includes(layer.role) ||
+      (layer.wallGroup !== undefined && !WALL_LAYER_GROUPS.includes(layer.wallGroup)) ||
       !Number.isFinite(layer.thickness) ||
       layer.thickness < 0 ||
       layer.thickness > MAXIMUM_ASSEMBLY_THICKNESS ||
@@ -225,6 +251,20 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
       return false;
     }
     ids.add(layer.id);
+  }
+  if (assembly.kind === "wall-structure") {
+    let previousGroupIndex = 0;
+    let hasPositiveMainLayer = false;
+    for (const layer of assembly.layers) {
+      if (layer.wallGroup === undefined) return false;
+      const groupIndex = WALL_LAYER_GROUPS.indexOf(layer.wallGroup);
+      if (groupIndex < previousGroupIndex) return false;
+      previousGroupIndex = groupIndex;
+      if (layer.wallGroup === "main" && layer.thickness > 0) hasPositiveMainLayer = true;
+    }
+    if (!hasPositiveMainLayer) return false;
+  } else if (assembly.layers.some((layer) => layer.wallGroup !== undefined)) {
+    return false;
   }
   return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;
 }
@@ -269,8 +309,9 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
       !isSixteenth(story.roughCeilingHeight) ||
       !layeredAssemblyIsValid(story.floorStructure, "floor-structure") ||
       !layeredAssemblyIsValid(story.floorFinish, "floor-finish") ||
+      !layeredAssemblyIsValid(story.ceilingStructure, "ceiling-structure") ||
       !layeredAssemblyIsValid(story.ceilingFinish, "ceiling-finish") ||
-      story.roughCeilingHeight < assemblyTotalThickness(story.floorFinish) + assemblyTotalThickness(story.ceilingFinish)
+      story.roughCeilingHeight < assemblyTotalThickness(story.floorFinish) + assemblyTotalThickness(story.ceilingStructure) + assemblyTotalThickness(story.ceilingFinish)
     ) {
       return false;
     }
@@ -309,12 +350,16 @@ export function calculateStoryElevations(building: BuildingStructure): Calculate
     const roughFloorElevation = roughFloors[index];
     const floorStructureThickness = assemblyTotalThickness(story.floorStructure);
     const floorFinishThickness = assemblyTotalThickness(story.floorFinish);
+    const ceilingStructureThickness = assemblyTotalThickness(story.ceilingStructure);
     const ceilingFinishThickness = assemblyTotalThickness(story.ceilingFinish);
     const roughCeilingElevation = snapToSixteenth(roughFloorElevation + story.roughCeilingHeight);
+    const ceilingStructureBottomElevation = snapToSixteenth(roughCeilingElevation - ceilingStructureThickness);
     return {
       ceilingFinishThickness,
-      finishedCeilingElevation: snapToSixteenth(roughCeilingElevation - ceilingFinishThickness),
-      finishedClearHeight: snapToSixteenth(story.roughCeilingHeight - floorFinishThickness - ceilingFinishThickness),
+      ceilingStructureBottomElevation,
+      ceilingStructureThickness,
+      finishedCeilingElevation: snapToSixteenth(ceilingStructureBottomElevation - ceilingFinishThickness),
+      finishedClearHeight: snapToSixteenth(story.roughCeilingHeight - floorFinishThickness - ceilingStructureThickness - ceilingFinishThickness),
       finishedFloorElevation: snapToSixteenth(roughFloorElevation + floorFinishThickness),
       floorAboveElevation: index < building.stories.length - 1 ? roughFloors[index + 1] : null,
       floorFinishThickness,

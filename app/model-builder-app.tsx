@@ -265,10 +265,14 @@ import {
   calculateStoryElevations,
   cloneBuildingStructure,
   removeBuildingStory,
+  wallLayerGroupThickness,
+  WALL_LAYER_GROUPS,
   type AssemblyKind,
+  type AssemblyLayer,
   type AssemblyLayerRole,
   type BuildingStructure,
   type LayeredAssembly,
+  type WallLayerGroup,
 } from "@/lib/building-stories";
 import {
   createProjectDocument,
@@ -7881,6 +7885,12 @@ const ASSEMBLY_ROLE_LABELS: Record<AssemblyLayerRole, string> = {
   substrate: "Substrate",
 };
 
+const WALL_LAYER_GROUP_LABELS: Record<WallLayerGroup, string> = {
+  exterior: "Exterior Layers",
+  main: "Main Layers",
+  interior: "Interior Layers",
+};
+
 function nextAssemblyLayerId(assembly: LayeredAssembly): string {
   let number = 1;
   const ids = new Set(assembly.layers.map((layer) => layer.id));
@@ -7889,11 +7899,13 @@ function nextAssemblyLayerId(assembly: LayeredAssembly): string {
 }
 
 function StoryDimensionInput({
+  allowZero = false,
   label,
   onChange,
   signed = false,
   value,
 }: {
+  allowZero?: boolean;
   label: string;
   onChange: (value: number) => void;
   signed?: boolean;
@@ -7906,7 +7918,7 @@ function StoryDimensionInput({
 
   const commit = () => {
     const parsed = parser(draft);
-    if (parsed === null || (!signed && parsed <= 0)) {
+    if (parsed === null || (!signed && (allowZero ? parsed < 0 : parsed <= 0))) {
       setError(true);
       return;
     }
@@ -7942,25 +7954,35 @@ function StoryAssemblyEditor({
   assembly: LayeredAssembly;
   onChange: (assembly: LayeredAssembly) => void;
 }) {
-  const addLayer = () => {
+  const isWallAssembly = assembly.kind === "wall-structure";
+  const addLayer = (wallGroup?: WallLayerGroup) => {
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
-    next.layers.push({
+    const layer: AssemblyLayer = {
       id: nextAssemblyLayerId(next),
       material: "New Material",
       name: "New Layer",
-      role: assembly.kind === "floor-structure" || assembly.kind === "wall-structure" ? "framing" : "finish",
+      role: assembly.kind === "floor-structure" || assembly.kind === "ceiling-structure" || isWallAssembly ? "framing" : "finish",
       thickness: 0.5,
-    });
+    };
+    if (isWallAssembly) layer.wallGroup = wallGroup ?? "main";
+    next.layers.push(layer);
+    if (isWallAssembly) {
+      next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
+    }
     onChange(next);
   };
   const updateLayer = (index: number, change: Partial<LayeredAssembly["layers"][number]>) => {
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
     next.layers[index] = { ...next.layers[index], ...change };
+    if (isWallAssembly && change.wallGroup !== undefined) {
+      next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
+    }
     onChange(next);
   };
   const moveLayer = (index: number, direction: -1 | 1) => {
     const target = index + direction;
     if (target < 0 || target >= assembly.layers.length) return;
+    if (isWallAssembly && assembly.layers[index].wallGroup !== assembly.layers[target].wallGroup) return;
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
     [next.layers[index], next.layers[target]] = [next.layers[target], next.layers[index]];
     onChange(next);
@@ -7969,28 +7991,45 @@ function StoryAssemblyEditor({
     const next = { ...assembly, layers: assembly.layers.filter((_, candidate) => candidate !== index).map((layer) => ({ ...layer })) };
     onChange(next);
   };
+  const mainLayerCount = assembly.layers.filter((layer) => layer.wallGroup === "main").length;
+  const renderLayer = (layer: AssemblyLayer, index: number) => {
+    const isOnlyMainLayer = isWallAssembly && layer.wallGroup === "main" && mainLayerCount === 1;
+    const previousLayer = assembly.layers[index - 1];
+    const nextLayer = assembly.layers[index + 1];
+    return (
+      <div className={isWallAssembly ? "story-layer-grid has-wall-group" : "story-layer-grid"} key={layer.id}>
+        <span>{index + 1}</span>
+        <div className="story-layer-names">
+          <input value={layer.name} onChange={(event) => updateLayer(index, { name: event.target.value })} aria-label={`${assembly.name} layer ${index + 1} name`} />
+          <input value={layer.material} onChange={(event) => updateLayer(index, { material: event.target.value })} aria-label={`${layer.name} material`} />
+        </div>
+        {isWallAssembly ? (
+          <select value={layer.wallGroup} onChange={(event) => updateLayer(index, { wallGroup: event.target.value as WallLayerGroup })} aria-label={`${layer.name} wall layer group`}>
+            {WALL_LAYER_GROUPS.map((group) => <option key={group} value={group} disabled={isOnlyMainLayer && group !== "main"}>{WALL_LAYER_GROUP_LABELS[group]}</option>)}
+          </select>
+        ) : null}
+        <select value={layer.role} onChange={(event) => updateLayer(index, { role: event.target.value as AssemblyLayerRole })} aria-label={`${layer.name} role`}>
+          {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+        </select>
+        <StoryDimensionInput allowZero={isWallAssembly} key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
+        <div className="story-layer-actions"><button type="button" onClick={() => moveLayer(index, -1)} disabled={!previousLayer || (isWallAssembly && previousLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} up`}>↑</button><button type="button" onClick={() => moveLayer(index, 1)} disabled={!nextLayer || (isWallAssembly && nextLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} down`}>↓</button><button type="button" onClick={() => removeLayer(index)} disabled={isOnlyMainLayer} aria-label={`Remove ${layer.name}`}>×</button></div>
+      </div>
+    );
+  };
   return (
     <section className="story-assembly">
       <header>
-        <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls rough framing" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story datums"}</span></div>
+        <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story datums"}</span></div>
         <b>{formatArchitectural(assemblyTotalThickness(assembly))}</b>
       </header>
-      <div className="story-layer-grid story-layer-head"><span>#</span><span>Layer / material</span><span>Role</span><span>Thickness</span><span>Order</span></div>
-      {assembly.layers.map((layer, index) => (
-        <div className="story-layer-grid" key={layer.id}>
-          <span>{index + 1}</span>
-          <div className="story-layer-names">
-            <input value={layer.name} onChange={(event) => updateLayer(index, { name: event.target.value })} aria-label={`${assembly.name} layer ${index + 1} name`} />
-            <input value={layer.material} onChange={(event) => updateLayer(index, { material: event.target.value })} aria-label={`${layer.name} material`} />
-          </div>
-          <select value={layer.role} onChange={(event) => updateLayer(index, { role: event.target.value as AssemblyLayerRole })} aria-label={`${layer.name} role`}>
-            {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
-          </select>
-          <StoryDimensionInput key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
-          <div className="story-layer-actions"><button type="button" onClick={() => moveLayer(index, -1)} disabled={index === 0} aria-label={`Move ${layer.name} up`}>↑</button><button type="button" onClick={() => moveLayer(index, 1)} disabled={index === assembly.layers.length - 1} aria-label={`Move ${layer.name} down`}>↓</button><button type="button" onClick={() => removeLayer(index)} aria-label={`Remove ${layer.name}`}>×</button></div>
+      <div className={isWallAssembly ? "story-layer-grid story-layer-head has-wall-group" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isWallAssembly ? <span>Group</span> : null}<span>Role</span><span>Thickness</span><span>Order</span></div>
+      {isWallAssembly ? WALL_LAYER_GROUPS.map((group) => (
+        <div className="story-wall-layer-group" key={group}>
+          <div className={`story-wall-group-heading is-${group}`}><strong>{WALL_LAYER_GROUP_LABELS[group]}</strong><span>{group === "main" ? "Structural core and future reference layer" : group === "exterior" ? "Outside of the Main layer" : "Room side of the Main layer"}</span><b>{formatArchitectural(wallLayerGroupThickness(assembly, group))}</b></div>
+          {assembly.layers.map((layer, index) => layer.wallGroup === group ? renderLayer(layer, index) : null)}
         </div>
-      ))}
-      <button type="button" className="story-add-layer" onClick={addLayer}>＋ Add layer</button>
+      )) : assembly.layers.map(renderLayer)}
+      {isWallAssembly ? <div className="story-add-wall-layers">{WALL_LAYER_GROUPS.map((group) => <button type="button" className="story-add-layer" key={group} onClick={() => addLayer(group)}>＋ {WALL_LAYER_GROUP_LABELS[group].replace(" Layers", "")}</button>)}</div> : <button type="button" className="story-add-layer" onClick={() => addLayer()}>＋ Add layer</button>}
     </section>
   );
 }
@@ -8032,7 +8071,7 @@ function StoryManagerDialog({
     setError("");
   };
   const replaceAssembly = (kind: AssemblyKind, assembly: LayeredAssembly) => {
-    replaceSelectedStory(kind === "floor-structure" ? { floorStructure: assembly } : kind === "floor-finish" ? { floorFinish: assembly } : { ceilingFinish: assembly });
+    replaceSelectedStory(kind === "floor-structure" ? { floorStructure: assembly } : kind === "floor-finish" ? { floorFinish: assembly } : kind === "ceiling-structure" ? { ceilingStructure: assembly } : { ceilingFinish: assembly });
   };
   const addStory = (placement: "above" | "below") => {
     const next = addBuildingStory(draft, selectedStory.id, placement);
@@ -8087,12 +8126,15 @@ function StoryManagerDialog({
               <div><span>Rough floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughFloorElevation) : "—"}</strong></div>
               <div><span>Finished floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedFloorElevation) : "—"}</strong></div>
               <div><span>Rough ceiling</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughCeilingElevation) : "—"}</strong></div>
+              <div><span>Floor structure depth</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.floorStructureThickness) : "—"}</strong></div>
+              <div><span>Ceiling structure depth</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.ceilingStructureThickness) : "—"}</strong></div>
               <div><span>Finished ceiling</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedCeilingElevation) : "—"}</strong></div>
               <div><span>Finished clear height</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.finishedClearHeight) : "—"}</strong></div>
               <div><span>Floor above</span><strong>{selectedCalculation?.floorAboveElevation !== null && selectedCalculation?.floorAboveElevation !== undefined ? formatSignedArchitectural(selectedCalculation.floorAboveElevation) : "No Story above"}</strong></div>
             </section>
             <StoryAssemblyEditor assembly={selectedStory.floorStructure} onChange={(assembly) => replaceAssembly("floor-structure", assembly)} />
             <StoryAssemblyEditor assembly={selectedStory.floorFinish} onChange={(assembly) => replaceAssembly("floor-finish", assembly)} />
+            <StoryAssemblyEditor assembly={selectedStory.ceilingStructure} onChange={(assembly) => replaceAssembly("ceiling-structure", assembly)} />
             <StoryAssemblyEditor assembly={selectedStory.ceilingFinish} onChange={(assembly) => replaceAssembly("ceiling-finish", assembly)} />
           </main>
           <aside className="story-section-preview" aria-label="Story section preview">
@@ -8173,7 +8215,7 @@ function WallTypeManagerDialog({
   const save = () => {
     const next = cloneBuildingStructure(draft);
     if (!buildingStructureIsValid(next)) {
-      setError("Wall types need unique names and at least one valid layer with a positive thickness.");
+      setError("Wall types need unique names, ordered Exterior/Main/Interior groups, and at least one positive-thickness Main layer.");
       return;
     }
     onSave(next);
@@ -8194,7 +8236,7 @@ function WallTypeManagerDialog({
               <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
             </section>
             <StoryAssemblyEditor assembly={selected} onChange={replaceSelected} />
-            <p className="property-grid-note">Layer 1 is the exterior face. New walls use the active type; existing walls retain their assigned type until changed.</p>
+            <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core and will control wall reference-line, joining, bearing, platform, foundation, and dimension behavior as those controls are added. New walls use the active type; existing walls retain their assigned type until changed.</p>
           </main>
         </div>
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}

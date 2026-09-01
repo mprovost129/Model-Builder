@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# TypeScript build cache
+*.tsbuildinfo
+
 # next.js
 /.next/
 /.vinext/
