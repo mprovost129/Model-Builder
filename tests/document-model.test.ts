@@ -21,6 +21,7 @@ import {
   createFloorPlatformFromPolyline,
   createWallFromLine,
   DEFAULT_DOCUMENT,
+  NEW_PROJECT_DOCUMENT,
   deleteLayer,
   deleteBoxObject,
   deleteBoxObjects,
@@ -156,8 +157,23 @@ test("duplicates the selected object with a unique name and visible offset", () 
   assert.equal(duplicatedAgain.object.name, "Foundation Copy 2");
 });
 
-test("deletes a selected object but never the final box", () => {
-  assert.equal(deleteBoxObject(DEFAULT_DOCUMENT, "box-01"), null);
+test("defines a blank new-project document with editable project defaults", () => {
+  assert.deepEqual(NEW_PROJECT_DOCUMENT.objects, []);
+  assert.deepEqual(NEW_PROJECT_DOCUMENT.lines, []);
+  assert.deepEqual(NEW_PROJECT_DOCUMENT.polylines, []);
+  assert.deepEqual(NEW_PROJECT_DOCUMENT.circles, []);
+  assert.deepEqual(NEW_PROJECT_DOCUMENT.arcs, []);
+  assert.equal(NEW_PROJECT_DOCUMENT.building.stories[0].name, "First Floor");
+  assert.equal(NEW_PROJECT_DOCUMENT.building.wallTypes.length, 1);
+  const added = addBoxObject(NEW_PROJECT_DOCUMENT);
+  assert.ok(added);
+  assert.equal(added.object.id, "box-01");
+});
+
+test("deletes a selected object and allows a blank model", () => {
+  const blank = deleteBoxObject(DEFAULT_DOCUMENT, "box-01");
+  assert.ok(blank);
+  assert.deepEqual(blank.objects, []);
   const added = addBoxObject(DEFAULT_DOCUMENT);
   assert.ok(added);
   const deleted = deleteBoxObject(added.document, "box-01");
@@ -243,7 +259,7 @@ test("moves and aligns a multi-object selection using a primary anchor", () => {
   );
 });
 
-test("deletes multiple selected objects while preserving at least one box", () => {
+test("deletes multiple selected objects including every box", () => {
   const second = addBoxObject(DEFAULT_DOCUMENT);
   assert.ok(second);
   const third = addBoxObject(second.document);
@@ -251,7 +267,9 @@ test("deletes multiple selected objects while preserving at least one box", () =
   const deleted = deleteBoxObjects(third.document, ["box-01", "box-02"]);
   assert.ok(deleted);
   assert.deepEqual(deleted.objects.map((object) => object.id), ["box-03"]);
-  assert.equal(deleteBoxObjects(second.document, ["box-01", "box-02"]), null);
+  const empty = deleteBoxObjects(second.document, ["box-01", "box-02"]);
+  assert.ok(empty);
+  assert.deepEqual(empty.objects, []);
 });
 
 test("copies one or more objects by an exact offset while preserving layers", () => {
@@ -452,7 +470,7 @@ test("copies mixed entities with new identities and leaves sources unchanged", (
   assert.match(copied.document.lines[1].name, /Copy/);
 });
 
-test("deletes an editable mixed selection while preserving the final box", () => {
+test("deletes an editable mixed selection and can erase the final box", () => {
   const lineResult = addLineObject(DEFAULT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 24, y: 0, z: 0 });
   assert.ok(lineResult);
   const circleResult = addCircleObject(lineResult.document, { center: { x: 12, y: 12, z: 0 }, radius: 6 });
@@ -465,7 +483,9 @@ test("deletes an editable mixed selection while preserving the final box", () =>
   assert.equal(deleted.lines.length, 0);
   assert.equal(deleted.circles.length, 0);
   assert.equal(deleted.objects.length, 1);
-  assert.equal(deleteModelEntities(DEFAULT_DOCUMENT, [{ kind: "box", id: "box-01" }]), null);
+  const empty = deleteModelEntities(DEFAULT_DOCUMENT, [{ kind: "box", id: "box-01" }]);
+  assert.ok(empty);
+  assert.deepEqual(empty.objects, []);
 });
 
 test("derives a shared rotation base from mixed selection bounds", () => {

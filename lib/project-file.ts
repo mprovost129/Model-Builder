@@ -545,13 +545,14 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   const fallbackStoryId = building.anchorStoryId;
   if (
     !Array.isArray(value.objects) ||
-    value.objects.length < 1 ||
     value.objects.length > MAXIMUM_OBJECT_COUNT ||
     (version === 1 && value.objects.length !== 1)
   ) {
     return {
       ok: false,
-      error: `A project must contain between 1 and ${MAXIMUM_OBJECT_COUNT} boxes.`,
+      error: version === 1
+        ? "This legacy project must contain exactly one box."
+        : `A project cannot contain more than ${MAXIMUM_OBJECT_COUNT} boxes.`,
     };
   }
 

@@ -10,6 +10,7 @@ import {
   createFloorPlatformFromPolyline,
   createWallFromLine,
   DEFAULT_DOCUMENT,
+  NEW_PROJECT_DOCUMENT,
   groupBoxObjects,
   moveBoxObject,
   rotateBoxObjects,
@@ -28,6 +29,23 @@ import {
 
 const createdAt = "2026-08-27T12:00:00.000Z";
 const updatedAt = "2026-08-27T12:30:00.000Z";
+
+test("round-trips a blank new plan with its project settings", () => {
+  const project = createProjectDocument({
+    createdAt,
+    document: NEW_PROJECT_DOCUMENT,
+    name: "Blank Plan",
+    updatedAt,
+  });
+  const parsed = parseProjectDocument(serializeProjectDocument(project));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const document = projectToDocument(parsed.project);
+  assert.deepEqual(document.objects, []);
+  assert.deepEqual(document.lines, []);
+  assert.equal(document.building.stories[0].name, "First Floor");
+  assert.equal(document.building.wallTypes.length, 1);
+});
 
 test("round-trips a versioned multi-box project without dimensional drift", () => {
   const added = addBoxObject(DEFAULT_DOCUMENT);
@@ -414,7 +432,7 @@ test("round-trips Arcs and upgrades version-10 projects without Arc data", () =>
   assert.deepEqual(upgraded.project.arcs, []);
 });
 
-test("rejects duplicate ids or names, off-grid geometry, and empty documents", () => {
+test("rejects duplicate ids or names and off-grid geometry", () => {
   const added = addBoxObject(DEFAULT_DOCUMENT);
   assert.ok(added);
   const project = createProjectDocument({
@@ -442,10 +460,6 @@ test("rejects duplicate ids or names, off-grid geometry, and empty documents", (
   const impreciseRotation = structuredClone(project);
   impreciseRotation.objects[0].rotationZ = 12.3456;
   assert.equal(parseProjectDocument(JSON.stringify(impreciseRotation)).ok, false);
-
-  const empty = structuredClone(project);
-  empty.objects = [];
-  assert.equal(parseProjectDocument(JSON.stringify(empty)).ok, false);
 
   const missingLayer = structuredClone(project);
   missingLayer.objects[0].layerId = "missing-layer";

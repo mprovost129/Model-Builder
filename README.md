@@ -509,5 +509,6 @@ Clicking the selected box name in the left Properties header turns it into an
 inline editor. Duplicate and Delete stay beside the object list in the right
 Model Explorer without repeating the selected object in a second panel. Names
 are trimmed, limited to 120 characters, and kept unique within the project. A
-project always retains at least one box, and every management action participates
-in Undo and Redo.
+new plan opens as a blank Top view while retaining editable Story, floor,
+ceiling, and Wall Type defaults. Projects may contain no model entities, and
+every management action participates in Undo and Redo.

@@ -170,8 +170,8 @@ import {
   createFloorPlatformFromPolyline,
   createWallFromLine,
   createBoundaryPolylineObject,
-  DEFAULT_DOCUMENT,
   DEFAULT_LAYER_ID,
+  NEW_PROJECT_DOCUMENT,
   deleteLayer,
   deleteArcObject,
   deleteLineObject,
@@ -8277,18 +8277,12 @@ export function ModelBuilderApp() {
   const [editor, dispatch] = useReducer(historyReducer, {
     future: [],
     past: [],
-    present: cloneDocument(DEFAULT_DOCUMENT),
-    saved: cloneDocument(DEFAULT_DOCUMENT),
+    present: cloneDocument(NEW_PROJECT_DOCUMENT),
+    saved: cloneDocument(NEW_PROJECT_DOCUMENT),
   });
-  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(
-    DEFAULT_DOCUMENT.objects[0].id,
-  );
-  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([
-    DEFAULT_DOCUMENT.objects[0].id,
-  ]);
-  const [selectedEntityKeys, setSelectedEntityKeys] = useState<string[]>([
-    cadEntityKey({ id: DEFAULT_DOCUMENT.objects[0].id, kind: "box" }),
-  ]);
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
+  const [selectedEntityKeys, setSelectedEntityKeys] = useState<string[]>([]);
   const [selectedFaceIndex, setSelectedFaceIndex] = useState<number | null>(null);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [selectedArcId, setSelectedArcId] = useState<string | null>(null);
@@ -8301,7 +8295,7 @@ export function ModelBuilderApp() {
   const [explorerTab, setExplorerTab] = useState<"objects" | "layers">("objects");
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
-  const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.perspective);
+  const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.top);
   const [copyMode, setCopyMode] = useState(false);
   const [moveMode, setMoveMode] = useState(false);
   const [mirrorMode, setMirrorMode] = useState(false);
@@ -8541,7 +8535,7 @@ export function ModelBuilderApp() {
   const isPristineProject =
     !isDirty &&
     normalizedProjectName === "Untitled Model" &&
-    documentsEqual(editor.present, DEFAULT_DOCUMENT);
+    documentsEqual(editor.present, NEW_PROJECT_DOCUMENT);
 
   const applyCadSelection = useCallback((
     document: ModelDocument,
@@ -11237,7 +11231,7 @@ export function ModelBuilderApp() {
       !selectedBox ||
       !selectedObjectId ||
       !selectionIsEditable ||
-      editor.present.objects.length <= selectedObjectIds.length
+      !selectedObjectIds.length
     ) return;
     const selectionCount = selectedObjectIds.length;
     const description = selectionCount > 1 ? `${selectionCount} selected objects` : selectedBox.name;
@@ -11253,7 +11247,7 @@ export function ModelBuilderApp() {
     if (!next) return;
     const nextSelection = next.objects[Math.min(selectedIndex, next.objects.length - 1)];
     dispatch({ type: "commit", next });
-    setSelectionForDocument(next, nextSelection.id);
+    setSelectionForDocument(next, nextSelection?.id ?? null);
     setFileNotice({ text: `Deleted ${description}.`, tone: "info" });
   }, [editor.present, selectedBox, selectedObjectId, selectedObjectIds, selectionIsEditable, setSelectionForDocument]);
 
@@ -11264,7 +11258,7 @@ export function ModelBuilderApp() {
     if (!window.confirm(`Erase ${description}? You can restore the selection with Undo.`)) return;
     const next = deleteModelEntities(editor.present, selectedEntityRefs);
     if (!next) {
-      setFileNotice({ text: "A project must keep at least one box, and locked entities cannot be erased.", tone: "info" });
+      setFileNotice({ text: "Locked entities cannot be erased.", tone: "info" });
       return;
     }
     dispatch({ type: "commit", next });
@@ -11300,12 +11294,14 @@ export function ModelBuilderApp() {
   const newProject = useCallback(() => {
     if (!confirmDiscard()) return;
     const now = new Date().toISOString();
-    dispatch({ type: "load", next: DEFAULT_DOCUMENT });
-    setDrawingPlaneFromBuilding(DEFAULT_DOCUMENT.building);
+    dispatch({ type: "load", next: NEW_PROJECT_DOCUMENT });
+    setDrawingPlaneFromBuilding(NEW_PROJECT_DOCUMENT.building);
     setProjectName("Untitled Model");
     setSavedProjectName("Untitled Model");
     setProjectCreatedAt(now);
-    setSelectionForDocument(DEFAULT_DOCUMENT, DEFAULT_DOCUMENT.objects[0].id);
+    setSelectionForDocument(NEW_PROJECT_DOCUMENT, null);
+    setViewTarget(VIEW_PRESETS.top);
+    setFitViewSignal((value) => value + 1);
     setCopyMode(false);
     setMoveMode(false);
     setRotateMode(false);
@@ -11327,7 +11323,7 @@ export function ModelBuilderApp() {
     setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
     setRecoveredAt(null);
-    setFileNotice({ text: "Started a new project.", tone: "info" });
+    setFileNotice({ text: "Started a blank new plan in Top view. Adjust Stories and Wall Types, then begin drawing.", tone: "info" });
   }, [confirmDiscard, setDrawingPlaneFromBuilding, setSelectionForDocument]);
 
   const saveProject = useCallback(() => {
@@ -11424,17 +11420,19 @@ export function ModelBuilderApp() {
   }, [setDrawingPlaneFromBuilding, setSelectionForDocument]);
 
   const discardRecoveredDraft = useCallback(() => {
-    if (!window.confirm("Discard the recovered draft and start a new project?")) {
+    if (!window.confirm("Discard the recovered draft and start a blank new plan?")) {
       return;
     }
     window.localStorage.removeItem(PROJECT_RECOVERY_STORAGE_KEY);
     const now = new Date().toISOString();
-    dispatch({ type: "load", next: DEFAULT_DOCUMENT });
-    setDrawingPlaneFromBuilding(DEFAULT_DOCUMENT.building);
+    dispatch({ type: "load", next: NEW_PROJECT_DOCUMENT });
+    setDrawingPlaneFromBuilding(NEW_PROJECT_DOCUMENT.building);
     setProjectName("Untitled Model");
     setSavedProjectName("Untitled Model");
     setProjectCreatedAt(now);
-    setSelectionForDocument(DEFAULT_DOCUMENT, DEFAULT_DOCUMENT.objects[0].id);
+    setSelectionForDocument(NEW_PROJECT_DOCUMENT, null);
+    setViewTarget(VIEW_PRESETS.top);
+    setFitViewSignal((value) => value + 1);
     setCopyMode(false);
     setMoveMode(false);
     setRotateMode(false);
@@ -11786,7 +11784,7 @@ export function ModelBuilderApp() {
           <strong>MB</strong>
         </div>
         <nav className="quick-access" aria-label="Quick access">
-          <button type="button" onClick={newProject} title="New project" aria-label="New project">＋</button>
+          <button type="button" onClick={newProject} title="New blank plan" aria-label="New blank plan">＋</button>
           <button type="button" onClick={requestOpen} title="Open project (Ctrl+O)" aria-label="Open project">▱</button>
           <button type="button" onClick={saveProject} title="Save project (Ctrl+S)" aria-label="Save project">▣</button>
           <span className="quick-separator" />
@@ -11829,7 +11827,7 @@ export function ModelBuilderApp() {
           <>
             <div className="ribbon-group home-project-group">
               <div className="ribbon-tools compact-tools home-tool-grid">
-                <button type="button" onClick={newProject} title="New project"><b>＋</b><span>New</span></button>
+                <button type="button" onClick={newProject} title="Start a blank plan"><b>＋</b><span>New Plan</span></button>
                 <button type="button" onClick={requestOpen} title="Open project (Ctrl+O)"><b>▱</b><span>Open</span></button>
                 <button type="button" onClick={saveProject} title="Save project (Ctrl+S)"><b>▣</b><span>Save</span></button>
               </div>
@@ -12001,7 +11999,7 @@ export function ModelBuilderApp() {
       <nav className="document-tabs" aria-label="Open projects">
         <button className="document-menu" type="button" aria-label="Project menu">☰</button>
         <button className="document-tab is-active" type="button"><span>{normalizedProjectName}</span>{isDirty ? <b>•</b> : null}<i>×</i></button>
-        <button className="new-document-tab" type="button" onClick={newProject} title="New project">＋</button>
+        <button className="new-document-tab" type="button" onClick={newProject} title="New blank plan">＋</button>
       </nav>
 
       {recoveredAt ? (
@@ -12479,7 +12477,7 @@ export function ModelBuilderApp() {
                   <button type="button" onClick={copyMode ? finishCopyMode : startCopyMode} disabled={!selectionIsEditable}>{copyMode ? "Finish Copy" : "Copy"}</button>
                   <button type="button" onClick={selectedGroup ? ungroupSelection : createSelectionGroup} disabled={selectedGroup ? !selectionIsEditable : !canCreateGroup}>{selectedGroup ? "Ungroup" : "Group"}</button>
                   <button type="button" className={allSelectedLocked ? "lock-object is-locked" : "lock-object"} onClick={toggleSelectionLock}>{allSelectedLocked ? "Unlock" : "Lock"}</button>
-                  <button type="button" className="delete-object" onClick={deleteSelectedObject} disabled={!selectionIsEditable || editor.present.objects.length <= selectedObjectIds.length} title={!selectionIsEditable ? "Unlock the selection before deleting" : editor.present.objects.length > selectedObjectIds.length ? `Delete ${selectedObjectIds.length} selected object${selectedObjectIds.length === 1 ? "" : "s"}` : "A project must keep at least one box"}>Delete</button>
+                  <button type="button" className="delete-object" onClick={deleteSelectedObject} disabled={!selectionIsEditable} title={!selectionIsEditable ? "Unlock the selection before deleting" : `Delete ${selectedObjectIds.length} selected object${selectedObjectIds.length === 1 ? "" : "s"}`}>Delete</button>
                 </div>
               ) : null}
               {selectedLine ? <div className="object-browser-actions" aria-label="Selected line actions"><button type="button" className={selectedLine.locked ? "lock-object is-locked" : "lock-object"} onClick={toggleSelectedLineLock}>{selectedLine.locked ? "Unlock" : "Lock"}</button><button type="button" className="delete-object" onClick={deleteSelectedLine} disabled={!selectedLineIsEditable}>Delete</button></div> : null}

@@ -91,6 +91,10 @@ belongs to Main.
 
 ## Current Implementation
 
+- Startup and New Plan open a blank model space in Top view. The default First
+  Floor, floor/ceiling assemblies, and active Wall Type remain available for
+  project-specific editing before any geometry is drawn. Blank projects can be
+  saved, reopened, and recovered normally.
 - Version-18 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the

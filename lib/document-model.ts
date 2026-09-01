@@ -246,6 +246,19 @@ export const DEFAULT_DOCUMENT: ModelDocument = {
   polylines: [],
 };
 
+/** A new user project keeps editable project defaults but starts with no model entities. */
+export const NEW_PROJECT_DOCUMENT: ModelDocument = {
+  activeLayerId: DEFAULT_LAYER_ID,
+  arcs: [],
+  building: createDefaultBuildingStructure(),
+  circles: [],
+  groups: [],
+  layers: [{ ...DEFAULT_LAYER }],
+  lines: [],
+  objects: [],
+  polylines: [],
+};
+
 export function cloneArcObject(arc: ArcObject): ArcObject {
   return {
     ...cloneArcGeometry(arc),
@@ -1420,7 +1433,7 @@ export function deleteBoxObject(
   objectId: string,
 ): ModelDocument | null {
   const object = findBoxObject(document, objectId);
-  if (document.objects.length <= 1 || !object || !objectIsEditable(document, object)) return null;
+  if (!object || !objectIsEditable(document, object)) return null;
   return withObjects(
     document,
     document.objects
@@ -1436,7 +1449,7 @@ export function deleteBoxObjects(
   const ids = new Set(objectIds);
   if (!ids.size) return null;
   const found = document.objects.filter((object) => ids.has(object.id));
-  if (found.length !== ids.size || document.objects.length - ids.size < 1) return null;
+  if (found.length !== ids.size) return null;
   if (found.some((object) => !objectIsEditable(document, object))) return null;
   return withObjects(
     document,
@@ -2893,7 +2906,6 @@ export function deleteModelEntities(document: ModelDocument, refs: ModelEntityRe
   const selected = normalizedEntityRefs(refs);
   if (!selected.length || selected.some((ref) => !modelEntityIsEditable(document, ref))) return null;
   const keys = new Set(selected.map((ref) => `${ref.kind}:${ref.id}`));
-  if (document.objects.filter((object) => !keys.has(`box:${object.id}`)).length < 1) return null;
   const next = cloneDocument(document);
   next.objects = next.objects.filter((object) => !keys.has(`box:${object.id}`));
   next.lines = next.lines.filter((line) => !keys.has(`line:${line.id}`));
