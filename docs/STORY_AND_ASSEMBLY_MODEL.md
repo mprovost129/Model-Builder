@@ -101,13 +101,19 @@ layers an explicit connection policy without changing the Wall reference line.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-19 project files store the Building Datum, ordered Stories, active and
+- Version-20 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
   exterior side and selected reference line. Wall layers persist their automatic
   junction-participation setting; version-18 and earlier layers receive safe
   role-based defaults during upgrade.
+- Each Wall stores a junction priority plus independent Start and End cleanup
+  modes. Automatic is the default. Square / disconnected explicitly removes an
+  endpoint from automatic cleanup without moving its reference path. A uniquely
+  higher-priority aligned Wall pair can act as the through host at an otherwise
+  ambiguous four-Wall node; equal priorities remain unresolved instead of being
+  guessed.
 - Legacy version-1 through version-12 projects open with a default First Floor;
   version-13 entities are assigned to the saved anchor Story during upgrade.
 - Manage > Stories opens the Story and Assembly Manager.
@@ -158,8 +164,8 @@ layers an explicit connection policy without changing the Wall reference line.
 
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Add explicit junction priorities and finish-wrap controls for advanced
-   multi-Wall nodes, building on the per-layer join policy, then add Wall openings.
+3. Add true material end-cap and finish-wrap geometry, building on the completed
+   per-layer join policy and Wall priority overrides, then add Wall openings.
 4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions

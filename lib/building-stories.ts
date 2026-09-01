@@ -16,6 +16,10 @@ export const WALL_REFERENCE_LINES = ["wall-center", "exterior-main", "center-mai
 export type WallReferenceLine = (typeof WALL_REFERENCE_LINES)[number];
 export const WALL_EXTERIOR_SIDES = ["left", "right"] as const;
 export type WallExteriorSide = (typeof WALL_EXTERIOR_SIDES)[number];
+export const WALL_JOIN_MODES = ["auto", "square"] as const;
+export type WallJoinMode = (typeof WALL_JOIN_MODES)[number];
+export const MINIMUM_WALL_JOIN_PRIORITY = -100;
+export const MAXIMUM_WALL_JOIN_PRIORITY = 100;
 
 export type AssemblyLayer = {
   id: string;

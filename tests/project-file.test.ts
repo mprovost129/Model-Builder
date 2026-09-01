@@ -69,7 +69,7 @@ test("round-trips a versioned multi-box project without dimensional drift", () =
   if (!parsed.ok) return;
   assert.deepEqual(projectToDocument(parsed.project), locked);
   assert.equal(parsed.project.name, "Sample House");
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.equal(parsed.project.objects.length, 2);
 });
 
@@ -114,6 +114,9 @@ test("round-trips Story-controlled walls and reusable layered wall types", () =>
   assert.equal(document.lines[0].wallTypeId, document.building.activeWallTypeId);
   assert.equal(document.lines[0].wallReferenceLine, "exterior-main");
   assert.equal(document.lines[0].wallExteriorSide, "left");
+  assert.equal(document.lines[0].wallJoinPriority, 0);
+  assert.equal(document.lines[0].wallStartJoinMode, "auto");
+  assert.equal(document.lines[0].wallEndJoinMode, "auto");
   assert.deepEqual(document.building.wallTypes, wall.building.wallTypes);
 });
 
@@ -121,7 +124,7 @@ test("upgrades version-14 projects with default wall types and drafting Lines", 
   const added = addLineObject(DEFAULT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 144, y: 0, z: 0 });
   assert.ok(added);
   const legacy = createProjectDocument({ createdAt, document: added.document, name: "Pre-Wall Model", updatedAt });
-  legacy.version = 14 as 19;
+  legacy.version = 14 as 20;
   delete (legacy.building as unknown as Record<string, unknown>).activeWallTypeId;
   delete (legacy.building as unknown as Record<string, unknown>).wallTypes;
   delete (legacy.lines[0] as unknown as Record<string, unknown>).architecturalRole;
@@ -129,7 +132,7 @@ test("upgrades version-14 projects with default wall types and drafting Lines", 
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.equal(parsed.project.lines[0].architecturalRole, null);
   assert.equal(parsed.project.lines[0].wallTypeId, null);
   assert.equal(parsed.project.building.wallTypes.length, 1);
@@ -137,26 +140,26 @@ test("upgrades version-14 projects with default wall types and drafting Lines", 
 
 test("upgrades version-15 Stories with an empty ceiling-structure assembly", () => {
   const legacy = createProjectDocument({ createdAt, document: DEFAULT_DOCUMENT, name: "Pre-Ceiling Structure", updatedAt });
-  legacy.version = 15 as 19;
+  legacy.version = 15 as 20;
   delete (legacy.building.stories[0] as unknown as Record<string, unknown>).ceilingStructure;
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.equal(parsed.project.building.stories[0].ceilingStructure.kind, "ceiling-structure");
   assert.deepEqual(parsed.project.building.stories[0].ceilingStructure.layers, []);
 });
 
 test("upgrades version-16 wall layers into Exterior, Main, and Interior groups", () => {
   const legacy = createProjectDocument({ createdAt, document: DEFAULT_DOCUMENT, name: "Pre-Wall Groups", updatedAt });
-  legacy.version = 16 as 19;
+  legacy.version = 16 as 20;
   for (const layer of legacy.building.wallTypes[0].layers) {
     delete (layer as unknown as Record<string, unknown>).wallGroup;
   }
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.deepEqual(parsed.project.building.wallTypes[0].layers.map((layer) => layer.wallGroup), ["exterior", "exterior", "main", "interior"]);
 });
 
@@ -170,7 +173,7 @@ test("rejects version-19 wall layers without an explicit group", () => {
 
 test("upgrades version-18 wall layers with role-based automatic-join defaults", () => {
   const legacy = createProjectDocument({ createdAt, document: DEFAULT_DOCUMENT, name: "Pre-Wall Join Metadata", updatedAt });
-  legacy.version = 18 as 19;
+  legacy.version = 18 as 20;
   legacy.building.wallTypes[0].layers[0].role = "membrane";
   for (const layer of legacy.building.wallTypes[0].layers) {
     delete (layer as unknown as Record<string, unknown>).participatesInJoin;
@@ -178,7 +181,7 @@ test("upgrades version-18 wall layers with role-based automatic-join defaults", 
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.deepEqual(parsed.project.building.wallTypes[0].layers.map((layer) => layer.participatesInJoin), [false, true, true, true]);
 });
 
@@ -196,23 +199,42 @@ test("upgrades version-17 walls without changing their centerline geometry", () 
   const wall = createWallFromLine(added.document, added.line.id);
   assert.ok(wall);
   const legacy = createProjectDocument({ createdAt, document: wall, name: "Pre-Wall Placement", updatedAt });
-  legacy.version = 17 as 19;
+  legacy.version = 17 as 20;
   delete (legacy.lines[0] as unknown as Record<string, unknown>).wallExteriorSide;
   delete (legacy.lines[0] as unknown as Record<string, unknown>).wallReferenceLine;
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.equal(parsed.project.lines[0].wallReferenceLine, "wall-center");
   assert.equal(parsed.project.lines[0].wallExteriorSide, "left");
   assert.deepEqual(parsed.project.lines[0].start, legacy.lines[0].start);
   assert.deepEqual(parsed.project.lines[0].end, legacy.lines[0].end);
 });
 
+test("upgrades version-19 walls with automatic junction defaults", () => {
+  const added = addLineObject(DEFAULT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 144, y: 0, z: 0 });
+  assert.ok(added);
+  const wall = createWallFromLine(added.document, added.line.id);
+  assert.ok(wall);
+  const legacy = createProjectDocument({ createdAt, document: wall, name: "Pre-Junction Overrides", updatedAt });
+  legacy.version = 19 as 20;
+  delete (legacy.lines[0] as unknown as Record<string, unknown>).wallJoinPriority;
+  delete (legacy.lines[0] as unknown as Record<string, unknown>).wallStartJoinMode;
+  delete (legacy.lines[0] as unknown as Record<string, unknown>).wallEndJoinMode;
+  const parsed = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.project.version, 20);
+  assert.equal(parsed.project.lines[0].wallJoinPriority, 0);
+  assert.equal(parsed.project.lines[0].wallStartJoinMode, "auto");
+  assert.equal(parsed.project.lines[0].wallEndJoinMode, "auto");
+});
+
 test("upgrades version-12 files with the default rough-framing Story", () => {
   const project = createProjectDocument({ createdAt, document: DEFAULT_DOCUMENT, name: "Legacy Story", updatedAt });
   const legacy = structuredClone(project);
-  legacy.version = 12 as 19;
+  legacy.version = 12 as 20;
   delete (legacy as unknown as Record<string, unknown>).building;
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
@@ -230,7 +252,7 @@ test("upgrades version-13 entities onto the saved anchor Story", () => {
     updatedAt,
   });
   const legacy = structuredClone(project);
-  legacy.version = 13 as 19;
+  legacy.version = 13 as 20;
   for (const collection of [legacy.objects, legacy.lines, legacy.polylines, legacy.circles, legacy.arcs]) {
     for (const entity of collection) delete (entity as unknown as Record<string, unknown>).storyId;
   }
@@ -272,12 +294,12 @@ test("opens legacy version-1 through version-7 projects and upgrades them", () =
     const parsed = parseProjectDocument(JSON.stringify({ ...legacyBase, version }));
     assert.equal(parsed.ok, true);
     if (!parsed.ok) continue;
-    assert.equal(parsed.project.version, 19);
+    assert.equal(parsed.project.version, 20);
     assert.deepEqual(projectToDocument(parsed.project), DEFAULT_DOCUMENT);
   }
 
   const legacyVersion3 = structuredClone(current);
-  legacyVersion3.version = 3 as 19;
+  legacyVersion3.version = 3 as 20;
   delete (legacyVersion3 as unknown as Record<string, unknown>).groups;
   legacyVersion3.objects = legacyVersion3.objects.map((object) => {
     const legacyObject = { ...object } as Partial<typeof object>;
@@ -290,7 +312,7 @@ test("opens legacy version-1 through version-7 projects and upgrades them", () =
   if (parsedVersion3.ok) assert.deepEqual(projectToDocument(parsedVersion3.project), DEFAULT_DOCUMENT);
 
   const legacyVersion4 = structuredClone(current);
-  legacyVersion4.version = 4 as 19;
+  legacyVersion4.version = 4 as 20;
   legacyVersion4.objects = legacyVersion4.objects.map((object) => {
     const legacyObject = { ...object } as Partial<typeof object>;
     delete legacyObject.rotationZ;
@@ -301,21 +323,21 @@ test("opens legacy version-1 through version-7 projects and upgrades them", () =
   if (parsedVersion4.ok) assert.deepEqual(projectToDocument(parsedVersion4.project), DEFAULT_DOCUMENT);
 
   const legacyVersion5 = structuredClone(current);
-  legacyVersion5.version = 5 as 19;
+  legacyVersion5.version = 5 as 20;
   delete (legacyVersion5 as unknown as Record<string, unknown>).lines;
   const parsedVersion5 = parseProjectDocument(JSON.stringify(legacyVersion5));
   assert.equal(parsedVersion5.ok, true);
   if (parsedVersion5.ok) assert.deepEqual(projectToDocument(parsedVersion5.project), DEFAULT_DOCUMENT);
 
   const legacyVersion6 = structuredClone(current);
-  legacyVersion6.version = 6 as 19;
+  legacyVersion6.version = 6 as 20;
   delete (legacyVersion6 as unknown as Record<string, unknown>).polylines;
   const parsedVersion6 = parseProjectDocument(JSON.stringify(legacyVersion6));
   assert.equal(parsedVersion6.ok, true);
   if (parsedVersion6.ok) assert.deepEqual(projectToDocument(parsedVersion6.project), DEFAULT_DOCUMENT);
 
   const legacyVersion7 = structuredClone(current);
-  legacyVersion7.version = 7 as 19;
+  legacyVersion7.version = 7 as 20;
   const parsedVersion7 = parseProjectDocument(JSON.stringify(legacyVersion7));
   assert.equal(parsedVersion7.ok, true);
   if (parsedVersion7.ok) assert.deepEqual(projectToDocument(parsedVersion7.project), DEFAULT_DOCUMENT);
@@ -330,7 +352,7 @@ test("rejects malformed, unrelated, and future files", () => {
     name: "Test",
     updatedAt,
   });
-  const future = parseProjectDocument(JSON.stringify({ ...project, version: 20 }));
+  const future = parseProjectDocument(JSON.stringify({ ...project, version: 21 }));
   assert.equal(future.ok, false);
   if (!future.ok) assert.match(future.error, /newer version/i);
 });
@@ -353,13 +375,13 @@ test("upgrades version-7 planar lines to explicit zero elevation", () => {
   const added = addLineObject(DEFAULT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 120, y: 60, z: 0 });
   assert.ok(added);
   const legacy = createProjectDocument({ createdAt, document: added.document, name: "Legacy Lines", updatedAt });
-  legacy.version = 7 as 19;
+  legacy.version = 7 as 20;
   delete (legacy.lines[0].start as unknown as Record<string, unknown>).z;
   delete (legacy.lines[0].end as unknown as Record<string, unknown>).z;
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.equal(parsed.project.lines[0].start.z, 0);
   assert.equal(parsed.project.lines[0].end.z, 0);
 });
@@ -368,12 +390,12 @@ test("upgrades version-8 polylines to an explicit zero elevation", () => {
   const added = addPolylineObject(DEFAULT_DOCUMENT, { closed: true, elevation: 0, vertices: [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 96 }, { x: 0, y: 96 }] }, "rectangle");
   assert.ok(added);
   const legacy = createProjectDocument({ createdAt, document: added.document, name: "Legacy Rectangle", updatedAt });
-  legacy.version = 8 as 19;
+  legacy.version = 8 as 20;
   delete (legacy.polylines[0] as unknown as Record<string, unknown>).elevation;
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.equal(parsed.project.polylines[0].elevation, 0);
 });
 
@@ -401,13 +423,13 @@ test("upgrades version-11 polylines to straight zero-width geometry", () => {
   const added = addPolylineObject(DEFAULT_DOCUMENT, { closed: false, elevation: 0, vertices: [{ x: 0, y: 0 }, { x: 48, y: 0 }] }, "polyline");
   assert.ok(added);
   const legacy = createProjectDocument({ createdAt, document: added.document, name: "Legacy Polyline", updatedAt });
-  legacy.version = 11 as 19;
+  legacy.version = 11 as 20;
   delete (legacy.polylines[0] as unknown as Record<string, unknown>).bulges;
   delete (legacy.polylines[0] as unknown as Record<string, unknown>).width;
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.project.version, 19);
+  assert.equal(parsed.project.version, 20);
   assert.deepEqual(parsed.project.polylines[0].bulges, [0]);
   assert.equal(parsed.project.polylines[0].width, 0);
 });
@@ -421,12 +443,12 @@ test("round-trips Circles and upgrades version-9 projects without Circle data", 
   if (parsed.ok) assert.deepEqual(projectToDocument(parsed.project).circles, added.document.circles);
 
   const legacy = structuredClone(project);
-  legacy.version = 9 as 19;
+  legacy.version = 9 as 20;
   delete (legacy as unknown as Record<string, unknown>).circles;
   const upgraded = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(upgraded.ok, true);
   if (!upgraded.ok) return;
-  assert.equal(upgraded.project.version, 19);
+  assert.equal(upgraded.project.version, 20);
   assert.deepEqual(upgraded.project.circles, []);
 });
 
@@ -445,12 +467,12 @@ test("round-trips Arcs and upgrades version-10 projects without Arc data", () =>
   if (parsed.ok) assert.deepEqual(projectToDocument(parsed.project).arcs, added.document.arcs);
 
   const legacy = structuredClone(project);
-  legacy.version = 10 as 19;
+  legacy.version = 10 as 20;
   delete (legacy as unknown as Record<string, unknown>).arcs;
   const upgraded = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(upgraded.ok, true);
   if (!upgraded.ok) return;
-  assert.equal(upgraded.project.version, 19);
+  assert.equal(upgraded.project.version, 20);
   assert.deepEqual(upgraded.project.arcs, []);
 });
 

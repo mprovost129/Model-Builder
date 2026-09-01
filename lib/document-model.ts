@@ -106,10 +106,14 @@ import {
   calculateStoryElevations,
   cloneBuildingStructure,
   createDefaultBuildingStructure,
+  MAXIMUM_WALL_JOIN_PRIORITY,
+  MINIMUM_WALL_JOIN_PRIORITY,
   WALL_EXTERIOR_SIDES,
+  WALL_JOIN_MODES,
   WALL_REFERENCE_LINES,
   type BuildingStructure,
   type WallExteriorSide,
+  type WallJoinMode,
   type WallReferenceLine,
 } from "./building-stories.ts";
 
@@ -132,6 +136,9 @@ export type LineObject = LineGeometry & {
   storyId: string;
   type: "line";
   wallExteriorSide: WallExteriorSide | null;
+  wallJoinPriority: number | null;
+  wallStartJoinMode: WallJoinMode | null;
+  wallEndJoinMode: WallJoinMode | null;
   wallReferenceLine: WallReferenceLine | null;
   wallTypeId: string | null;
 };
@@ -294,6 +301,9 @@ export function cloneLineObject(line: LineObject): LineObject {
     storyId: line.storyId,
     type: "line",
     wallExteriorSide: line.wallExteriorSide,
+    wallJoinPriority: line.wallJoinPriority,
+    wallStartJoinMode: line.wallStartJoinMode,
+    wallEndJoinMode: line.wallEndJoinMode,
     wallReferenceLine: line.wallReferenceLine,
     wallTypeId: line.wallTypeId,
   };
@@ -385,7 +395,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.lines.every((line, index) => {
       const other = b.lines[index];
       return other !== undefined && line.id === other.id && line.layerId === other.layerId &&
-        line.architecturalRole === other.architecturalRole && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
+        line.architecturalRole === other.architecturalRole && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         lineGeometriesEqual(line, other);
     }) &&
     a.polylines.length === b.polylines.length &&
@@ -929,6 +939,9 @@ export function addLineObject(
     storyId: document.building.activeStoryId,
     type: "line",
     wallExteriorSide: null,
+    wallJoinPriority: null,
+    wallStartJoinMode: null,
+    wallEndJoinMode: null,
     wallReferenceLine: null,
     wallTypeId: null,
   };
@@ -969,6 +982,9 @@ export function createWallFromLine(document: ModelDocument, lineId: string): Mod
     name: candidate.name.startsWith("Wall ") ? candidate.name : uniqueObjectName(document, wallName),
     start: { ...candidate.start, z: roughFloor },
     wallExteriorSide: "left",
+    wallJoinPriority: 0,
+    wallStartJoinMode: "auto",
+    wallEndJoinMode: "auto",
     wallReferenceLine: "exterior-main",
     wallTypeId: wallType.id,
   } : candidate));
@@ -977,7 +993,7 @@ export function createWallFromLine(document: ModelDocument, lineId: string): Mod
 export function removeWallRole(document: ModelDocument, lineId: string): ModelDocument | null {
   const line = findLineObject(document, lineId);
   if (!line || line.architecturalRole !== "wall" || !lineIsEditable(document, line)) return null;
-  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), architecturalRole: null, wallExteriorSide: null, wallReferenceLine: null, wallTypeId: null } : candidate));
+  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), architecturalRole: null, wallExteriorSide: null, wallJoinPriority: null, wallStartJoinMode: null, wallEndJoinMode: null, wallReferenceLine: null, wallTypeId: null } : candidate));
 }
 
 export function assignWallType(document: ModelDocument, lineId: string, wallTypeId: string): ModelDocument | null {
@@ -989,7 +1005,7 @@ export function assignWallType(document: ModelDocument, lineId: string, wallType
 export function updateWallPlacement(
   document: ModelDocument,
   lineId: string,
-  change: { exteriorSide?: WallExteriorSide; referenceLine?: WallReferenceLine },
+  change: { endJoinMode?: WallJoinMode; exteriorSide?: WallExteriorSide; joinPriority?: number; referenceLine?: WallReferenceLine; startJoinMode?: WallJoinMode },
 ): ModelDocument | null {
   const line = findLineObject(document, lineId);
   if (
@@ -997,11 +1013,17 @@ export function updateWallPlacement(
     line.architecturalRole !== "wall" ||
     !lineIsEditable(document, line) ||
     (change.exteriorSide !== undefined && !WALL_EXTERIOR_SIDES.includes(change.exteriorSide)) ||
-    (change.referenceLine !== undefined && !WALL_REFERENCE_LINES.includes(change.referenceLine))
+    (change.referenceLine !== undefined && !WALL_REFERENCE_LINES.includes(change.referenceLine)) ||
+    (change.startJoinMode !== undefined && !WALL_JOIN_MODES.includes(change.startJoinMode)) ||
+    (change.endJoinMode !== undefined && !WALL_JOIN_MODES.includes(change.endJoinMode)) ||
+    (change.joinPriority !== undefined && (!Number.isInteger(change.joinPriority) || change.joinPriority < MINIMUM_WALL_JOIN_PRIORITY || change.joinPriority > MAXIMUM_WALL_JOIN_PRIORITY))
   ) return null;
   return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? {
     ...cloneLineObject(candidate),
     wallExteriorSide: change.exteriorSide ?? candidate.wallExteriorSide,
+    wallJoinPriority: change.joinPriority ?? candidate.wallJoinPriority,
+    wallStartJoinMode: change.startJoinMode ?? candidate.wallStartJoinMode,
+    wallEndJoinMode: change.endJoinMode ?? candidate.wallEndJoinMode,
     wallReferenceLine: change.referenceLine ?? candidate.wallReferenceLine,
   } : candidate));
 }
@@ -2367,6 +2389,9 @@ export function joinModelEntities(
       storyId,
       type: "line",
       wallExteriorSide: preserve && primary.kind === "line" ? (primaryEntity as LineObject).wallExteriorSide : null,
+      wallJoinPriority: preserve && primary.kind === "line" ? (primaryEntity as LineObject).wallJoinPriority : null,
+      wallStartJoinMode: preserve && primary.kind === "line" ? (primaryEntity as LineObject).wallStartJoinMode : null,
+      wallEndJoinMode: preserve && primary.kind === "line" ? (primaryEntity as LineObject).wallEndJoinMode : null,
       wallReferenceLine: preserve && primary.kind === "line" ? (primaryEntity as LineObject).wallReferenceLine : null,
       wallTypeId: preserve && primary.kind === "line" ? (primaryEntity as LineObject).wallTypeId : null,
     };
@@ -2466,6 +2491,9 @@ export function explodeModelEntities(
           storyId: polyline.storyId,
           type: "line",
           wallExteriorSide: null,
+          wallJoinPriority: null,
+          wallStartJoinMode: null,
+          wallEndJoinMode: null,
           wallReferenceLine: null,
           wallTypeId: null,
         };
@@ -2687,6 +2715,9 @@ export function chamferLineObjects(
       storyId: first.storyId,
       type: "line",
       wallExteriorSide: null,
+      wallJoinPriority: null,
+      wallStartJoinMode: null,
+      wallEndJoinMode: null,
       wallReferenceLine: null,
       wallTypeId: null,
     };

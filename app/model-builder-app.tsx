@@ -274,6 +274,7 @@ import {
   type BuildingStructure,
   type LayeredAssembly,
   type WallExteriorSide,
+  type WallJoinMode,
   type WallLayerGroup,
   type WallReferenceLine,
 } from "@/lib/building-stories";
@@ -10914,7 +10915,7 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next });
   }, [editor.present, selectedLine]);
 
-  const setSelectedWallPlacement = useCallback((change: { exteriorSide?: WallExteriorSide; referenceLine?: WallReferenceLine }) => {
+  const setSelectedWallPlacement = useCallback((change: { endJoinMode?: WallJoinMode; exteriorSide?: WallExteriorSide; joinPriority?: number; referenceLine?: WallReferenceLine; startJoinMode?: WallJoinMode }) => {
     if (!selectedLine) return;
     const next = updateWallPlacement(editor.present, selectedLine.id, change);
     if (!next) return;
@@ -12115,6 +12116,9 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Thickness"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(editor.present.building.wallTypes.find((wallType) => wallType.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]))}</span></PropertyGridRow>
                 <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "wall-center"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
+                <PropertyGridRow label="Join priority"><select className="property-cell-select" value={selectedLine.wallJoinPriority ?? 0} onChange={(event) => setSelectedWallPlacement({ joinPriority: Number(event.target.value) })} aria-label="Wall join priority" disabled={!selectedLineIsEditable}><option value={-10}>Low</option><option value={0}>Normal</option><option value={10}>High</option><option value={20}>Primary</option></select></PropertyGridRow>
+                <PropertyGridRow label="Start cleanup"><select className="property-cell-select" value={selectedLine.wallStartJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ startJoinMode: event.target.value as WallJoinMode })} aria-label="Wall start junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
+                <PropertyGridRow label="End cleanup"><select className="property-cell-select" value={selectedLine.wallEndJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ endJoinMode: event.target.value as WallJoinMode })} aria-label="Wall end junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
                 <PropertyGridRow label="Junctions"><span className="property-readout">{selectedWallJunctionLabel}</span></PropertyGridRow>
               </> : null}
               <PropertyGridRow label="Locked"><button className={selectedLine.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedLineLock}>{selectedLine.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>

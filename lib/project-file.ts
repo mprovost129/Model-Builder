@@ -39,7 +39,10 @@ import {
   cloneBuildingStructure,
   createDefaultCeilingStructure,
   createDefaultBuildingStructure,
+  MAXIMUM_WALL_JOIN_PRIORITY,
+  MINIMUM_WALL_JOIN_PRIORITY,
   WALL_EXTERIOR_SIDES,
+  WALL_JOIN_MODES,
   WALL_LAYER_GROUPS,
   WALL_REFERENCE_LINES,
   type AssemblyKind,
@@ -49,12 +52,13 @@ import {
   type BuildingStructure,
   type LayeredAssembly,
   type WallExteriorSide,
+  type WallJoinMode,
   type WallLayerGroup,
   type WallReferenceLine,
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 19;
+export const PROJECT_FILE_VERSION = 20;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -337,7 +341,7 @@ function readLayer(value: unknown): ModelLayer | null {
   };
 }
 
-function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean): LineObject | null {
+function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean): LineObject | null {
   if (!isRecord(value) || value.type !== "line" || !isRecord(value.start) || !isRecord(value.end)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -363,12 +367,19 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   const wallReferenceLine = supportsWallPlacement
     ? value.wallReferenceLine === null ? null : typeof value.wallReferenceLine === "string" && WALL_REFERENCE_LINES.includes(value.wallReferenceLine as WallReferenceLine) ? value.wallReferenceLine as WallReferenceLine : undefined
     : architecturalRole === "wall" ? "wall-center" : null;
+  const wallJoinPriority = supportsWallJunctionOverrides
+    ? value.wallJoinPriority === null ? null : isFiniteNumber(value.wallJoinPriority) && Number.isInteger(value.wallJoinPriority) && value.wallJoinPriority >= MINIMUM_WALL_JOIN_PRIORITY && value.wallJoinPriority <= MAXIMUM_WALL_JOIN_PRIORITY ? value.wallJoinPriority : undefined
+    : architecturalRole === "wall" ? 0 : null;
+  const readJoinMode = (candidate: unknown): WallJoinMode | null | undefined => candidate === null ? null : typeof candidate === "string" && WALL_JOIN_MODES.includes(candidate as WallJoinMode) ? candidate as WallJoinMode : undefined;
+  const wallStartJoinMode = supportsWallJunctionOverrides ? readJoinMode(value.wallStartJoinMode) : architecturalRole === "wall" ? "auto" : null;
+  const wallEndJoinMode = supportsWallJunctionOverrides ? readJoinMode(value.wallEndJoinMode) : architecturalRole === "wall" ? "auto" : null;
   if (
     architecturalRole === undefined ||
     wallTypeId === undefined ||
     wallExteriorSide === undefined ||
     wallReferenceLine === undefined ||
-    (architecturalRole === "wall") !== (wallTypeId !== null && wallExteriorSide !== null && wallReferenceLine !== null)
+    wallJoinPriority === undefined || wallStartJoinMode === undefined || wallEndJoinMode === undefined ||
+    (architecturalRole === "wall") !== (wallTypeId !== null && wallExteriorSide !== null && wallReferenceLine !== null && wallJoinPriority !== null && wallStartJoinMode !== null && wallEndJoinMode !== null)
   ) return null;
   if (!isFiniteNumber(startX) || !isFiniteNumber(startY) || !isFiniteNumber(startZ) ||
       !isFiniteNumber(endX) || !isFiniteNumber(endY) || !isFiniteNumber(endZ)) return null;
@@ -386,6 +397,9 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
     storyId,
     type: "line",
     wallExteriorSide,
+    wallJoinPriority,
+    wallStartJoinMode,
+    wallEndJoinMode,
     wallReferenceLine,
     wallTypeId,
   };
@@ -649,7 +663,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.lines) || value.lines.length > MAXIMUM_LINE_COUNT) {
       return { ok: false, error: "The project line collection is missing or invalid." };
     }
-    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18));
+    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20));
     if (parsedLines.some((line) => line === null)) {
       return { ok: false, error: "One or more drawing lines are invalid." };
     }

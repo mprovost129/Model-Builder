@@ -29,6 +29,9 @@ function wall(
     storyId: "story-01",
     type: "line",
     wallExteriorSide: "left",
+    wallJoinPriority: 0,
+    wallStartJoinMode: "auto",
+    wallEndJoinMode: "auto",
     wallReferenceLine: "exterior-main",
     wallTypeId: "wall-type-01",
     ...overrides,
@@ -169,4 +172,24 @@ test("keeps coincident endpoints on different Stories independent", () => {
   const plan = buildAutomaticWallJoinPlan([first, upper], wallTypes());
   assert.equal(plan.endpointJoins.size, 0);
   assert.equal(unresolvedWallJunctionCount(first.id, plan), 0);
+});
+
+test("uses explicit priority to resolve a four-Wall crossing", () => {
+  const west = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 }, { wallJoinPriority: 10 });
+  const east = wall("wall-02", { x: 120, y: 0 }, { x: 240, y: 0 }, { wallJoinPriority: 10 });
+  const south = wall("wall-03", { x: 120, y: -120 }, { x: 120, y: 0 });
+  const north = wall("wall-04", { x: 120, y: 0 }, { x: 120, y: 120 });
+  const plan = buildAutomaticWallJoinPlan([west, east, south, north], wallTypes());
+  assert.equal(plan.endpointJoins.get(south.id)?.end?.kind, "tee");
+  assert.equal(plan.endpointJoins.get(north.id)?.start?.kind, "tee");
+  assert.equal(unresolvedWallJunctionCount(west.id, plan), 0);
+});
+
+test("respects a manual square endpoint without reporting an unresolved junction", () => {
+  const first = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 }, { wallEndJoinMode: "square" });
+  const second = wall("wall-02", { x: 120, y: 0 }, { x: 120, y: 120 });
+  const plan = buildAutomaticWallJoinPlan([first, second], wallTypes());
+  assert.equal(plan.endpointJoins.size, 0);
+  assert.equal(unresolvedWallJunctionCount(first.id, plan), 0);
+  assert.equal(unresolvedWallJunctionCount(second.id, plan), 0);
 });

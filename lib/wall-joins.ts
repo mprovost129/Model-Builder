@@ -55,6 +55,14 @@ function endpointPoint(line: LineObject, endpoint: WallEndpoint) {
   return endpoint === "start" ? line.start : line.end;
 }
 
+function endpointUsesAutomaticJoin(line: LineObject, endpoint: WallEndpoint) {
+  return (endpoint === "start" ? line.wallStartJoinMode : line.wallEndJoinMode) !== "square";
+}
+
+function joinPriority(line: LineObject) {
+  return line.wallJoinPriority ?? 0;
+}
+
 function lineDirection(line: LineObject) {
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
@@ -293,7 +301,7 @@ export function buildAutomaticWallJoinPlan(
   const wallLines = lines.filter((line) => line.architecturalRole === "wall");
   const wallTypesById = new Map(wallTypes.map((wallType) => [wallType.id, wallType]));
   const endpoints: EndpointCandidate[] = wallLines.flatMap((line) =>
-    (["start", "end"] as const).map((endpoint) => ({ endpoint, line, point: endpointPoint(line, endpoint) })),
+    (["start", "end"] as const).filter((endpoint) => endpointUsesAutomaticJoin(line, endpoint)).map((endpoint) => ({ endpoint, line, point: endpointPoint(line, endpoint) })),
   );
   const groups: EndpointCandidate[][] = [];
   endpoints.forEach((candidate) => {
@@ -328,8 +336,12 @@ export function buildAutomaticWallJoinPlan(
           }
         }
       }
-      if (possibleHosts.length === 1) {
-        const [firstHost, secondHost, branch] = possibleHosts[0];
+      const rankedHosts = possibleHosts.sort((first, second) => joinPriority(second[0].line) + joinPriority(second[1].line) - joinPriority(first[0].line) - joinPriority(first[1].line));
+      const bestHost = rankedHosts[0];
+      const bestScore = bestHost ? joinPriority(bestHost[0].line) + joinPriority(bestHost[1].line) : 0;
+      const nextScore = rankedHosts[1] ? joinPriority(rankedHosts[1][0].line) + joinPriority(rankedHosts[1][1].line) : Number.NEGATIVE_INFINITY;
+      if (bestHost && (rankedHosts.length === 1 || bestScore > nextScore)) {
+        const [firstHost, secondHost, branch] = bestHost;
         if (canBranchIntoHost(branch, firstHost.line)) {
           addTeeJoin(plan, branch, [firstHost.line.id, secondHost.line.id], firstHost.line.id);
           return;
@@ -339,7 +351,24 @@ export function buildAutomaticWallJoinPlan(
       return;
     }
 
-    if (group.length > 3) markUnresolved(plan, group);
+    if (group.length > 3) {
+      const hostPairs: Array<[EndpointCandidate, EndpointCandidate]> = [];
+      for (let firstIndex = 0; firstIndex < group.length; firstIndex += 1) {
+        for (let secondIndex = firstIndex + 1; secondIndex < group.length; secondIndex += 1) {
+          if (hostSegmentsAlign(group[firstIndex], group[secondIndex], wallTypesById)) hostPairs.push([group[firstIndex], group[secondIndex]]);
+        }
+      }
+      hostPairs.sort((first, second) => joinPriority(second[0].line) + joinPriority(second[1].line) - joinPriority(first[0].line) - joinPriority(first[1].line));
+      const best = hostPairs[0];
+      const bestScore = best ? joinPriority(best[0].line) + joinPriority(best[1].line) : 0;
+      const nextScore = hostPairs[1] ? joinPriority(hostPairs[1][0].line) + joinPriority(hostPairs[1][1].line) : Number.NEGATIVE_INFINITY;
+      const branches = best ? group.filter((candidate) => candidate !== best[0] && candidate !== best[1]) : [];
+      if (best && bestScore > nextScore && branches.every((branch) => canBranchIntoHost(branch, best[0].line))) {
+        branches.forEach((branch) => addTeeJoin(plan, branch, [best[0].line.id, best[1].line.id], best[0].line.id));
+      } else {
+        markUnresolved(plan, group);
+      }
+    }
   });
 
   groups.filter((group) => group.length === 1).forEach(([branch]) => {
@@ -349,8 +378,10 @@ export function buildAutomaticWallJoinPlan(
       Math.abs(line.start.z - branch.point.z) <= ENDPOINT_TOLERANCE &&
       pointOnLineInterior(branch.point, line)
     ));
-    if (hosts.length === 1 && wallTypeFor(hosts[0], wallTypesById) && canBranchIntoHost(branch, hosts[0])) {
-      addTeeJoin(plan, branch, [hosts[0].id], hosts[0].id);
+    const rankedHosts = hosts.filter((host) => wallTypeFor(host, wallTypesById)).sort((first, second) => joinPriority(second) - joinPriority(first));
+    const selectedHost = rankedHosts[0];
+    if (selectedHost && (rankedHosts.length === 1 || joinPriority(selectedHost) > joinPriority(rankedHosts[1])) && canBranchIntoHost(branch, selectedHost)) {
+      addTeeJoin(plan, branch, [selectedHost.id], selectedHost.id);
     } else if (hosts.length > 0) {
       markUnresolved(plan, [branch, ...hosts.map((line) => ({ endpoint: "start" as const, line, point: line.start }))]);
     }
