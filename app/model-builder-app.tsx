@@ -152,6 +152,7 @@ import {
   addCircleObject,
   addPolylineObject,
   addLineObject,
+  addWallOpening,
   addLayer,
   addBoxObject,
   alignBoxObjects,
@@ -175,6 +176,7 @@ import {
   deleteLayer,
   deleteArcObject,
   deleteLineObject,
+  deleteWallOpening,
   deletePolylineObject,
   deleteBoxObject,
   deleteBoxObjects,
@@ -246,6 +248,7 @@ import {
   updateLineGrip,
   updateLineObject,
   updateWallPlacement,
+  updateWallOpening,
   updatePolylineObjectGrip,
   updatePolylineObject,
   updatePolylineObjectVertex,
@@ -254,6 +257,8 @@ import {
   type CircleObject,
   type CurveFilletPick,
   type LineObject,
+  type WallOpening,
+  type WallOpeningKind,
   type PolylineObject,
   type AlignmentMode,
   type ModelDocument,
@@ -283,7 +288,7 @@ import {
   buildAutomaticWallJoinPlan,
   unresolvedWallJunctionCount,
   wallEndCapFootprints,
-  wallLayerFootprint,
+  wallLayerSolidSegments,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
 import {
@@ -1329,22 +1334,23 @@ function updateWallView(
   if (length < 1 / 16) return;
   wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
-    const footprint = wallLayerFootprint(line, wallType, index, joinPlan, linesById, wallTypesById);
-    const shape = new THREE.Shape();
-    shape.moveTo(footprint.startExterior.x, footprint.startExterior.y);
-    shape.lineTo(footprint.startInterior.x, footprint.startInterior.y);
-    shape.lineTo(footprint.endInterior.x, footprint.endInterior.y);
-    shape.lineTo(footprint.endExterior.x, footprint.endExterior.y);
-    shape.closePath();
-    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: story.roughCeilingHeight, steps: 1 });
-    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.z = line.start.z;
-    mesh.userData.lineId = line.id;
-    mesh.userData.wallLayer = layer.name;
-    view.group.add(mesh);
-    view.meshes.push(mesh);
-    view.materials.push(material);
+    wallLayerSolidSegments(line, wallType, index, joinPlan, linesById, wallTypesById, story.roughCeilingHeight).forEach((segment) => {
+      const shape = new THREE.Shape();
+      shape.moveTo(segment.startExterior.x, segment.startExterior.y);
+      shape.lineTo(segment.startInterior.x, segment.startInterior.y);
+      shape.lineTo(segment.endInterior.x, segment.endInterior.y);
+      shape.lineTo(segment.endExterior.x, segment.endExterior.y);
+      shape.closePath();
+      const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: segment.height, steps: 1 });
+      const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.z = line.start.z + segment.baseHeight;
+      mesh.userData.lineId = line.id;
+      mesh.userData.wallLayer = layer.name;
+      view.group.add(mesh);
+      view.meshes.push(mesh);
+      view.materials.push(material);
+    });
   });
   wallEndCapFootprints(line, wallType, joinPlan).forEach((footprint) => {
     const layer = wallType.layers[footprint.layerIndex];
@@ -7900,6 +7906,67 @@ function WallGeometryControl({
   );
 }
 
+function WallOpeningNameField({ opening, onUpdate }: { opening: WallOpening; onUpdate: (change: Partial<WallOpening>) => boolean }) {
+  const [draft, setDraft] = useState(opening.name);
+  const [error, setError] = useState(false);
+  const commit = () => {
+    if (!onUpdate({ name: draft })) {
+      setDraft(opening.name);
+      setError(true);
+      return;
+    }
+    setError(false);
+  };
+  return (
+    <label className="property-table-row property-input-row"><span className="property-table-label">Name</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(opening.name); setError(false); event.currentTarget.blur(); } }} aria-label="Opening name" spellCheck={false} /></div></label>
+  );
+}
+
+function WallOpeningsControl({
+  line,
+  onAdd,
+  onDelete,
+  onUpdate,
+}: {
+  line: LineObject;
+  onAdd: (kind: WallOpeningKind) => string | null;
+  onDelete: (openingId: string) => void;
+  onUpdate: (openingId: string, change: Partial<WallOpening>) => boolean;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(line.wallOpenings[0]?.id ?? null);
+  const opening = line.wallOpenings.find((candidate) => candidate.id === selectedId) ?? line.wallOpenings.at(-1) ?? null;
+  const add = (kind: WallOpeningKind) => {
+    const id = onAdd(kind);
+    if (id) setSelectedId(id);
+  };
+  const updateDimension = (field: "centerOffset" | "headerBottomHeight" | "roughHeight" | "roughWidth" | "unitHeight" | "unitWidth", draft: string) => {
+    const value = parseArchitectural(draft);
+    if (value === null || (field === "centerOffset" ? value < 0 : value <= 0)) return false;
+    return opening ? onUpdate(opening.id, { [field]: snapToSixteenth(value) }) : false;
+  };
+  return (
+    <PropertyGridSection title="Openings" meta={`${line.wallOpenings.length} hosted`}>
+      <div className="property-action-row"><button type="button" onClick={() => add("door")}>+ Door</button><button type="button" onClick={() => add("window")}>+ Window</button></div>
+      {line.wallOpenings.length > 0 ? <PropertyGridRow label="Opening"><select className="property-cell-select" value={opening?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)} aria-label="Hosted wall opening">{line.wallOpenings.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.kind === "door" ? "Door" : "Window"}</option>)}</select></PropertyGridRow> : <p className="property-grid-note">Add a Door or Window to cut its rough opening through every Wall layer.</p>}
+      {opening ? <>
+        <WallOpeningNameField key={`${opening.id}:${opening.name}`} opening={opening} onUpdate={(change) => onUpdate(opening.id, change)} />
+        <PropertyGridRow label="Type"><span className="property-readout">{opening.kind === "door" ? "Door" : "Window"}</span></PropertyGridRow>
+        <LineCoordinateField label="Center from start" unsigned value={opening.centerOffset} onCommit={(draft) => updateDimension("centerOffset", draft)} />
+        <LineCoordinateField label="Unit width" unsigned value={opening.unitWidth} onCommit={(draft) => updateDimension("unitWidth", draft)} />
+        <LineCoordinateField label="Unit height" unsigned value={opening.unitHeight} onCommit={(draft) => updateDimension("unitHeight", draft)} />
+        <LineCoordinateField label="Rough width" unsigned value={opening.roughWidth} onCommit={(draft) => updateDimension("roughWidth", draft)} />
+        <LineCoordinateField label="Rough height" unsigned value={opening.roughHeight} onCommit={(draft) => updateDimension("roughHeight", draft)} />
+        {opening.kind === "window" ? <>
+          <LineCoordinateField label="Bottom of header" unsigned value={opening.headerBottomHeight} onCommit={(draft) => updateDimension("headerBottomHeight", draft)} />
+          <PropertyGridRow label="Rough sill"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight - opening.roughHeight)}</span></PropertyGridRow>
+        </> : <PropertyGridRow label="Bottom of header"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight)}</span></PropertyGridRow>}
+        <div className="property-action-row single-action"><button type="button" onClick={() => onDelete(opening.id)}>Delete Opening</button></div>
+        <p className="property-grid-note">Unit dimensions describe the inserted product. Rough dimensions control the Wall cut and future framing. Header height is measured to the bottom of the structural header above the Story subfloor.</p>
+      </> : null}
+    </PropertyGridSection>
+  );
+}
+
 function LineCoordinateField({ label, onCommit, unsigned = false, value }: { label: string; onCommit: (draft: string) => boolean; unsigned?: boolean; value: number }) {
   const formatValue = unsigned ? formatArchitectural : formatSignedArchitectural;
   const [draft, setDraft] = useState(formatValue(value));
@@ -10955,6 +11022,39 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next });
   }, [editor.present, selectedLine]);
 
+  const addSelectedWallOpening = useCallback((kind: WallOpeningKind) => {
+    if (!selectedLine) return null;
+    const result = addWallOpening(editor.present, selectedLine.id, kind);
+    if (!result) {
+      setFileNotice({ text: `There is not enough clear Wall length or height for another ${kind}.`, tone: "error" });
+      return null;
+    }
+    dispatch({ type: "commit", next: result.document });
+    setFileNotice({ text: `Added ${result.opening.name}; its rough opening now cuts every Wall layer.`, tone: "success" });
+    return result.opening.id;
+  }, [editor.present, selectedLine]);
+
+  const updateSelectedWallOpening = useCallback((openingId: string, change: Partial<WallOpening>) => {
+    if (!selectedLine) return false;
+    const next = updateWallOpening(editor.present, selectedLine.id, openingId, change);
+    if (!next) {
+      setFileNotice({ text: "That opening would overlap another opening, leave the Wall, or exceed the Story height.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    return true;
+  }, [editor.present, selectedLine]);
+
+  const deleteSelectedWallOpening = useCallback((openingId: string) => {
+    if (!selectedLine) return;
+    const opening = selectedLine.wallOpenings.find((candidate) => candidate.id === openingId);
+    if (!opening || !window.confirm(`Delete ${opening.name}? You can restore it with Undo.`)) return;
+    const next = deleteWallOpening(editor.present, selectedLine.id, openingId);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `Deleted ${opening.name}.`, tone: "info" });
+  }, [editor.present, selectedLine]);
+
   const toggleSelectedLineLock = useCallback(() => {
     if (!selectedLine) return;
     const next = setLineLocked(editor.present, selectedLine.id, !selectedLine.locked);
@@ -12235,7 +12335,10 @@ export function ModelBuilderApp() {
             <PropertyGridSection className="locked-selection-notice" title="Editing" meta="Read only"><PropertyGridRow label="Status"><span className="property-readout is-locked">Line locked</span></PropertyGridRow><p className="property-grid-note">Unlock the line or its layer to edit its geometry.</p></PropertyGridSection>
           ) : selectedLine ? (
             selectedLine.architecturalRole === "wall"
-              ? <WallGeometryControl building={editor.present.building} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
+              ? <>
+                <WallGeometryControl building={editor.present.building} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
+                <WallOpeningsControl line={selectedLine} onAdd={addSelectedWallOpening} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
+              </>
               : <LineGeometryControl key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.start.z}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.end.z}`} line={selectedLine} onUpdate={updateSelectedLine} />
           ) : selectedBox && !selectionIsEditable ? (
             <PropertyGridSection className="locked-selection-notice" title="Editing" meta="Read only">

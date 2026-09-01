@@ -1,4 +1,4 @@
-import type { LineObject } from "./document-model.ts";
+import { wallOpeningRoughBottom, type LineObject } from "./document-model.ts";
 import {
   wallLayerCenterOffsets,
   wallLayerGroupThickness,
@@ -38,6 +38,11 @@ export type WallLayerFootprint = {
 };
 
 export type WallEndCapFootprint = WallLayerFootprint & { endpoint: WallEndpoint; layerIndex: number };
+
+export type WallLayerSolidSegment = WallLayerFootprint & {
+  baseHeight: number;
+  height: number;
+};
 
 type CutLine = {
   direction: WallFootprintPoint;
@@ -528,6 +533,59 @@ export function wallLayerFootprint(
     footprint.endInterior = { x: footprint.endInterior.x - direction.x * totalDepth, y: footprint.endInterior.y - direction.y * totalDepth };
   }
   return footprint;
+}
+
+/** Splits a Wall layer into solids around each hosted rough opening. */
+export function wallLayerSolidSegments(
+  line: LineObject,
+  wallType: LayeredAssembly,
+  layerIndex: number,
+  joinPlan: AutomaticWallJoinPlan,
+  linesById: ReadonlyMap<string, LineObject>,
+  wallTypesById: ReadonlyMap<string, LayeredAssembly>,
+  wallHeight: number,
+): WallLayerSolidSegment[] {
+  const fullFootprint = wallLayerFootprint(line, wallType, layerIndex, joinPlan, linesById, wallTypesById);
+  if (line.wallOpenings.length === 0) return [{ ...fullFootprint, baseHeight: 0, height: wallHeight }];
+  const direction = lineDirection(line);
+  if (!direction || wallHeight <= 0) return [];
+  const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
+  const offsets = boundaryOffsets(wallType, line, layerIndex);
+  const crossSection = (distance: number) => {
+    if (distance <= 0) return { exterior: fullFootprint.startExterior, interior: fullFootprint.startInterior };
+    if (distance >= length) return { exterior: fullFootprint.endExterior, interior: fullFootprint.endInterior };
+    const point = { x: line.start.x + direction.x * distance, y: line.start.y + direction.y * distance };
+    return {
+      exterior: offsetPointAt(point, direction, offsets.exterior),
+      interior: offsetPointAt(point, direction, offsets.interior),
+    };
+  };
+  const result: WallLayerSolidSegment[] = [];
+  const addSegment = (start: number, end: number, baseHeight: number, height: number) => {
+    if (end - start < ENDPOINT_TOLERANCE || height < ENDPOINT_TOLERANCE) return;
+    const startSection = crossSection(start);
+    const endSection = crossSection(end);
+    result.push({
+      baseHeight,
+      endExterior: endSection.exterior,
+      endInterior: endSection.interior,
+      height,
+      startExterior: startSection.exterior,
+      startInterior: startSection.interior,
+    });
+  };
+  let cursor = 0;
+  [...line.wallOpenings].sort((first, second) => first.centerOffset - second.centerOffset).forEach((opening) => {
+    const openingStart = opening.centerOffset - opening.roughWidth / 2;
+    const openingEnd = opening.centerOffset + opening.roughWidth / 2;
+    addSegment(cursor, openingStart, 0, wallHeight);
+    const roughBottom = wallOpeningRoughBottom(opening);
+    addSegment(openingStart, openingEnd, 0, roughBottom);
+    addSegment(openingStart, openingEnd, opening.headerBottomHeight, wallHeight - opening.headerBottomHeight);
+    cursor = openingEnd;
+  });
+  addSegment(cursor, length, 0, wallHeight);
+  return result;
 }
 
 export function wallEndCapFootprints(

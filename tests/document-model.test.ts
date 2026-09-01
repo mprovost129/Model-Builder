@@ -8,6 +8,7 @@ import {
   addLineObject,
   addPolylineObject,
   addRectangleObject,
+  addWallOpening,
   addLayer,
   addBoxObject,
   alignBoxObjects,
@@ -26,6 +27,7 @@ import {
   deleteBoxObject,
   deleteBoxObjects,
   deleteModelEntities,
+  deleteWallOpening,
   documentsEqual,
   discoverDocumentBoundary,
   duplicateBoxObject,
@@ -55,6 +57,7 @@ import {
   renameGroup,
   renameLayer,
   renameBoxObject,
+  removeWallRole,
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
@@ -62,6 +65,8 @@ import {
   updateLineGrip,
   updateLineObject,
   updateWallPlacement,
+  updateWallOpening,
+  wallOpeningRoughBottom,
   updateCircleGrip,
   updateArcGrip,
   updatePolylineObjectVertex,
@@ -1228,6 +1233,37 @@ test("converts a Line into a layered Wall controlled by its Story", () => {
   assert.ok(placed);
   assert.equal(placed.lines[0].wallExteriorSide, "right");
   assert.equal(placed.lines[0].wallReferenceLine, "center-main");
+});
+
+test("hosts framing-ready Door and Window rough openings on a Wall", () => {
+  const added = addLineObject(DEFAULT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 192, y: 0, z: 0 });
+  assert.ok(added);
+  const wall = createWallFromLine(added.document, added.line.id);
+  assert.ok(wall);
+  const windowResult = addWallOpening(wall, added.line.id, "window");
+  assert.ok(windowResult);
+  const windowOpening = windowResult.opening;
+  assert.equal(windowOpening.unitWidth, 36);
+  assert.equal(windowOpening.roughWidth, 36.5);
+  assert.equal(windowOpening.headerBottomHeight, 80);
+  assert.equal(wallOpeningRoughBottom(windowOpening), 31.5);
+
+  const raised = updateWallOpening(windowResult.document, added.line.id, windowOpening.id, { headerBottomHeight: 84 });
+  assert.ok(raised);
+  assert.equal(wallOpeningRoughBottom(raised.lines[0].wallOpenings[0]), 35.5);
+  const doorResult = addWallOpening(raised, added.line.id, "door");
+  assert.ok(doorResult);
+  assert.equal(doorResult.opening.headerBottomHeight, doorResult.opening.roughHeight);
+  assert.equal(wallOpeningRoughBottom(doorResult.opening), 0);
+
+  assert.equal(updateWallOpening(doorResult.document, added.line.id, doorResult.opening.id, { centerOffset: windowOpening.centerOffset }), null);
+  assert.equal(updateWallOpening(doorResult.document, added.line.id, doorResult.opening.id, { roughWidth: 240 }), null);
+  const deleted = deleteWallOpening(doorResult.document, added.line.id, doorResult.opening.id);
+  assert.ok(deleted);
+  assert.equal(deleted.lines[0].wallOpenings.length, 1);
+  const draftingLine = removeWallRole(deleted, added.line.id);
+  assert.ok(draftingLine);
+  assert.deepEqual(draftingLine.lines[0].wallOpenings, []);
 });
 
 test("keeps Walls on their Story when moved or copied and reassigns removed wall types", () => {

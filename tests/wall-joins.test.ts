@@ -11,6 +11,7 @@ import {
   unresolvedWallJunctionCount,
   wallEndCapFootprints,
   wallLayerFootprint,
+  wallLayerSolidSegments,
 } from "../lib/wall-joins.ts";
 
 function wall(
@@ -35,9 +36,34 @@ function wall(
     wallEndJoinMode: "auto",
     wallReferenceLine: "exterior-main",
     wallTypeId: "wall-type-01",
+    wallOpenings: [],
     ...overrides,
   };
 }
+
+test("cuts Door and Window rough openings through a Wall layer", () => {
+  const source = wall("wall-01", { x: 0, y: 0 }, { x: 240, y: 0 }, {
+    wallOpenings: [
+      { centerOffset: 60, headerBottomHeight: 82.5, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36 },
+      { centerOffset: 156, headerBottomHeight: 84, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36 },
+    ],
+  });
+  const types = wallTypes();
+  const plan = buildAutomaticWallJoinPlan([source], types);
+  const segments = wallLayerSolidSegments(source, types[0], 2, plan, new Map([[source.id, source]]), typeMap(types), 97.125);
+  assert.equal(segments.length, 6);
+  assert.deepEqual(segments.map((segment) => [segment.baseHeight, segment.height]), [
+    [0, 97.125],
+    [82.5, 14.625],
+    [0, 97.125],
+    [0, 35.5],
+    [84, 13.125],
+    [0, 97.125],
+  ]);
+  const windowLower = segments[3];
+  assert.equal(windowLower.startExterior.x, 137.75);
+  assert.equal(windowLower.endExterior.x, 174.25);
+});
 
 function wallTypes() {
   return createDefaultBuildingStructure().wallTypes;

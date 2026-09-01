@@ -109,13 +109,19 @@ nodes remain unwrapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-22 project files store the Building Datum, ordered Stories, active and
+- Version-23 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
   exterior side and selected reference line. Wall layers persist their automatic
   junction-participation setting; version-18 and earlier layers receive safe
   role-based defaults during upgrade.
+- Door and Window openings are hosted by their Wall and store unit width/height
+  separately from rough-opening width/height. The rough dimensions cut every
+  Wall layer. Doors begin at the Story rough floor/subfloor; Windows store the
+  bottom of the structural header above that same datum and calculate rough sill
+  height as `bottom of header - rough-opening height`. This preserves the inputs
+  needed for later king studs, trimmers, headers, sills, and cripple framing.
 - Each Wall stores a junction priority plus independent Start and End cleanup
   modes. Automatic is the default. Square / disconnected explicitly removes an
   endpoint from automatic cleanup without moving its reference path. A uniquely
@@ -174,8 +180,9 @@ nodes remain unwrapped so their junction logic stays authoritative.
 
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Add wall openings, then extend the completed multi-layer open-end wraps with
-   opening-specific returns and configurable return depths.
+3. Extend hosted wall openings with selectable Door/Window library components,
+   opening-specific finish returns, configurable return depths, and framing
+   members generated from the existing rough-opening and header data.
 4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions
