@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { discoverBoundaryAtPoint, type BoundarySource } from "../lib/cad-boundary.ts";
+import { discoverBoundaryAtPoint, discoverBoundedFaces, type BoundarySource } from "../lib/cad-boundary.ts";
 import { polylineArea } from "../lib/cad-polyline.ts";
 
 const line = (startX: number, startY: number, endX: number, endY: number, z = 0): BoundarySource => ({
@@ -40,6 +40,7 @@ test("selects the smallest enclosed face containing the picked point", () => {
   assert.ok(right);
   assert.equal(left.area, 80);
   assert.equal(right.area, 120);
+  assert.deepEqual(discoverBoundedFaces(sources, 0).map((face) => face.area), [80, 120]);
 });
 
 test("preserves circular boundaries as exact curved Polyline segments", () => {

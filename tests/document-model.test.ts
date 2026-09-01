@@ -30,6 +30,7 @@ import {
   deleteWallOpening,
   documentsEqual,
   discoverDocumentBoundary,
+  effectiveRoomSettings,
   duplicateBoxObject,
   findBoxObject,
   findGroup,
@@ -58,6 +59,7 @@ import {
   renameLayer,
   renameBoxObject,
   removeWallRole,
+  refreshRoomsForStory,
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
@@ -66,6 +68,7 @@ import {
   updateLineObject,
   updateWallPlacement,
   updateWallOpening,
+  updateRoomObject,
   wallOpeningRoughBottom,
   updateCircleGrip,
   updateArcGrip,
@@ -1264,6 +1267,39 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   const draftingLine = removeWallRole(deleted, added.line.id);
   assert.ok(draftingLine);
   assert.deepEqual(draftingLine.lines[0].wallOpenings, []);
+});
+
+test("detects enclosed Rooms and preserves Story-default overrides across topology refreshes", () => {
+  let document = cloneDocument(NEW_PROJECT_DOCUMENT);
+  const addWall = (start: { x: number; y: number; z: number }, end: { x: number; y: number; z: number }) => {
+    const added = addLineObject(document, start, end);
+    assert.ok(added);
+    const wall = createWallFromLine(added.document, added.line.id);
+    assert.ok(wall);
+    document = wall;
+  };
+  addWall({ x: 0, y: 0, z: 0 }, { x: 240, y: 0, z: 0 });
+  addWall({ x: 240, y: 0, z: 0 }, { x: 240, y: 120, z: 0 });
+  addWall({ x: 240, y: 120, z: 0 }, { x: 0, y: 120, z: 0 });
+  addWall({ x: 0, y: 120, z: 0 }, { x: 0, y: 0, z: 0 });
+  addWall({ x: 96, y: 0, z: 0 }, { x: 96, y: 120, z: 0 });
+  const detected = refreshRoomsForStory(document, "story-01");
+  assert.ok(detected);
+  assert.equal(detected.rooms.length, 2);
+  assert.deepEqual(detected.rooms.map((room) => room.boundaryWallIds.length), [4, 4]);
+  assert.deepEqual(detected.rooms.map((room) => room.roughCeilingHeightOverride), [null, null]);
+
+  const edited = updateRoomObject(detected, detected.rooms[0].id, { name: "Office", roughCeilingHeightOverride: 108, roughFloorOffset: 1.5 });
+  assert.ok(edited);
+  const refreshed = refreshRoomsForStory(edited, "story-01");
+  assert.ok(refreshed);
+  assert.equal(refreshed.rooms.find((room) => room.id === detected.rooms[0].id)?.name, "Office");
+  const office = refreshed.rooms.find((room) => room.name === "Office");
+  assert.ok(office);
+  const effective = effectiveRoomSettings(office, refreshed.building.stories[0], 0);
+  assert.equal(effective.roughFloorElevation, 1.5);
+  assert.equal(effective.roughCeilingHeight, 108);
+  assert.deepEqual(effective.floorStructure, refreshed.building.stories[0].floorStructure);
 });
 
 test("keeps Walls on their Story when moved or copied and reassigns removed wall types", () => {

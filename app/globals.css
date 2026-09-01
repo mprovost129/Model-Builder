@@ -401,6 +401,23 @@ button { color: inherit; }
 .wall-type-manager { width: min(1120px, calc(100vw - 48px)); height: min(760px, calc(100vh - 48px)); }
 .wall-type-manager .story-manager-body { grid-template-columns: 210px minmax(580px, 1fr); }
 .wall-type-manager .story-editor-summary { grid-template-columns: minmax(200px, 1fr) minmax(190px, .8fr) auto; }
+.room-manager { width: min(1200px, calc(100vw - 48px)); height: min(820px, calc(100vh - 48px)); }
+.room-manager .story-manager-body { grid-template-columns: 230px minmax(620px, 1fr); }
+.room-editor-summary { grid-template-columns: minmax(200px, 1fr) 150px 120px; }
+.room-story-picker { display: grid; gap: 4px; padding: 8px; border-bottom: 1px solid #34404b; color: #96a3ae; font-size: 7px; letter-spacing: .05em; text-transform: uppercase; }
+.room-story-picker select { height: 28px; border: 1px solid #465462; border-radius: 2px; background: #141b22; color: #e4e9ed; padding: 0 6px; font-size: 9px; }
+.room-height-settings { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(180px, 1fr) minmax(190px, 1fr); align-items: end; gap: 7px; margin-bottom: 8px; padding: 8px; border: 1px solid #3b4752; background: #202933; }
+.room-inherit-toggle { display: flex; align-items: center; gap: 7px; min-height: 28px; color: #cbd4db; font-size: 8px; }
+.room-inherit-toggle input,
+.room-override-section > label input { width: 14px; height: 14px; accent-color: #d3aa55; }
+.room-output { display: flex; align-items: center; min-height: 28px; padding: 0 7px; border: 1px solid #465462; border-radius: 2px; background: #141b22; color: #e4e9ed; font: 9px var(--font-geist-mono), monospace; }
+.room-override-section { margin-bottom: 8px; border: 1px solid #3b4752; background: #1c242d; }
+.room-override-section > label { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 9px; color: #cbd4db; font-size: 8px; }
+.room-override-section .story-assembly { margin: 0; border-right: 0; border-bottom: 0; border-left: 0; }
+.room-empty-state { display: grid; place-items: center; align-content: center; gap: 10px; min-height: 300px; padding: 30px; border: 1px dashed #465462; color: #8f9ba7; text-align: center; }
+.room-empty-state strong { color: #dbe2e7; font-size: 13px; }
+.room-empty-state span { max-width: 500px; font-size: 9px; line-height: 1.6; }
+.room-empty-state button { min-height: 30px; padding: 0 14px; border: 1px solid #846936; border-radius: 2px; background: #3b3122; color: #f3d18d; cursor: pointer; }
 .story-list,
 .story-section-preview { min-height: 0; overflow-y: auto; background: #1c242d; }
 .story-list { border-right: 1px solid #3e4955; }
@@ -528,6 +545,7 @@ button { color: inherit; }
 @media (max-width: 1180px) {
   .story-manager-body { grid-template-columns: 170px minmax(560px, 1fr); }
   .wall-type-manager .story-manager-body { grid-template-columns: 180px minmax(520px, 1fr); }
+  .room-manager .story-manager-body { grid-template-columns: 190px minmax(560px, 1fr); }
   .story-section-preview { display: none; }
 }
 

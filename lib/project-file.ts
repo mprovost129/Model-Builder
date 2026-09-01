@@ -16,6 +16,7 @@ import {
   MAXIMUM_LINE_COUNT,
   MAXIMUM_WALL_OPENING_COUNT,
   MAXIMUM_POLYLINE_COUNT,
+  MAXIMUM_ROOM_COUNT,
   MAXIMUM_OBJECT_COUNT,
   type BoxObject,
   type ArcObject,
@@ -26,11 +27,14 @@ import {
   type LineObject,
   type WallOpening,
   type PolylineObject,
+  type RoomObject,
+  cloneRoomObject,
+  roomObjectIsValid,
   wallOpeningsAreValid,
 } from "./document-model.ts";
 import { arcGeometryIsValid } from "./cad-arc.ts";
 import { circleGeometryIsValid } from "./cad-circle.ts";
-import { polylineGeometryIsValid } from "./cad-polyline.ts";
+import { polylineGeometryIsValid, type PolylineGeometry } from "./cad-polyline.ts";
 import {
   MAXIMUM_COORDINATE,
   MINIMUM_DIMENSION,
@@ -61,7 +65,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 23;
+export const PROJECT_FILE_VERSION = 24;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -77,6 +81,7 @@ export type ModelBuilderProject = {
   name: string;
   objects: BoxObject[];
   polylines: PolylineObject[];
+  rooms: RoomObject[];
   units: {
     display: "us-architectural";
     internal: "inch";
@@ -481,6 +486,41 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
   return { ...geometry, architecturalRole, id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), shape: value.shape, storyId, type: "polyline" };
 }
 
+function readRoomObject(value: unknown): RoomObject | null {
+  if (
+    !isRecord(value) || !isRecord(value.boundary) || !Array.isArray(value.boundary.vertices) ||
+    typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
+    typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120 ||
+    typeof value.storyId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.storyId) ||
+    !Array.isArray(value.boundaryWallIds) || value.boundaryWallIds.some((id) => typeof id !== "string") ||
+    !isFiniteNumber(value.roughFloorOffset) ||
+    !(value.roughCeilingHeightOverride === null || isFiniteNumber(value.roughCeilingHeightOverride))
+  ) return null;
+  const vertices = value.boundary.vertices.map((point) => isRecord(point) && isFiniteNumber(point.x) && isFiniteNumber(point.y) ? { x: point.x, y: point.y } : null);
+  if (vertices.some((point) => point === null) || !Array.isArray(value.boundary.bulges) || !value.boundary.bulges.every(isFiniteNumber) || !isFiniteNumber(value.boundary.elevation) || !isFiniteNumber(value.boundary.width) || value.boundary.closed !== true) return null;
+  const boundary: PolylineGeometry = { bulges: value.boundary.bulges as number[], closed: true, elevation: value.boundary.elevation, vertices: vertices as Array<{ x: number; y: number }>, width: value.boundary.width };
+  if (!polylineGeometryIsValid(boundary)) return null;
+  const readOverride = (candidate: unknown, kind: AssemblyKind) => candidate === null ? null : readLayeredAssembly(candidate, kind);
+  const floorStructureOverride = readOverride(value.floorStructureOverride, "floor-structure");
+  const floorFinishOverride = readOverride(value.floorFinishOverride, "floor-finish");
+  const ceilingStructureOverride = readOverride(value.ceilingStructureOverride, "ceiling-structure");
+  const ceilingFinishOverride = readOverride(value.ceilingFinishOverride, "ceiling-finish");
+  if ((value.floorStructureOverride !== null && !floorStructureOverride) || (value.floorFinishOverride !== null && !floorFinishOverride) || (value.ceilingStructureOverride !== null && !ceilingStructureOverride) || (value.ceilingFinishOverride !== null && !ceilingFinishOverride)) return null;
+  return {
+    boundary,
+    boundaryWallIds: value.boundaryWallIds as string[],
+    ceilingFinishOverride,
+    ceilingStructureOverride,
+    floorFinishOverride,
+    floorStructureOverride,
+    id: value.id,
+    name: value.name.trim(),
+    roughCeilingHeightOverride: value.roughCeilingHeightOverride as number | null,
+    roughFloorOffset: value.roughFloorOffset,
+    storyId: value.storyId,
+  };
+}
+
 function readCircleObject(value: unknown, supportsStories: boolean, fallbackStoryId: string): CircleObject | null {
   if (!isRecord(value) || value.type !== "circle" || !isRecord(value.center)) return null;
   if (
@@ -545,6 +585,7 @@ export function createProjectDocument({
     name: name.trim() || "Untitled Model",
     objects: cloneDocument(document).objects,
     polylines: cloneDocument(document).polylines,
+    rooms: cloneDocument(document).rooms,
     units: {
       display: "us-architectural",
       internal: "inch",
@@ -783,6 +824,15 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     }
     if (arcs.some((arc) => !storyIds.has(arc.storyId))) return { ok: false, error: "One or more drawing arcs reference a missing Story." };
   }
+  let rooms: RoomObject[] = [];
+  if (version >= 24) {
+    if (!Array.isArray(value.rooms) || value.rooms.length > MAXIMUM_ROOM_COUNT) return { ok: false, error: "The project Room collection is missing or invalid." };
+    const parsedRooms = value.rooms.map(readRoomObject);
+    if (parsedRooms.some((room) => room === null)) return { ok: false, error: "One or more Rooms are invalid." };
+    rooms = parsedRooms as RoomObject[];
+    const roomDocument: ModelDocument = { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines, rooms };
+    if (new Set(rooms.map((room) => room.id)).size !== rooms.length || rooms.some((room) => !roomObjectIsValid(room, roomDocument))) return { ok: false, error: "One or more Rooms reference invalid Stories, Walls, or settings." };
+  }
   const allEntityIds = [...validObjects.map((object) => object.id), ...lines.map((line) => line.id), ...polylines.map((polyline) => polyline.id), ...circles.map((circle) => circle.id), ...arcs.map((arc) => arc.id)];
   const allEntityNames = [...validObjects.map((object) => object.name.toLowerCase()), ...lines.map((line) => line.name.toLowerCase()), ...polylines.map((polyline) => polyline.name.toLowerCase()), ...circles.map((circle) => circle.name.toLowerCase()), ...arcs.map((arc) => arc.name.toLowerCase())];
   if (new Set(allEntityIds).size !== allEntityIds.length || new Set(allEntityNames).size !== allEntityNames.length) return { ok: false, error: "Project entity identifiers and names must be unique." };
@@ -791,7 +841,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     ok: true,
     project: createProjectDocument({
       createdAt: value.createdAt,
-      document: { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines },
+      document: { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines, rooms },
       name: value.name,
       updatedAt: value.updatedAt,
     }),
@@ -809,6 +859,7 @@ export function projectToDocument(project: ModelBuilderProject): ModelDocument {
     lines: project.lines.map(cloneLineObject),
     objects: project.objects.map(cloneBoxObject),
     polylines: project.polylines.map(clonePolylineObject),
+    rooms: project.rooms.map(cloneRoomObject),
   };
 }
 

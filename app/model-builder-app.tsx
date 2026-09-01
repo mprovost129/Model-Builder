@@ -224,6 +224,8 @@ import {
   renameCircleObject,
   removeFloorPlatformRole,
   removeWallRole,
+  refreshRoomsForStory,
+  roomObjectIsValid,
   rotateModelEntities,
   scaleModelEntities,
   stretchModelEntities,
@@ -252,6 +254,7 @@ import {
   updatePolylineObjectGrip,
   updatePolylineObject,
   updatePolylineObjectVertex,
+  effectiveRoomSettings,
   type BoxObject,
   type ArcObject,
   type CircleObject,
@@ -263,6 +266,7 @@ import {
   type AlignmentMode,
   type ModelDocument,
   type ModelEntityRef,
+  type RoomObject,
 } from "@/lib/document-model";
 import {
   addBuildingStory,
@@ -270,6 +274,7 @@ import {
   buildingStructureIsValid,
   calculateStoryElevations,
   cloneBuildingStructure,
+  cloneLayeredAssembly,
   removeBuildingStory,
   wallLayerGroupThickness,
   WALL_LAYER_GROUPS,
@@ -8380,6 +8385,126 @@ function WallTypeManagerDialog({
   );
 }
 
+type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" | "ceilingStructureOverride" | "ceilingFinishOverride";
+
+function RoomManagerDialog({
+  document,
+  onCancel,
+  onSave,
+}: {
+  document: ModelDocument;
+  onCancel: () => void;
+  onSave: (document: ModelDocument) => void;
+}) {
+  const [draft, setDraft] = useState(() => cloneDocument(document));
+  const [selectedStoryId, setSelectedStoryId] = useState(document.building.activeStoryId);
+  const [selectedRoomId, setSelectedRoomId] = useState(document.rooms.find((room) => room.storyId === document.building.activeStoryId)?.id ?? null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+  const story = draft.building.stories.find((candidate) => candidate.id === selectedStoryId) ?? draft.building.stories[0];
+  const rooms = draft.rooms.filter((room) => room.storyId === story.id);
+  const selected = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
+  const storyElevation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id)?.roughFloorElevation ?? 0;
+  const effective = selected ? effectiveRoomSettings(selected, story, storyElevation) : null;
+  const formatRoomArea = (room: RoomObject) => `${(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft`;
+  const selectStory = (storyId: string) => {
+    setSelectedStoryId(storyId);
+    setSelectedRoomId(draft.rooms.find((room) => room.storyId === storyId)?.id ?? null);
+    setError("");
+  };
+  const replaceSelected = (change: Partial<RoomObject>) => {
+    if (!selected) return;
+    setDraft((current) => ({ ...cloneDocument(current), rooms: current.rooms.map((room) => room.id === selected.id ? { ...room, ...change } : room) }));
+    setError("");
+  };
+  const detect = () => {
+    const next = refreshRoomsForStory(draft, story.id);
+    if (!next) {
+      setError("Rooms could not be updated. Check that the Story walls form valid closed areas.");
+      return;
+    }
+    const firstRoom = next.rooms.find((room) => room.storyId === story.id) ?? null;
+    setDraft(next);
+    setSelectedRoomId((current) => next.rooms.some((room) => room.id === current) ? current : firstRoom?.id ?? null);
+    setError("");
+  };
+  const setAssemblyOverride = (key: RoomAssemblyOverrideKey, enabled: boolean) => {
+    if (!selected) return;
+    const storyKey = key.replace("Override", "") as "floorStructure" | "floorFinish" | "ceilingStructure" | "ceilingFinish";
+    replaceSelected({ [key]: enabled ? cloneLayeredAssembly(story[storyKey]) : null });
+  };
+  const save = () => {
+    const next = cloneDocument(draft);
+    if (next.rooms.some((room) => !roomObjectIsValid(room, next))) {
+      setError("Check the Room names, heights, offsets, and assembly layers before applying these settings.");
+      return;
+    }
+    onSave(next);
+  };
+  const overrideEditor = (key: RoomAssemblyOverrideKey, label: string) => {
+    if (!selected) return null;
+    const assembly = selected[key];
+    return (
+      <section className="room-override-section" key={key}>
+        <label><input type="checkbox" checked={assembly !== null} onChange={(event) => setAssemblyOverride(key, event.target.checked)} /><span>{assembly ? `${label} override` : `Use Story ${label.toLowerCase()}`}</span></label>
+        {assembly ? <StoryAssemblyEditor assembly={assembly} onChange={(next) => replaceSelected({ [key]: next })} /> : null}
+      </section>
+    );
+  };
+  return (
+    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="story-manager room-manager" role="dialog" aria-modal="true" aria-labelledby="room-manager-title">
+        <header className="story-manager-header"><div><strong id="room-manager-title">Room Manager</strong><span>Closed Wall loops create Rooms. Each Room inherits its Story settings until an override is enabled.</span></div><button type="button" onClick={onCancel} aria-label="Close Room Manager">×</button></header>
+        <div className="story-manager-body">
+          <aside className="story-list">
+            <header><strong>{story.name}</strong><span>{rooms.length} detected Room{rooms.length === 1 ? "" : "s"}</span></header>
+            <label className="room-story-picker"><span>Story</span><select value={story.id} onChange={(event) => selectStory(event.target.value)}>{draft.building.stories.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}</select></label>
+            {rooms.map((room) => <button type="button" key={room.id} className={room.id === selected?.id ? "is-selected" : ""} onClick={() => setSelectedRoomId(room.id)}><strong>{room.name}</strong><span>{formatRoomArea(room)} · {room.boundaryWallIds.length} walls</span>{room.roughCeilingHeightOverride !== null || room.roughFloorOffset !== 0 || room.floorStructureOverride || room.floorFinishOverride || room.ceilingStructureOverride || room.ceilingFinishOverride ? <small>OVERRIDES</small> : <small>STORY DEFAULTS</small>}</button>)}
+            <div className="story-list-actions"><button type="button" onClick={detect}>↻ Detect / Update Rooms</button></div>
+          </aside>
+          <main className="story-editor">
+            {selected && effective ? <>
+              <section className="story-editor-summary room-editor-summary">
+                <label><span>Room name</span><input value={selected.name} maxLength={120} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
+                <label><span>Enclosed area</span><output>{formatRoomArea(selected)}</output></label>
+                <label><span>Boundary</span><output>{selected.boundaryWallIds.length} Walls</output></label>
+              </section>
+              <section className="room-height-settings">
+                <StoryDimensionInput signed key={`${selected.id}:floor:${selected.roughFloorOffset}`} label="Rough floor offset" value={selected.roughFloorOffset} onChange={(roughFloorOffset) => replaceSelected({ roughFloorOffset })} />
+                <label className="room-inherit-toggle"><input type="checkbox" checked={selected.roughCeilingHeightOverride !== null} onChange={(event) => replaceSelected({ roughCeilingHeightOverride: event.target.checked ? story.roughCeilingHeight : null })} /><span>{selected.roughCeilingHeightOverride === null ? "Use Story ceiling height" : "Override ceiling height"}</span></label>
+                {selected.roughCeilingHeightOverride !== null ? <StoryDimensionInput key={`${selected.id}:ceiling:${selected.roughCeilingHeightOverride}`} label="Rough ceiling / plate height" value={selected.roughCeilingHeightOverride} onChange={(roughCeilingHeightOverride) => replaceSelected({ roughCeilingHeightOverride })} /> : <label className="story-field"><span>Effective rough ceiling</span><output className="room-output">{formatArchitectural(effective.roughCeilingHeight)}</output></label>}
+              </section>
+              <section className="story-calculated-grid room-calculated-grid" aria-label="Effective Room settings">
+                <div><span>Effective rough floor</span><strong>{formatSignedArchitectural(effective.roughFloorElevation)}</strong></div>
+                <div><span>Effective ceiling height</span><strong>{formatArchitectural(effective.roughCeilingHeight)}</strong></div>
+                <div><span>Floor structure</span><strong>{formatArchitectural(assemblyTotalThickness(effective.floorStructure))}</strong></div>
+                <div><span>Floor finish</span><strong>{formatArchitectural(assemblyTotalThickness(effective.floorFinish))}</strong></div>
+                <div><span>Ceiling structure</span><strong>{formatArchitectural(assemblyTotalThickness(effective.ceilingStructure))}</strong></div>
+                <div><span>Ceiling finish</span><strong>{formatArchitectural(assemblyTotalThickness(effective.ceilingFinish))}</strong></div>
+              </section>
+              {overrideEditor("floorStructureOverride", "Floor structure")}
+              {overrideEditor("floorFinishOverride", "Floor finish")}
+              {overrideEditor("ceilingStructureOverride", "Ceiling structure")}
+              {overrideEditor("ceilingFinishOverride", "Ceiling finish")}
+            </> : <section className="room-empty-state"><strong>No enclosed Rooms found on {story.name}</strong><span>Draw connected Walls around each space, then choose Detect / Update Rooms. Open wall networks do not create Rooms.</span><button type="button" onClick={detect}>Detect Rooms</button></section>}
+          </main>
+        </div>
+        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
+        <footer className="story-manager-footer"><span>{rooms.length} Room{rooms.length === 1 ? "" : "s"} on {story.name} · inherited values remain linked to Story defaults</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Room Settings</button></div></footer>
+      </section>
+    </div>
+  );
+}
+
 export function ModelBuilderApp() {
   const [editor, dispatch] = useReducer(historyReducer, {
     future: [],
@@ -8399,6 +8524,7 @@ export function ModelBuilderApp() {
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
+  const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [explorerTab, setExplorerTab] = useState<"objects" | "layers">("objects");
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
@@ -11295,6 +11421,13 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${activeType?.name ?? "Wall type"} is active for new walls.`, tone: "success" });
   }, [editor.present]);
 
+  const applyRoomSettings = useCallback((next: ModelDocument) => {
+    dispatch({ type: "commit", next });
+    setRoomManagerOpen(false);
+    const count = next.rooms.filter((room) => room.storyId === next.building.activeStoryId).length;
+    setFileNotice({ text: `${count} Room${count === 1 ? "" : "s"} saved for the active Story.`, tone: "success" });
+  }, []);
+
   const activateLayer = useCallback((layerId: string) => {
     const next = setActiveLayer(editor.present, layerId);
     if (!next) return;
@@ -12128,7 +12261,7 @@ export function ModelBuilderApp() {
         {activeRibbonTab === "Manage" ? (
           <>
             <div className="ribbon-group current-settings"><div><span>Units</span><strong>Architectural</strong></div><div><span>Active Story</span><strong>{activeStory.name}</strong></div><small>Project settings</small></div>
-            <div className="ribbon-group"><div className="ribbon-tools compact-tools"><button type="button" onClick={() => setStoryManagerOpen(true)} title="Define rough framing Stories and layered floor assemblies"><b>≋</b><span>Stories</span></button><button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable layered wall assemblies"><b>▥</b><span>Wall Types</span></button></div><small>Building</small></div>
+            <div className="ribbon-group"><div className="ribbon-tools compact-tools"><button type="button" onClick={() => setStoryManagerOpen(true)} title="Define rough framing Stories and layered floor assemblies"><b>≋</b><span>Stories</span></button><button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable layered wall assemblies"><b>▥</b><span>Wall Types</span></button><button type="button" onClick={() => setRoomManagerOpen(true)} title="Detect enclosed Rooms and manage Story overrides"><b>▦</b><span>Rooms</span></button></div><small>Building</small></div>
             <div className="ribbon-group"><div className="ribbon-tools compact-tools"><button type="button" onClick={() => setExplorerTab("layers")}><b>▤</b><span>Layers</span></button><button type="button" onClick={addNewLayer}><b>＋</b><span>New Layer</span></button></div><small>Layers</small></div>
             <div className="ribbon-group planned-group"><div className="planned-tools"><span>Materials</span><span>Styles</span></div><small>Standards · planned</small></div>
           </>
@@ -12696,6 +12829,7 @@ export function ModelBuilderApp() {
       </footer>
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
+      {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
     </main>
   );
 }

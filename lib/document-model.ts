@@ -49,6 +49,8 @@ import {
 import {
   clonePolylineGeometry,
   moveRectangleGrip,
+  polylineArea,
+  polylineCentroid,
   polylineGeometriesEqual,
   polylineGeometryIsValid,
   polylineSegmentCircularGeometry,
@@ -96,6 +98,7 @@ import {
 } from "./cad-lengthen.ts";
 import {
   discoverBoundaryAtPoint,
+  discoverBoundedFaces,
   type BoundaryDiscoveryResult,
   type BoundarySource,
 } from "./cad-boundary.ts";
@@ -105,13 +108,19 @@ import {
   buildingStructuresEqual,
   calculateStoryElevations,
   cloneBuildingStructure,
+  cloneLayeredAssembly,
   createDefaultBuildingStructure,
   MAXIMUM_WALL_JOIN_PRIORITY,
   MINIMUM_WALL_JOIN_PRIORITY,
+  MINIMUM_ROUGH_CEILING_HEIGHT,
+  MAXIMUM_ROUGH_CEILING_HEIGHT,
+  layeredAssemblyIsValid,
   WALL_EXTERIOR_SIDES,
   WALL_JOIN_MODES,
   WALL_REFERENCE_LINES,
   type BuildingStructure,
+  type BuildingStory,
+  type LayeredAssembly,
   type WallExteriorSide,
   type WallJoinMode,
   type WallReferenceLine,
@@ -189,6 +198,30 @@ export type ArcObject = ArcGeometry & {
   type: "arc";
 };
 
+export type RoomObject = {
+  boundary: PolylineGeometry;
+  boundaryWallIds: string[];
+  ceilingFinishOverride: LayeredAssembly | null;
+  ceilingStructureOverride: LayeredAssembly | null;
+  floorFinishOverride: LayeredAssembly | null;
+  floorStructureOverride: LayeredAssembly | null;
+  id: string;
+  name: string;
+  /** Local offset above or below the Story rough floor/subfloor. */
+  roughFloorOffset: number;
+  roughCeilingHeightOverride: number | null;
+  storyId: string;
+};
+
+export type EffectiveRoomSettings = {
+  ceilingFinish: LayeredAssembly;
+  ceilingStructure: LayeredAssembly;
+  floorFinish: LayeredAssembly;
+  floorStructure: LayeredAssembly;
+  roughCeilingHeight: number;
+  roughFloorElevation: number;
+};
+
 export type ModelGroup = {
   id: string;
   name: string;
@@ -212,6 +245,7 @@ export type ModelDocument = {
   lines: LineObject[];
   objects: BoxObject[];
   polylines: PolylineObject[];
+  rooms: RoomObject[];
 };
 
 export type ModelEntityKind = "arc" | "box" | "circle" | "line" | "polyline";
@@ -227,6 +261,7 @@ export const MAXIMUM_CIRCLE_COUNT = 1000;
 export const MAXIMUM_ARC_COUNT = 1000;
 export const MAXIMUM_LAYER_COUNT = 64;
 export const MAXIMUM_GROUP_COUNT = 64;
+export const MAXIMUM_ROOM_COUNT = 1000;
 export const DEFAULT_LAYER_ID = "layer-default";
 
 export const DEFAULT_LAYER: ModelLayer = {
@@ -269,6 +304,7 @@ export const DEFAULT_DOCUMENT: ModelDocument = {
     },
   ],
   polylines: [],
+  rooms: [],
 };
 
 /** A new user project keeps editable project defaults but starts with no model entities. */
@@ -282,6 +318,7 @@ export const NEW_PROJECT_DOCUMENT: ModelDocument = {
   lines: [],
   objects: [],
   polylines: [],
+  rooms: [],
 };
 
 export function cloneArcObject(arc: ArcObject): ArcObject {
@@ -409,6 +446,127 @@ export function cloneGroup(group: ModelGroup): ModelGroup {
   return { ...group };
 }
 
+export function cloneRoomObject(room: RoomObject): RoomObject {
+  return {
+    boundary: clonePolylineGeometry(room.boundary),
+    boundaryWallIds: [...room.boundaryWallIds],
+    ceilingFinishOverride: room.ceilingFinishOverride ? cloneLayeredAssembly(room.ceilingFinishOverride) : null,
+    ceilingStructureOverride: room.ceilingStructureOverride ? cloneLayeredAssembly(room.ceilingStructureOverride) : null,
+    floorFinishOverride: room.floorFinishOverride ? cloneLayeredAssembly(room.floorFinishOverride) : null,
+    floorStructureOverride: room.floorStructureOverride ? cloneLayeredAssembly(room.floorStructureOverride) : null,
+    id: room.id,
+    name: room.name,
+    roughCeilingHeightOverride: room.roughCeilingHeightOverride,
+    roughFloorOffset: room.roughFloorOffset,
+    storyId: room.storyId,
+  };
+}
+
+function roomAssemblyIsValid(assembly: LayeredAssembly | null, kind: LayeredAssembly["kind"]): boolean {
+  return assembly === null || layeredAssemblyIsValid(assembly, kind);
+}
+
+export function roomObjectIsValid(room: RoomObject, document: ModelDocument): boolean {
+  const wallIds = new Set(document.lines.filter((line) => line.architecturalRole === "wall" && line.storyId === room.storyId).map((line) => line.id));
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room.id) &&
+    room.name.trim().length > 0 && room.name.trim().length <= 120 &&
+    document.building.stories.some((story) => story.id === room.storyId) &&
+    polylineGeometryIsValid(room.boundary) && room.boundary.closed && polylineArea(room.boundary) > 0 &&
+    room.boundaryWallIds.length >= 3 && new Set(room.boundaryWallIds).size === room.boundaryWallIds.length && room.boundaryWallIds.every((id) => wallIds.has(id)) &&
+    Number.isFinite(room.roughFloorOffset) && Math.abs(room.roughFloorOffset) <= MAXIMUM_COORDINATE && Math.abs(room.roughFloorOffset * 16 - Math.round(room.roughFloorOffset * 16)) < 1e-8 &&
+    (room.roughCeilingHeightOverride === null ||
+      (Number.isFinite(room.roughCeilingHeightOverride) && room.roughCeilingHeightOverride >= MINIMUM_ROUGH_CEILING_HEIGHT && room.roughCeilingHeightOverride <= MAXIMUM_ROUGH_CEILING_HEIGHT && Math.abs(room.roughCeilingHeightOverride * 16 - Math.round(room.roughCeilingHeightOverride * 16)) < 1e-8)) &&
+    roomAssemblyIsValid(room.floorStructureOverride, "floor-structure") &&
+    roomAssemblyIsValid(room.floorFinishOverride, "floor-finish") &&
+    roomAssemblyIsValid(room.ceilingStructureOverride, "ceiling-structure") &&
+    roomAssemblyIsValid(room.ceilingFinishOverride, "ceiling-finish");
+}
+
+export function effectiveRoomSettings(
+  room: RoomObject,
+  story: BuildingStory,
+  roughFloorElevation: number,
+): EffectiveRoomSettings {
+  return {
+    ceilingFinish: cloneLayeredAssembly(room.ceilingFinishOverride ?? story.ceilingFinish),
+    ceilingStructure: cloneLayeredAssembly(room.ceilingStructureOverride ?? story.ceilingStructure),
+    floorFinish: cloneLayeredAssembly(room.floorFinishOverride ?? story.floorFinish),
+    floorStructure: cloneLayeredAssembly(room.floorStructureOverride ?? story.floorStructure),
+    roughCeilingHeight: room.roughCeilingHeightOverride ?? story.roughCeilingHeight,
+    roughFloorElevation: snapToSixteenth(roughFloorElevation + room.roughFloorOffset),
+  };
+}
+
+function roomBoundaryWallIds(boundary: PolylineGeometry, walls: LineObject[]): string[] {
+  const tolerance = 1e-5;
+  const ids = new Set<string>();
+  for (const segment of polylineSegments(boundary)) {
+    if (Math.abs(segment.bulge) >= 1e-10) continue;
+    const midpoint = { x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2 };
+    for (const wall of walls) {
+      const dx = wall.end.x - wall.start.x;
+      const dy = wall.end.y - wall.start.y;
+      const lengthSquared = dx * dx + dy * dy;
+      if (lengthSquared <= tolerance) continue;
+      const cross = (midpoint.x - wall.start.x) * dy - (midpoint.y - wall.start.y) * dx;
+      const projection = ((midpoint.x - wall.start.x) * dx + (midpoint.y - wall.start.y) * dy) / lengthSquared;
+      if (Math.abs(cross) <= tolerance * Math.sqrt(lengthSquared) && projection >= -tolerance && projection <= 1 + tolerance) ids.add(wall.id);
+    }
+  }
+  return [...ids].sort();
+}
+
+/** Rebuilds the enclosed Rooms on one Story while preserving settings for unchanged wall loops. */
+export function refreshRoomsForStory(document: ModelDocument, storyId: string): ModelDocument | null {
+  const elevation = calculateStoryElevations(document.building).find((item) => item.storyId === storyId)?.roughFloorElevation;
+  if (elevation === undefined) return null;
+  const walls = document.lines.filter((line) => line.architecturalRole === "wall" && line.storyId === storyId);
+  const sources: BoundarySource[] = walls.map((wall) => ({ kind: "line", geometry: { start: wall.start, end: wall.end } }));
+  const faces = discoverBoundedFaces(sources, elevation)
+    .map((face) => ({ ...face, boundaryWallIds: roomBoundaryWallIds(face.geometry, walls), centroid: polylineCentroid(face.geometry) }))
+    .filter((face) => face.boundaryWallIds.length >= 3)
+    .sort((first, second) => (first.centroid?.y ?? 0) - (second.centroid?.y ?? 0) || (first.centroid?.x ?? 0) - (second.centroid?.x ?? 0) || first.area - second.area);
+  const existingByWalls = new Map(document.rooms.filter((room) => room.storyId === storyId).map((room) => [room.boundaryWallIds.join("|"), room]));
+  const usedIds = new Set(document.rooms.map((room) => room.id));
+  let nextNumber = 1;
+  const nextId = () => {
+    while (usedIds.has(`room-${String(nextNumber).padStart(2, "0")}`)) nextNumber += 1;
+    const id = `room-${String(nextNumber).padStart(2, "0")}`;
+    usedIds.add(id);
+    nextNumber += 1;
+    return id;
+  };
+  const rooms = faces.map((face, index) => {
+    const existing = existingByWalls.get(face.boundaryWallIds.join("|"));
+    if (existing) return { ...cloneRoomObject(existing), boundary: clonePolylineGeometry(face.geometry), boundaryWallIds: face.boundaryWallIds };
+    return {
+      boundary: clonePolylineGeometry(face.geometry),
+      boundaryWallIds: face.boundaryWallIds,
+      ceilingFinishOverride: null,
+      ceilingStructureOverride: null,
+      floorFinishOverride: null,
+      floorStructureOverride: null,
+      id: nextId(),
+      name: `Room ${String(index + 1).padStart(2, "0")}`,
+      roughCeilingHeightOverride: null,
+      roughFloorOffset: 0,
+      storyId,
+    } satisfies RoomObject;
+  });
+  if (rooms.length > MAXIMUM_ROOM_COUNT) return null;
+  const next = cloneDocument(document);
+  next.rooms = [...next.rooms.filter((room) => room.storyId !== storyId), ...rooms];
+  return next.rooms.every((room) => roomObjectIsValid(room, next)) ? next : null;
+}
+
+export function updateRoomObject(document: ModelDocument, roomId: string, change: Partial<Omit<RoomObject, "id" | "storyId" | "boundary" | "boundaryWallIds">>): ModelDocument | null {
+  const next = cloneDocument(document);
+  const index = next.rooms.findIndex((room) => room.id === roomId);
+  if (index < 0) return null;
+  next.rooms[index] = { ...next.rooms[index], ...change, name: change.name?.trim() || next.rooms[index].name };
+  return roomObjectIsValid(next.rooms[index], next) ? next : null;
+}
+
 export function cloneDocument(document: ModelDocument): ModelDocument {
   return {
     activeLayerId: document.activeLayerId,
@@ -420,6 +578,7 @@ export function cloneDocument(document: ModelDocument): ModelDocument {
     lines: document.lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).map(cloneRoomObject),
   };
 }
 
@@ -473,6 +632,18 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
       return other !== undefined && polyline.id === other.id && polyline.layerId === other.layerId &&
         polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.shape === other.shape && polyline.storyId === other.storyId &&
         polylineGeometriesEqual(polyline, other);
+    }) &&
+    (a.rooms ?? []).length === (b.rooms ?? []).length &&
+    (a.rooms ?? []).every((room, index) => {
+      const other = (b.rooms ?? [])[index];
+      return other !== undefined && room.id === other.id && room.name === other.name && room.storyId === other.storyId &&
+        room.roughFloorOffset === other.roughFloorOffset && room.roughCeilingHeightOverride === other.roughCeilingHeightOverride &&
+        room.boundaryWallIds.length === other.boundaryWallIds.length && room.boundaryWallIds.every((wallId, wallIndex) => wallId === other.boundaryWallIds[wallIndex]) &&
+        polylineGeometriesEqual(room.boundary, other.boundary) &&
+        JSON.stringify(room.floorStructureOverride) === JSON.stringify(other.floorStructureOverride) &&
+        JSON.stringify(room.floorFinishOverride) === JSON.stringify(other.floorFinishOverride) &&
+        JSON.stringify(room.ceilingStructureOverride) === JSON.stringify(other.ceilingStructureOverride) &&
+        JSON.stringify(room.ceilingFinishOverride) === JSON.stringify(other.ceilingFinishOverride);
     }) &&
     a.objects.length === b.objects.length &&
     a.objects.every((object, index) => {
@@ -532,9 +703,14 @@ export function updateDocumentBuilding(
     const change = storyChange(arc.storyId);
     return { ...arc, center: { ...arc.center, z: snapToSixteenth(arc.center.z + change.delta) }, storyId: change.storyId };
   });
+  next.rooms = next.rooms.map((room) => {
+    const change = storyChange(room.storyId);
+    return { ...room, boundary: { ...clonePolylineGeometry(room.boundary), elevation: snapToSixteenth(room.boundary.elevation + change.delta) }, storyId: change.storyId };
+  });
   next.building = cloneBuildingStructure(building);
   const storiesById = new Map(building.stories.map((story) => [story.id, story]));
   if (next.lines.some((line) => !wallOpeningsAreValid(line, storiesById.get(line.storyId)?.roughCeilingHeight ?? 0))) return null;
+  if (next.rooms.some((room) => !roomObjectIsValid(room, next))) return null;
   return next;
 }
 
@@ -567,6 +743,7 @@ export function assignModelEntityToStory(
   if (ref.kind === "polyline") next.polylines = next.polylines.map((polyline) => polyline.id === ref.id ? { ...polyline, elevation: snapToSixteenth(polyline.elevation + delta), storyId } : polyline);
   if (ref.kind === "circle") next.circles = next.circles.map((circle) => circle.id === ref.id ? { ...circle, center: { ...circle.center, z: snapToSixteenth(circle.center.z + delta) }, storyId } : circle);
   if (ref.kind === "arc") next.arcs = next.arcs.map((arc) => arc.id === ref.id ? { ...arc, center: { ...arc.center, z: snapToSixteenth(arc.center.z + delta) }, storyId } : arc);
+  if (ref.kind === "line") next.rooms = next.rooms.filter((room) => !room.boundaryWallIds.includes(ref.id));
   return next;
 }
 
@@ -590,10 +767,12 @@ function withObjects(document: ModelDocument, objects: BoxObject[]): ModelDocume
     lines: document.lines.map(cloneLineObject),
     objects: objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).map(cloneRoomObject),
   };
 }
 
 function withLines(document: ModelDocument, lines: LineObject[]): ModelDocument {
+  const roomWallKeys = new Set(lines.filter((line) => line.architecturalRole === "wall").map((line) => `${line.storyId}:${line.id}`));
   return {
     activeLayerId: document.activeLayerId,
     arcs: document.arcs.map(cloneArcObject),
@@ -604,6 +783,7 @@ function withLines(document: ModelDocument, lines: LineObject[]): ModelDocument 
     lines: lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).filter((room) => room.boundaryWallIds.every((wallId) => roomWallKeys.has(`${room.storyId}:${wallId}`))).map(cloneRoomObject),
   };
 }
 
@@ -618,6 +798,7 @@ function withPolylines(document: ModelDocument, polylines: PolylineObject[]): Mo
     lines: document.lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).map(cloneRoomObject),
   };
 }
 
@@ -632,6 +813,7 @@ function withCircles(document: ModelDocument, circles: CircleObject[]): ModelDoc
     lines: document.lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).map(cloneRoomObject),
   };
 }
 
@@ -646,6 +828,7 @@ function withArcs(document: ModelDocument, arcs: ArcObject[]): ModelDocument {
     lines: document.lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).map(cloneRoomObject),
   };
 }
 
@@ -3099,6 +3282,7 @@ export function deleteModelEntities(document: ModelDocument, refs: ModelEntityRe
   const next = cloneDocument(document);
   next.objects = next.objects.filter((object) => !keys.has(`box:${object.id}`));
   next.lines = next.lines.filter((line) => !keys.has(`line:${line.id}`));
+  next.rooms = next.rooms.filter((room) => room.boundaryWallIds.every((wallId) => next.lines.some((line) => line.id === wallId && line.storyId === room.storyId && line.architecturalRole === "wall")));
   next.polylines = next.polylines.filter((polyline) => !keys.has(`polyline:${polyline.id}`));
   next.circles = next.circles.filter((circle) => !keys.has(`circle:${circle.id}`));
   next.arcs = next.arcs.filter((arc) => !keys.has(`arc:${arc.id}`));
@@ -3147,6 +3331,7 @@ export function groupBoxObjects(
         groupId: ids.has(object.id) ? group.id : object.groupId,
       })),
       polylines: document.polylines.map(clonePolylineObject),
+      rooms: (document.rooms ?? []).map(cloneRoomObject),
     },
     group: cloneGroup(group),
   };
@@ -3174,6 +3359,7 @@ export function ungroupBoxObjects(
       groupId: object.groupId === groupId ? null : object.groupId,
     })),
     polylines: document.polylines.map(clonePolylineObject),
+    rooms: (document.rooms ?? []).map(cloneRoomObject),
   };
 }
 
@@ -3251,6 +3437,7 @@ export function addLayer(document: ModelDocument): {
       lines: document.lines.map(cloneLineObject),
       objects: document.objects.map(cloneBoxObject),
       polylines: document.polylines.map(clonePolylineObject),
+      rooms: (document.rooms ?? []).map(cloneRoomObject),
     },
     layer: cloneLayer(layer),
   };

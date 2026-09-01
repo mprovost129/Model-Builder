@@ -22,7 +22,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 23
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 24
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs
@@ -86,6 +86,10 @@ polylines, rectangles, Circles, and Arcs.
 - Hosted Door and Window records with separate unit and rough-opening dimensions,
   rough-opening cuts through every Wall layer, and a Window bottom-of-header
   elevation measured above the Story subfloor for future framing
+- Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
+  calculated areas, and a dedicated Room Manager
+- Story-default inheritance for Room floor/ceiling assemblies and rough ceiling
+  height, plus explicit Room-level assembly, ceiling-height, and rough-floor offsets
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an
@@ -169,7 +173,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-22 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-23 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -235,18 +239,19 @@ Application state is kept separate from formatted dimension text. The 3D view
 is derived from numeric dimensions measured in inches, with interface values
 normalized to architectural notation.
 
-## Next Milestone
+## Current Milestone
 
 The 2D Core v1 engineering gate is complete: the compact modification set,
 reusable Boundary discovery, regression suite, production build, lint, and
 rendered-workspace checks pass. A short manual architectural floor-plan smoke
 test is the remaining acceptance check.
 
-The first part of **Levels, Stories, Datum, and Vertical Constraints** is now in
-progress. Rough-framing Stories, layered assemblies, calculated elevations, the
-Building Datum, project persistence, and the first Story Manager are implemented.
-Next, existing drawing geometry will be associated with its Story and closed
-boundaries will become floor-platform inputs.
+**Levels, Stories, Datum, and Vertical Constraints** now includes rough-framing
+Stories, layered assemblies, calculated elevations, the Building Datum, Story-owned
+drawing geometry, floor-platform inputs, Wall types and junctions, hosted openings,
+and enclosed Rooms with inherited defaults and explicit overrides. This is the
+recommended checkpoint for focused user-interface work before Room-derived wall
+vertical constraints and generated floor/ceiling platforms are added.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -256,7 +261,7 @@ residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
 Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
-the project name, unit settings, Story and assembly definitions, and format metadata. Version-1 through version-14 files open and upgrade
+the project name, unit settings, Story, Room, and assembly definitions, and format metadata. Version-1 through version-23 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

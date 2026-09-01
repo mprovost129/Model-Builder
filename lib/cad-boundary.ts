@@ -480,14 +480,24 @@ export function discoverBoundaryAtPoint(
   elevation = pick.z,
 ): BoundaryDiscoveryResult | null {
   if (![pick.x, pick.y, pick.z, elevation].every(Number.isFinite) || Math.abs(pick.z - elevation) > BOUNDARY_ELEVATION_TOLERANCE) return null;
-  const primitives = sources.flatMap((source) => sourcePrimitives(source, elevation));
-  if (!primitives.length || primitives.length > MAXIMUM_BOUNDARY_PRIMITIVES) return null;
-  const graph = buildGraph(splitPrimitives(primitives));
-  const candidates = traceFaces(graph)
-    .map((geometry) => ({ area: signedPolylineArea(geometry), geometry: { ...geometry, elevation } }))
-    .filter((candidate) => candidate.area > BOUNDARY_NODE_TOLERANCE && polylineContainsPoint(candidate.geometry, pick))
+  const candidates = discoverBoundedFaces(sources, elevation)
+    .filter((candidate) => polylineContainsPoint(candidate.geometry, pick))
     .sort((first, second) => first.area - second.area);
-  const result = candidates[0];
-  if (!result || !polylineGeometryIsValid(result.geometry)) return null;
-  return { area: stableNumber(result.area), geometry: result.geometry };
+  return candidates[0] ?? null;
+}
+
+/** Returns every finite counterclockwise face formed by the supplied planar sources. */
+export function discoverBoundedFaces(
+  sources: BoundarySource[],
+  elevation: number,
+): BoundaryDiscoveryResult[] {
+  if (!Number.isFinite(elevation)) return [];
+  const primitives = sources.flatMap((source) => sourcePrimitives(source, elevation));
+  if (!primitives.length || primitives.length > MAXIMUM_BOUNDARY_PRIMITIVES) return [];
+  const graph = buildGraph(splitPrimitives(primitives));
+  return traceFaces(graph)
+    .map((geometry) => ({ area: signedPolylineArea(geometry), geometry: { ...geometry, elevation } }))
+    .filter((candidate) => candidate.area > BOUNDARY_NODE_TOLERANCE && polylineGeometryIsValid(candidate.geometry))
+    .map((candidate) => ({ area: stableNumber(candidate.area), geometry: candidate.geometry }))
+    .sort((first, second) => first.area - second.area);
 }

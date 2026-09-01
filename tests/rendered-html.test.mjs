@@ -180,6 +180,9 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /Rough framing establishes vertical datums/);
   assert.match(component, /updateDocumentBuilding/);
   assert.match(component, /calculateStoryElevations/);
+  assert.match(component, /RoomManagerDialog/);
+  assert.match(component, /Detect \/ Update Rooms/);
+  assert.match(component, /refreshRoomsForStory/);
   assert.match(component, /stretchModelEntities/);
   assert.match(component, /selectScreenStretchTargets/);
   assert.match(component, /StretchControl/);
