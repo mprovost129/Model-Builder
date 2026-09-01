@@ -11,6 +11,10 @@ polylines, rectangles, Circles, and Arcs.
 - Three-dimensional perspective workspace with a ground grid and XYZ axes
 - AutoCAD/Revit-inspired workspace shell with quick access, tabbed ribbon,
   project tabs, left Properties, right Model Explorer, command line, and status bar
+- Blank-plan setup guide that exposes active Story, floor depth, ceiling height,
+  and Wall Type defaults before drawing begins
+- Building view in Model Explorer for direct access to Stories, Wall Types, and
+  detected Rooms, plus an always-available Project Setup summary in Properties
 - Compact spreadsheet-style Properties grid with collapsible categories and inline values
 - Column-aligned Layer Manager with inline naming, object counts, state controls, and search
 - Parametric Length, Width, and Height fields
@@ -249,9 +253,12 @@ test is the remaining acceptance check.
 **Levels, Stories, Datum, and Vertical Constraints** now includes rough-framing
 Stories, layered assemblies, calculated elevations, the Building Datum, Story-owned
 drawing geometry, floor-platform inputs, Wall types and junctions, hosted openings,
-and enclosed Rooms with inherited defaults and explicit overrides. This is the
-recommended checkpoint for focused user-interface work before Room-derived wall
-vertical constraints and generated floor/ceiling platforms are added.
+and enclosed Rooms with inherited defaults and explicit overrides. The first
+focused interface pass is complete: blank plans now open with an in-canvas setup
+guide, the Home ribbon exposes the building workflow, Properties summarizes the
+active project defaults, and Model Explorer has a Building view for Stories,
+Wall Types, and Rooms. The next engineering milestone is Room-derived wall
+vertical constraints and generated floor/ceiling platforms.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.

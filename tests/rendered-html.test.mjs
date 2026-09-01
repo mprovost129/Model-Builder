@@ -45,6 +45,11 @@ test("server-renders the Model Builder workspace", async () => {
   assert.match(html, />Manage</);
   assert.match(html, /MODEL EXPLORER/);
   assert.match(html, /aria-label="Model explorer views"/);
+  assert.match(html, />Building</);
+  assert.match(html, /aria-label="New plan workflow"/);
+  assert.match(html, /Set the building defaults, then draw the plan/);
+  assert.match(html, /Stories, floors, and ceilings/);
+  assert.match(html, /Exterior, Main, and Interior layers/);
   assert.match(html, /aria-label="Open projects"/);
   assert.match(html, /aria-label="Model and layouts"/);
   assert.match(html, /aria-label="Command input"/);
@@ -183,6 +188,9 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /RoomManagerDialog/);
   assert.match(component, /Detect \/ Update Rooms/);
   assert.match(component, /refreshRoomsForStory/);
+  assert.match(component, /building-browser/);
+  assert.match(component, /Project Setup/);
+  assert.match(component, /Confirm project settings/);
   assert.match(component, /stretchModelEntities/);
   assert.match(component, /selectScreenStretchTargets/);
   assert.match(component, /StretchControl/);

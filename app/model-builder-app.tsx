@@ -8525,7 +8525,8 @@ export function ModelBuilderApp() {
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
-  const [explorerTab, setExplorerTab] = useState<"objects" | "layers">("objects");
+  const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
+  const [showStartGuide, setShowStartGuide] = useState(true);
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
   const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.top);
@@ -8657,6 +8658,9 @@ export function ModelBuilderApp() {
   const selectedArc = findArcObject(editor.present, selectedArcId);
   const selectedArcIsEditable = Boolean(selectedArc && arcIsEditable(editor.present, selectedArc));
   const activeStory = editor.present.building.stories.find((story) => story.id === editor.present.building.activeStoryId) ?? editor.present.building.stories[0];
+  const activeWallType = editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId) ?? editor.present.building.wallTypes[0];
+  const modelEntityCount = editor.present.objects.length + editor.present.lines.length + editor.present.polylines.length + editor.present.circles.length + editor.present.arcs.length;
+  const activeStoryRoomCount = editor.present.rooms.filter((room) => room.storyId === activeStory.id).length;
   const setDrawingPlaneFromBuilding = useCallback((building: BuildingStructure) => {
     const activeId = building.activeStoryId;
     const elevation = calculateStoryElevations(building).find((calculation) => calculation.storyId === activeId)?.roughFloorElevation ?? 0;
@@ -8859,6 +8863,7 @@ export function ModelBuilderApp() {
     setWallMode(false);
     setPolylineMode(false);
     setRectangleMode(false);
+    setShowStartGuide(true);
     setDragStatus(null);
   }, [editor.present, selectCadEntity]);
 
@@ -12040,6 +12045,8 @@ export function ModelBuilderApp() {
       ? "Line mode adds straight segments. Arc mode uses a through-point and endpoint to store a true curved segment. A/L switches modes; WIDTH plus a dimension sets constant width. U undoes, C closes, and Enter finishes open."
       : `Specify two corners by click or exact coordinates. After the first corner, use @X,Y or enter dimensions such as 12' x 8'; the cursor chooses the quadrant.`;
 
+  const activeStoryCalculation = calculateStoryElevations(editor.present.building).find((calculation) => calculation.storyId === activeStory.id);
+
   return (
     <main className="app-shell">
       <input
@@ -12105,6 +12112,14 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={saveProject} title="Save project (Ctrl+S)"><b>▣</b><span>Save</span></button>
               </div>
               <small>Project</small>
+            </div>
+            <div className="ribbon-group home-architecture-group">
+              <div className="ribbon-tools compact-tools home-tool-grid">
+                <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor depth, finishes, and ceiling height"><b>≋</b><span>Plan Setup</span></button>
+                <button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title={`Draw Walls using ${activeWallType.name}`}><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Walls"}</span></button>
+                <button type="button" onClick={() => setRoomManagerOpen(true)} title="Detect enclosed Rooms and manage overrides"><b>▦</b><span>Rooms</span></button>
+              </div>
+              <small>Building workflow</small>
             </div>
             <div className="ribbon-group home-create-group">
               <div className="ribbon-tools compact-tools home-tool-grid">
@@ -12544,17 +12559,29 @@ export function ModelBuilderApp() {
               </PropertyGridSection>
             </>
           ) : (
-            <PropertyGridSection className="drawing-properties" title="Drawing" meta="No selection">
-              <PropertyGridRow label="Current layer"><span className="property-readout">{activeLayer?.name ?? "Default"}</span></PropertyGridRow>
-              <PropertyGridRow label="Units"><span className="property-readout">Architectural</span></PropertyGridRow>
-              <PropertyGridRow label="Precision"><span className="property-readout">1/16&quot;</span></PropertyGridRow>
-              <PropertyGridRow label="Visible grid"><select className="property-cell-select" value={cadDraftingSettings.gridSpacing} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, gridSpacing: Number(event.target.value) }))} aria-label="Visible grid spacing">{GRID_SPACING_OPTIONS.map((spacing) => <option key={spacing} value={spacing}>{formatDraftingSpacing(spacing)}</option>)}</select></PropertyGridRow>
-              <PropertyGridRow label="Cursor snap"><select className="property-cell-select" value={cadDraftingSettings.snapIncrement} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, snapIncrement: Number(event.target.value) }))} aria-label="Cursor snap increment">{SNAP_INCREMENT_OPTIONS.map((increment) => <option key={increment} value={increment}>{formatDraftingSpacing(increment)}</option>)}</select></PropertyGridRow>
-              <p className="property-grid-note">Drawing-level settings appear here when no object is selected.</p>
-            </PropertyGridSection>
+            <>
+              <PropertyGridSection className="project-setup-properties" title="Project Setup" meta={modelEntityCount ? "Building defaults" : "Start here"}>
+                <PropertyGridRow label="Active Story"><span className="property-readout">{activeStory.name}</span></PropertyGridRow>
+                <PropertyGridRow label="Rough floor"><span className="property-readout">{formatSignedArchitectural(activeStoryCalculation?.roughFloorElevation ?? 0)}</span></PropertyGridRow>
+                <PropertyGridRow label="Ceiling height"><span className="property-readout">{formatArchitectural(activeStory.roughCeilingHeight)}</span></PropertyGridRow>
+                <PropertyGridRow label="Floor depth"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(activeStory.floorStructure))}</span></PropertyGridRow>
+                <PropertyGridRow label="Active Wall"><span className="property-readout">{activeWallType.name} · {formatArchitectural(assemblyTotalThickness(activeWallType))}</span></PropertyGridRow>
+                <PropertyGridRow label="Rooms"><span className="property-readout">{activeStoryRoomCount} detected</span></PropertyGridRow>
+                <div className="property-action-row project-setup-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story &amp; Floor Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
+                <p className="property-grid-note">Story settings establish the defaults. Room settings override them only where needed.</p>
+              </PropertyGridSection>
+              <PropertyGridSection className="drawing-properties" title="Drawing" meta="No selection">
+                <PropertyGridRow label="Current layer"><span className="property-readout">{activeLayer?.name ?? "Default"}</span></PropertyGridRow>
+                <PropertyGridRow label="Units"><span className="property-readout">Architectural</span></PropertyGridRow>
+                <PropertyGridRow label="Precision"><span className="property-readout">1/16&quot;</span></PropertyGridRow>
+                <PropertyGridRow label="Visible grid"><select className="property-cell-select" value={cadDraftingSettings.gridSpacing} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, gridSpacing: Number(event.target.value) }))} aria-label="Visible grid spacing">{GRID_SPACING_OPTIONS.map((spacing) => <option key={spacing} value={spacing}>{formatDraftingSpacing(spacing)}</option>)}</select></PropertyGridRow>
+                <PropertyGridRow label="Cursor snap"><select className="property-cell-select" value={cadDraftingSettings.snapIncrement} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, snapIncrement: Number(event.target.value) }))} aria-label="Cursor snap increment">{SNAP_INCREMENT_OPTIONS.map((increment) => <option key={increment} value={increment}>{formatDraftingSpacing(increment)}</option>)}</select></PropertyGridRow>
+              </PropertyGridSection>
+            </>
           )}
         </aside>
 
+        <div className="viewport-workspace">
         <Viewport
           activeElevation={cadDraftingSettings.activeElevation}
           gridSpacing={cadDraftingSettings.gridSpacing}
@@ -12685,12 +12712,27 @@ export function ModelBuilderApp() {
             setFileNotice({ text: `Placed ${copiedIds.length} copied object${copiedIds.length === 1 ? "" : "s"}.`, tone: "success" });
           }}
         />
+        {modelEntityCount === 0 && showStartGuide && !arcMode && !boundaryMode && !circleMode && !lineMode && !polylineMode && !rectangleMode ? (
+          <section className="empty-plan-guide" aria-label="New plan workflow">
+            <button className="empty-plan-close" type="button" onClick={() => setShowStartGuide(false)} aria-label="Dismiss new plan guide">×</button>
+            <header><span>NEW PLAN · TOP VIEW</span><strong>Set the building defaults, then draw the plan.</strong><p>The model space is intentionally blank. Story settings control floor depth and ceiling height; Rooms can override those defaults later.</p></header>
+            <div className="empty-plan-status">
+              <div><span>1 · STORY</span><strong>{activeStory.name}</strong><small>{formatArchitectural(activeStory.roughCeilingHeight)} rough ceiling</small></div>
+              <div><span>2 · FLOOR</span><strong>{formatArchitectural(assemblyTotalThickness(activeStory.floorStructure))}</strong><small>structural depth</small></div>
+              <div><span>3 · WALL</span><strong>{activeWallType.name}</strong><small>{formatArchitectural(assemblyTotalThickness(activeWallType))} total thickness</small></div>
+            </div>
+            <div className="empty-plan-actions"><button type="button" className="is-primary" onClick={() => setStoryManagerOpen(true)}><b>≋</b><span><strong>Plan Settings</strong><small>Stories, floors, and ceilings</small></span></button><button type="button" onClick={() => setWallTypeManagerOpen(true)}><b>▥</b><span><strong>Wall Types</strong><small>Exterior, Main, and Interior layers</small></span></button><button type="button" onClick={activateWallMode}><b>⌁</b><span><strong>Start Drawing Walls</strong><small>Uses the active Story and Wall Type</small></span></button></div>
+            <footer><span><b>1</b> Confirm project settings</span><i>→</i><span><b>2</b> Draw connected Walls</span><i>→</i><span><b>3</b> Detect Rooms</span></footer>
+          </section>
+        ) : null}
+        </div>
 
         <aside className="model-explorer">
           <div className="panel-heading"><span>MODEL EXPLORER</span><button type="button" aria-label="More model explorer options">···</button></div>
           <div className="explorer-tabs" role="tablist" aria-label="Model explorer views">
             <button type="button" className={explorerTab === "objects" ? "is-active" : ""} role="tab" aria-selected={explorerTab === "objects"} onClick={() => setExplorerTab("objects")}>Objects</button>
             <button type="button" className={explorerTab === "layers" ? "is-active" : ""} role="tab" aria-selected={explorerTab === "layers"} onClick={() => setExplorerTab("layers")}>Layers</button>
+            <button type="button" className={explorerTab === "building" ? "is-active" : ""} role="tab" aria-selected={explorerTab === "building"} onClick={() => setExplorerTab("building")}>Building</button>
           </div>
           {explorerTab === "objects" ? (
             <section className="object-browser" aria-label="Project objects">
@@ -12764,7 +12806,7 @@ export function ModelBuilderApp() {
               {selectedCircle ? <div className="object-browser-actions" aria-label="Selected Circle actions"><button type="button" className={selectedCircle.locked ? "lock-object is-locked" : "lock-object"} onClick={toggleSelectedCircleLock}>{selectedCircle.locked ? "Unlock" : "Lock"}</button><button type="button" className="delete-object" onClick={deleteSelectedCircle} disabled={!selectedCircleIsEditable}>Delete</button></div> : null}
               {selectedArc ? <div className="object-browser-actions" aria-label="Selected Arc actions"><button type="button" className={selectedArc.locked ? "lock-object is-locked" : "lock-object"} onClick={toggleSelectedArcLock}>{selectedArc.locked ? "Unlock" : "Lock"}</button><button type="button" className="delete-object" onClick={deleteSelectedArc} disabled={!selectedArcIsEditable}>Delete</button></div> : null}
             </section>
-          ) : (
+          ) : explorerTab === "layers" ? (
             <section className="layer-manager" aria-label="Project layers">
               <div className="layer-manager-toolbar"><div><span>Current layer</span><strong>{activeLayer?.name ?? "Default"}</strong></div><button type="button" onClick={addNewLayer}>+ Layer</button></div>
               <label className="layer-search"><span aria-hidden="true">⌕</span><input value={layerFilter} onChange={(event) => setLayerFilter(event.target.value)} placeholder="Search layers" aria-label="Search layers" spellCheck={false} /></label>
@@ -12799,6 +12841,28 @@ export function ModelBuilderApp() {
                 </div>
               </div>
               <p className="layer-manager-note">Click C to make a layer current. The current layer remains visible and unlocked.</p>
+            </section>
+          ) : (
+            <section className="building-browser" aria-label="Building structure">
+              <header className="building-browser-header"><div><span>Active Story</span><strong>{activeStory.name}</strong></div><button type="button" onClick={() => setStoryManagerOpen(true)}>Edit Setup</button></header>
+              <section className="building-browser-section">
+                <header><strong>Stories</strong><span>{editor.present.building.stories.length}</span></header>
+                {calculateStoryElevations(editor.present.building).map((calculation) => {
+                  const story = editor.present.building.stories.find((candidate) => candidate.id === calculation.storyId);
+                  if (!story) return null;
+                  return <button type="button" className={story.id === activeStory.id ? "building-browser-row is-active" : "building-browser-row"} key={story.id} onClick={() => setStoryManagerOpen(true)}><span className="building-browser-icon">≋</span><span><strong>{story.name}</strong><small>Floor {formatSignedArchitectural(calculation.roughFloorElevation)} · Ceiling {formatSignedArchitectural(calculation.roughCeilingElevation)}</small></span>{story.id === activeStory.id ? <b>ACTIVE</b> : null}</button>;
+                })}
+              </section>
+              <section className="building-browser-section">
+                <header><strong>Wall Types</strong><span>{editor.present.building.wallTypes.length}</span></header>
+                {editor.present.building.wallTypes.map((wallType) => <button type="button" className={wallType.id === activeWallType.id ? "building-browser-row is-active" : "building-browser-row"} key={wallType.id} onClick={() => setWallTypeManagerOpen(true)}><span className="building-browser-icon">▥</span><span><strong>{wallType.name}</strong><small>{formatArchitectural(assemblyTotalThickness(wallType))} · {wallType.layers.length} layers</small></span>{wallType.id === activeWallType.id ? <b>ACTIVE</b> : null}</button>)}
+              </section>
+              <section className="building-browser-section">
+                <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>
+                {editor.present.rooms.filter((room) => room.storyId === activeStory.id).map((room) => <button type="button" className="building-browser-row" key={room.id} onClick={() => setRoomManagerOpen(true)}><span className="building-browser-icon">▦</span><span><strong>{room.name}</strong><small>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {room.boundaryWallIds.length} Walls</small></span></button>)}
+                {!activeStoryRoomCount ? <div className="building-browser-empty"><span>No Rooms detected yet.</span><button type="button" onClick={() => setRoomManagerOpen(true)}>Open Room Manager</button></div> : null}
+              </section>
+              <div className="building-browser-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
             </section>
           )}
         </aside>
