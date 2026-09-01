@@ -81,6 +81,8 @@ polylines, rectangles, Circles, and Arcs.
   groups, per-group thickness totals, and a required structural Main core
 - Directed Walls with left/right exterior orientation and selectable Wall center,
   exterior-Main, center-Main, or interior-Main reference lines
+- Automatic layer-by-layer miter cleanup for compatible two-Wall corners on the
+  same Story, with conservative square ends for unresolved junctions
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an

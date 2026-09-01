@@ -266,7 +266,6 @@ import {
   calculateStoryElevations,
   cloneBuildingStructure,
   removeBuildingStory,
-  wallLayerCenterOffsets,
   wallLayerGroupThickness,
   WALL_LAYER_GROUPS,
   type AssemblyKind,
@@ -278,6 +277,12 @@ import {
   type WallLayerGroup,
   type WallReferenceLine,
 } from "@/lib/building-stories";
+import {
+  automaticWallJoinCount,
+  buildAutomaticWallJoinPlan,
+  wallLayerFootprint,
+  type AutomaticWallJoinPlan,
+} from "@/lib/wall-joins";
 import {
   createProjectDocument,
   parseProjectDocument,
@@ -1304,27 +1309,32 @@ function clearWallView(view: WallView) {
   view.materials = [];
 }
 
-function updateWallView(view: WallView, line: LineObject, story: BuildingStructure["stories"][number], wallType: LayeredAssembly) {
+function updateWallView(
+  view: WallView,
+  line: LineObject,
+  story: BuildingStructure["stories"][number],
+  wallType: LayeredAssembly,
+  joinPlan: AutomaticWallJoinPlan,
+  linesById: ReadonlyMap<string, LineObject>,
+) {
   clearWallView(view);
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const length = Math.hypot(dx, dy);
   if (length < 1 / 16) return;
-  const normalX = -dy / length;
-  const normalY = dx / length;
-  const layerOffsets = wallLayerCenterOffsets(wallType, line.wallReferenceLine ?? "wall-center", line.wallExteriorSide ?? "left");
   wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
-    const centerOffset = layerOffsets[index];
-    const geometry = new THREE.BoxGeometry(length, layer.thickness, story.roughCeilingHeight);
+    const footprint = wallLayerFootprint(line, wallType, index, joinPlan, linesById);
+    const shape = new THREE.Shape();
+    shape.moveTo(footprint.startExterior.x, footprint.startExterior.y);
+    shape.lineTo(footprint.startInterior.x, footprint.startInterior.y);
+    shape.lineTo(footprint.endInterior.x, footprint.endInterior.y);
+    shape.lineTo(footprint.endExterior.x, footprint.endExterior.y);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: story.roughCeilingHeight, steps: 1 });
     const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(
-      (line.start.x + line.end.x) / 2 + normalX * centerOffset,
-      (line.start.y + line.end.y) / 2 + normalY * centerOffset,
-      line.start.z + story.roughCeilingHeight / 2,
-    );
-    mesh.rotation.z = Math.atan2(dy, dx);
+    mesh.position.z = line.start.z;
     mesh.userData.lineId = line.id;
     mesh.userData.wallLayer = layer.name;
     view.group.add(mesh);
@@ -6214,7 +6224,10 @@ function Viewport({
         wallViewsRef.current.delete(lineId);
       }
     });
-    document.lines.filter((line) => line.architecturalRole === "wall").forEach((line) => {
+    const wallLines = document.lines.filter((line) => line.architecturalRole === "wall");
+    const wallJoinPlan = buildAutomaticWallJoinPlan(wallLines);
+    const wallLinesById = new Map(wallLines.map((line) => [line.id, line]));
+    wallLines.forEach((line) => {
       let view = wallViewsRef.current.get(line.id);
       if (!view) {
         view = createWallView(scene);
@@ -6222,7 +6235,7 @@ function Viewport({
       }
       const story = document.building.stories.find((candidate) => candidate.id === line.storyId);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (story && wallType) updateWallView(view, line, story, wallType);
+      if (story && wallType) updateWallView(view, line, story, wallType, wallJoinPlan, wallLinesById);
       view.group.visible = Boolean(story && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
@@ -8390,6 +8403,12 @@ export function ModelBuilderApp() {
 
   const selectedBox = findBoxObject(editor.present, selectedObjectId);
   const selectedLine = findLineObject(editor.present, selectedLineId);
+  const selectedWallJoinPlan = selectedLine?.architecturalRole === "wall"
+    ? buildAutomaticWallJoinPlan(editor.present.lines)
+    : new Map();
+  const selectedWallJoinCount = selectedLine
+    ? automaticWallJoinCount(selectedLine.id, selectedWallJoinPlan)
+    : 0;
   const selectedLineIsEditable = Boolean(selectedLine && lineIsEditable(editor.present, selectedLine));
   const selectedPolyline = findPolylineObject(editor.present, selectedPolylineId);
   const selectedPolylineIsEditable = Boolean(selectedPolyline && polylineIsEditable(editor.present, selectedPolyline));
@@ -12079,6 +12098,7 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Thickness"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(editor.present.building.wallTypes.find((wallType) => wallType.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]))}</span></PropertyGridRow>
                 <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "wall-center"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
+                <PropertyGridRow label="Joins"><span className="property-readout">{selectedWallJoinCount ? `${selectedWallJoinCount} automatic corner${selectedWallJoinCount === 1 ? "" : "s"}` : "Open or unresolved ends"}</span></PropertyGridRow>
               </> : null}
               <PropertyGridRow label="Locked"><button className={selectedLine.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedLineLock}>{selectedLine.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>
               <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>{selectedLine.architecturalRole === "wall" ? "Convert to Line" : "Create Wall"}</button></div>
