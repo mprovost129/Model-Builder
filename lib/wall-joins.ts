@@ -449,11 +449,12 @@ export function wallLayerFootprint(
   wallTypesById: ReadonlyMap<string, LayeredAssembly>,
 ): WallLayerFootprint {
   const joins = joinPlan.endpointJoins.get(line.id);
+  const participatesInJoin = wallType.layers[layerIndex]?.participatesInJoin !== false;
   return {
-    startExterior: joinedBoundaryPoint(line, "start", wallType, layerIndex, "exterior", joins?.start, linesById, wallTypesById),
-    startInterior: joinedBoundaryPoint(line, "start", wallType, layerIndex, "interior", joins?.start, linesById, wallTypesById),
-    endExterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "exterior", joins?.end, linesById, wallTypesById),
-    endInterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "interior", joins?.end, linesById, wallTypesById),
+    startExterior: joinedBoundaryPoint(line, "start", wallType, layerIndex, "exterior", participatesInJoin ? joins?.start : undefined, linesById, wallTypesById),
+    startInterior: joinedBoundaryPoint(line, "start", wallType, layerIndex, "interior", participatesInJoin ? joins?.start : undefined, linesById, wallTypesById),
+    endExterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "exterior", participatesInJoin ? joins?.end : undefined, linesById, wallTypesById),
+    endInterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "interior", participatesInJoin ? joins?.end : undefined, linesById, wallTypesById),
   };
 }
 

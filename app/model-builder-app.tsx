@@ -1232,6 +1232,7 @@ const FLOOR_LAYER_COLORS: Record<AssemblyLayerRole, number> = {
   "air-gap": 0x8fa4b2,
   finish: 0xc99762,
   framing: 0xb58a5c,
+  insulation: 0xd6b76f,
   membrane: 0x506b7c,
   sheathing: 0xc3a176,
   substrate: 0x9b9385,
@@ -7900,6 +7901,7 @@ const ASSEMBLY_ROLE_LABELS: Record<AssemblyLayerRole, string> = {
   "air-gap": "Air gap",
   finish: "Finish",
   framing: "Framing",
+  insulation: "Insulation",
   membrane: "Membrane",
   sheathing: "Sheathing / subfloor",
   substrate: "Substrate",
@@ -7991,7 +7993,10 @@ function StoryAssemblyEditor({
       role: assembly.kind === "floor-structure" || assembly.kind === "ceiling-structure" || isWallAssembly ? "framing" : "finish",
       thickness: 0.5,
     };
-    if (isWallAssembly) layer.wallGroup = wallGroup ?? "main";
+    if (isWallAssembly) {
+      layer.participatesInJoin = true;
+      layer.wallGroup = wallGroup ?? "main";
+    }
     next.layers.push(layer);
     if (isWallAssembly) {
       next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
@@ -8039,6 +8044,7 @@ function StoryAssemblyEditor({
           {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
         </select>
         <StoryDimensionInput allowZero={isWallAssembly} key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
+        {isWallAssembly ? <label className="story-layer-join" title="When enabled, this layer is trimmed or mitered by automatic wall junctions."><input type="checkbox" checked={layer.participatesInJoin ?? true} onChange={(event) => updateLayer(index, { participatesInJoin: event.target.checked })} aria-label={`${layer.name} participates in automatic wall joins`} /><span>{layer.participatesInJoin === false ? "Square" : "Auto"}</span></label> : null}
         <div className="story-layer-actions"><button type="button" onClick={() => moveLayer(index, -1)} disabled={!previousLayer || (isWallAssembly && previousLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} up`}>↑</button><button type="button" onClick={() => moveLayer(index, 1)} disabled={!nextLayer || (isWallAssembly && nextLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} down`}>↓</button><button type="button" onClick={() => removeLayer(index)} disabled={isOnlyMainLayer} aria-label={`Remove ${layer.name}`}>×</button></div>
       </div>
     );
@@ -8049,7 +8055,7 @@ function StoryAssemblyEditor({
         <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story datums"}</span></div>
         <b>{formatArchitectural(assemblyTotalThickness(assembly))}</b>
       </header>
-      <div className={isWallAssembly ? "story-layer-grid story-layer-head has-wall-group" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isWallAssembly ? <span>Group</span> : null}<span>Role</span><span>Thickness</span><span>Order</span></div>
+      <div className={isWallAssembly ? "story-layer-grid story-layer-head has-wall-group" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isWallAssembly ? <span>Group</span> : null}<span>Role</span><span>Thickness</span>{isWallAssembly ? <span>Join</span> : null}<span>Order</span></div>
       {isWallAssembly ? WALL_LAYER_GROUPS.map((group) => (
         <div className="story-wall-layer-group" key={group}>
           <div className={`story-wall-group-heading is-${group}`}><strong>{WALL_LAYER_GROUP_LABELS[group]}</strong><span>{group === "main" ? "Structural core and future reference layer" : group === "exterior" ? "Outside of the Main layer" : "Room side of the Main layer"}</span><b>{formatArchitectural(wallLayerGroupThickness(assembly, group))}</b></div>

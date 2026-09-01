@@ -80,6 +80,19 @@ test("miters corresponding boundaries without moving editable reference paths", 
   assert.deepEqual(second.start, { x: 120, y: 0, z: 0 });
 });
 
+test("keeps layers excluded from automatic joins square at the editable endpoint", () => {
+  const first = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 });
+  const second = wall("wall-02", { x: 120, y: 0 }, { x: 120, y: 120 });
+  const lines = [first, second];
+  const types = wallTypes();
+  types[0].layers[0].participatesInJoin = false;
+  const plan = buildAutomaticWallJoinPlan(lines, types);
+  const footprint = wallLayerFootprint(first, types[0], 0, plan, new Map(lines.map((line) => [line.id, line])), typeMap(types));
+  assert.deepEqual(footprint.endExterior, { x: 120, y: 0.9375 });
+  assert.deepEqual(footprint.endInterior, { x: 120, y: 0.4375 });
+  assert.equal(plan.endpointJoins.get(first.id)?.end?.kind, "corner");
+});
+
 test("joins mixed wall types from their Main boundaries", () => {
   const types = [...wallTypes(), alternateWallType()];
   const first = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 });

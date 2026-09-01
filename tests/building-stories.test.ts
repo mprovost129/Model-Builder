@@ -65,6 +65,7 @@ test("defines reusable exterior-to-interior layered wall types", () => {
   assert.equal(building.wallTypes[0].layers[0].name, "Exterior Finish");
   assert.equal(building.wallTypes[0].layers.at(-1)?.name, "Interior Finish");
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.wallGroup), ["exterior", "exterior", "main", "interior"]);
+  assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.participatesInJoin), [true, true, true, true]);
 });
 
 test("requires an ordered positive-thickness Main group in every wall type", () => {
@@ -83,6 +84,10 @@ test("requires an ordered positive-thickness Main group in every wall type", () 
   assert.ok(mainLayer);
   mainLayer.thickness = 0;
   assert.equal(buildingStructureIsValid(zeroDepthMain), false);
+
+  const missingJoinBehavior = createDefaultBuildingStructure();
+  delete missingJoinBehavior.wallTypes[0].layers[0].participatesInJoin;
+  assert.equal(buildingStructureIsValid(missingJoinBehavior), false);
 });
 
 test("positions wall layers from selectable Main reference lines and exterior sides", () => {

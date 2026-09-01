@@ -72,7 +72,7 @@ structural layer must recalculate dependent Story datums.
 
 Every assembly is an ordered list of material layers. Each layer has a stable
 identifier, name, material, role, and model-space thickness. Initial roles are
-Finish, Sheathing/Subfloor, Framing, Substrate, Membrane, and Air Gap.
+Finish, Sheathing/Subfloor, Framing, Insulation, Substrate, Membrane, and Air Gap.
 
 Layer thicknesses are non-negative and use the project's 1/16-inch architectural
 precision. Voids and air spaces are modeled as explicit layers rather than
@@ -89,17 +89,25 @@ and dimension behavior. A layer's group and its material role are deliberately
 separate: for example, sheathing can belong to the Exterior group while framing
 belongs to Main.
 
+Every wall layer also stores whether it participates in automatic junction
+cleanup. Participating layers are mitered or trimmed at supported corners and
+T-junctions. Non-participating layers remain square at their editable Wall path
+endpoint. This gives zero-thickness membranes and other special construction
+layers an explicit connection policy without changing the Wall reference line.
+
 ## Current Implementation
 
 - Startup and New Plan open a blank model space in Top view. The default First
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-18 project files store the Building Datum, ordered Stories, active and
+- Version-19 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
-  exterior side and selected reference line.
+  exterior side and selected reference line. Wall layers persist their automatic
+  junction-participation setting; version-18 and earlier layers receive safe
+  role-based defaults during upgrade.
 - Legacy version-1 through version-12 projects open with a default First Floor;
   version-13 entities are assigned to the saved anchor Story during upgrade.
 - Manage > Stories opens the Story and Assembly Manager.
@@ -138,6 +146,7 @@ belongs to Main.
 - Manage > Wall Types edits reusable exterior-to-interior layered assemblies in
   three explicit groups. Group totals are calculated independently, layer order
   is constrained within each group, and the last Main layer cannot be removed.
+  Each layer can opt into automatic junction cleanup or remain square-ended.
   Existing Walls retain an assigned type; new Walls use the active type.
 - Version-15 and version-16 wall types are upgraded automatically. Framing
   layers become Main; surrounding layers are classified Exterior or Interior.
@@ -150,7 +159,7 @@ belongs to Main.
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
 3. Add explicit junction priorities and finish-wrap controls for advanced
-   multi-Wall nodes, then add Wall openings.
+   multi-Wall nodes, building on the per-layer join policy, then add Wall openings.
 4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions

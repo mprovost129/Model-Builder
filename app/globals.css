@@ -473,7 +473,7 @@ button { color: inherit; }
 .story-assembly > header span { color: #8f9ba7; font-size: 7px; }
 .story-assembly > header b { margin-left: auto; color: #f0c978; font: 10px var(--font-geist-mono), monospace; }
 .story-layer-grid { display: grid; grid-template-columns: 26px minmax(180px, 1.5fr) minmax(120px, .8fr) minmax(145px, .8fr) 86px; align-items: center; min-height: 36px; border-bottom: 1px solid #333e48; }
-.story-layer-grid.has-wall-group { grid-template-columns: 26px minmax(170px, 1.45fr) minmax(105px, .75fr) minmax(105px, .75fr) minmax(135px, .8fr) 86px; }
+.story-layer-grid.has-wall-group { grid-template-columns: 26px minmax(165px, 1.4fr) minmax(100px, .7fr) minmax(100px, .7fr) minmax(130px, .8fr) 62px 86px; }
 .story-layer-grid > * { min-width: 0; }
 .story-layer-grid > span { color: #85929d; font: 8px var(--font-geist-mono), monospace; text-align: center; }
 .story-layer-head { min-height: 24px; background: #222b34; }
@@ -482,6 +482,8 @@ button { color: inherit; }
 .story-layer-grid > select { margin: 3px; }
 .story-layer-grid > .story-field { padding: 3px; }
 .story-layer-grid > .story-field > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.story-layer-join { display: grid; place-items: center; gap: 2px; color: #9eabb6; font: 7px var(--font-geist-mono), monospace; text-transform: uppercase; }
+.story-layer-join input { width: 13px; height: 13px; margin: 0; accent-color: #d3aa55; }
 .story-layer-actions { display: flex; justify-content: center; gap: 2px; }
 .story-layer-actions button { width: 24px; height: 24px; border: 1px solid #46535f; background: #252f39; color: #b9c3cb; cursor: pointer; }
 .story-layer-actions button:last-child { color: #df8d87; }

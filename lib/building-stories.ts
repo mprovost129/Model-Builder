@@ -5,6 +5,7 @@ export type AssemblyLayerRole =
   | "air-gap"
   | "finish"
   | "framing"
+  | "insulation"
   | "membrane"
   | "sheathing"
   | "substrate";
@@ -24,6 +25,8 @@ export type AssemblyLayer = {
   thickness: number;
   /** Required for wall assemblies; omitted for horizontal assemblies. */
   wallGroup?: WallLayerGroup;
+  /** Required for wall assemblies. False keeps this layer square at automatic junctions. */
+  participatesInJoin?: boolean;
 };
 
 export type LayeredAssembly = {
@@ -158,10 +161,10 @@ export function createDefaultWallType(): LayeredAssembly {
     kind: "wall-structure",
     name: "2x4 Exterior Wall",
     layers: [
-      { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", role: "finish", thickness: 0.5, wallGroup: "exterior" },
-      { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", role: "sheathing", thickness: 0.4375, wallGroup: "exterior" },
-      { id: "wall-type-01-03", material: "Lumber", name: "2x4 Stud Framing", role: "framing", thickness: 3.5, wallGroup: "main" },
-      { id: "wall-type-01-04", material: "Gypsum Board", name: "Interior Finish", role: "finish", thickness: 0.5, wallGroup: "interior" },
+      { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
+      { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", participatesInJoin: true, role: "sheathing", thickness: 0.4375, wallGroup: "exterior" },
+      { id: "wall-type-01-03", material: "Lumber", name: "2x4 Stud Framing", participatesInJoin: true, role: "framing", thickness: 3.5, wallGroup: "main" },
+      { id: "wall-type-01-04", material: "Gypsum Board", name: "Interior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "interior" },
     ],
   };
 }
@@ -269,7 +272,7 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
         { value: layer.name, limit: LAYER_NAME_LIMIT },
         { value: layer.material, limit: MATERIAL_NAME_LIMIT },
       ]) ||
-      !["air-gap", "finish", "framing", "membrane", "sheathing", "substrate"].includes(layer.role) ||
+      !["air-gap", "finish", "framing", "insulation", "membrane", "sheathing", "substrate"].includes(layer.role) ||
       (layer.wallGroup !== undefined && !WALL_LAYER_GROUPS.includes(layer.wallGroup)) ||
       !Number.isFinite(layer.thickness) ||
       layer.thickness < 0 ||
@@ -284,14 +287,14 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
     let previousGroupIndex = 0;
     let hasPositiveMainLayer = false;
     for (const layer of assembly.layers) {
-      if (layer.wallGroup === undefined) return false;
+      if (layer.wallGroup === undefined || typeof layer.participatesInJoin !== "boolean") return false;
       const groupIndex = WALL_LAYER_GROUPS.indexOf(layer.wallGroup);
       if (groupIndex < previousGroupIndex) return false;
       previousGroupIndex = groupIndex;
       if (layer.wallGroup === "main" && layer.thickness > 0) hasPositiveMainLayer = true;
     }
     if (!hasPositiveMainLayer) return false;
-  } else if (assembly.layers.some((layer) => layer.wallGroup !== undefined)) {
+  } else if (assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
     return false;
   }
   return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;
