@@ -23,6 +23,7 @@ export type AutomaticWallJoin = CornerWallJoin | TeeWallJoin;
 
 export type AutomaticWallJoinPlan = {
   endpointJoins: Map<string, Partial<Record<WallEndpoint, AutomaticWallJoin>>>;
+  occupiedEndpoints: Map<string, Set<WallEndpoint>>;
   passThroughCounts: Map<string, number>;
   unresolvedCounts: Map<string, number>;
 };
@@ -35,6 +36,8 @@ export type WallLayerFootprint = {
   startExterior: WallFootprintPoint;
   startInterior: WallFootprintPoint;
 };
+
+export type WallEndCapFootprint = WallLayerFootprint & { endpoint: WallEndpoint; layerIndex: number };
 
 type CutLine = {
   direction: WallFootprintPoint;
@@ -295,6 +298,7 @@ export function buildAutomaticWallJoinPlan(
 ): AutomaticWallJoinPlan {
   const plan: AutomaticWallJoinPlan = {
     endpointJoins: new Map(),
+    occupiedEndpoints: new Map(),
     passThroughCounts: new Map(),
     unresolvedCounts: new Map(),
   };
@@ -309,6 +313,11 @@ export function buildAutomaticWallJoinPlan(
     if (group) group.push(candidate);
     else groups.push([candidate]);
   });
+  groups.filter((group) => group.length > 1).forEach((group) => group.forEach((candidate) => {
+    const occupied = plan.occupiedEndpoints.get(candidate.line.id) ?? new Set<WallEndpoint>();
+    occupied.add(candidate.endpoint);
+    plan.occupiedEndpoints.set(candidate.line.id, occupied);
+  }));
 
   groups.forEach((group) => {
     if (group.length === 2) {
@@ -481,12 +490,57 @@ export function wallLayerFootprint(
 ): WallLayerFootprint {
   const joins = joinPlan.endpointJoins.get(line.id);
   const participatesInJoin = wallType.layers[layerIndex]?.participatesInJoin !== false;
-  return {
+  const footprint = {
     startExterior: joinedBoundaryPoint(line, "start", wallType, layerIndex, "exterior", participatesInJoin ? joins?.start : undefined, linesById, wallTypesById),
     startInterior: joinedBoundaryPoint(line, "start", wallType, layerIndex, "interior", participatesInJoin ? joins?.start : undefined, linesById, wallTypesById),
     endExterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "exterior", participatesInJoin ? joins?.end : undefined, linesById, wallTypesById),
     endInterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "interior", participatesInJoin ? joins?.end : undefined, linesById, wallTypesById),
   };
+  const capLayer = wallType.layers.find((layer) => layer.id === wallType.wallEndCapLayerId);
+  const direction = lineDirection(line);
+  if (!capLayer || !direction) return footprint;
+  const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
+  const capDepth = Math.min(capLayer.thickness, length / 2);
+  const startIsOpen = !joins?.start && !joinPlan.occupiedEndpoints.get(line.id)?.has("start");
+  const endIsOpen = !joins?.end && !joinPlan.occupiedEndpoints.get(line.id)?.has("end");
+  if (startIsOpen) {
+    footprint.startExterior = { x: footprint.startExterior.x + direction.x * capDepth, y: footprint.startExterior.y + direction.y * capDepth };
+    footprint.startInterior = { x: footprint.startInterior.x + direction.x * capDepth, y: footprint.startInterior.y + direction.y * capDepth };
+  }
+  if (endIsOpen) {
+    footprint.endExterior = { x: footprint.endExterior.x - direction.x * capDepth, y: footprint.endExterior.y - direction.y * capDepth };
+    footprint.endInterior = { x: footprint.endInterior.x - direction.x * capDepth, y: footprint.endInterior.y - direction.y * capDepth };
+  }
+  return footprint;
+}
+
+export function wallEndCapFootprints(
+  line: LineObject,
+  wallType: LayeredAssembly,
+  joinPlan: AutomaticWallJoinPlan,
+): WallEndCapFootprint[] {
+  const layerIndex = wallType.layers.findIndex((layer) => layer.id === wallType.wallEndCapLayerId && layer.role === "finish" && layer.thickness > 0);
+  const direction = lineDirection(line);
+  if (layerIndex < 0 || !direction) return [];
+  const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
+  const depth = Math.min(wallType.layers[layerIndex].thickness, length / 2);
+  const firstOffsets = boundaryOffsets(wallType, line, 0);
+  const lastOffsets = boundaryOffsets(wallType, line, wallType.layers.length - 1);
+  const exteriorOffset = firstOffsets.exterior;
+  const interiorOffset = lastOffsets.interior;
+  const joins = joinPlan.endpointJoins.get(line.id);
+  const result: WallEndCapFootprint[] = [];
+  if (!joins?.start && !joinPlan.occupiedEndpoints.get(line.id)?.has("start")) {
+    const startExterior = offsetEndpoint(line, "start", exteriorOffset);
+    const startInterior = offsetEndpoint(line, "start", interiorOffset);
+    result.push({ endpoint: "start", layerIndex, startExterior, startInterior, endExterior: { x: startExterior.x + direction.x * depth, y: startExterior.y + direction.y * depth }, endInterior: { x: startInterior.x + direction.x * depth, y: startInterior.y + direction.y * depth } });
+  }
+  if (!joins?.end && !joinPlan.occupiedEndpoints.get(line.id)?.has("end")) {
+    const endExterior = offsetEndpoint(line, "end", exteriorOffset);
+    const endInterior = offsetEndpoint(line, "end", interiorOffset);
+    result.push({ endpoint: "end", layerIndex, endExterior, endInterior, startExterior: { x: endExterior.x - direction.x * depth, y: endExterior.y - direction.y * depth }, startInterior: { x: endInterior.x - direction.x * depth, y: endInterior.y - direction.y * depth } });
+  }
+  return result;
 }
 
 export function automaticWallJoinCount(lineId: string, joinPlan: AutomaticWallJoinPlan) {

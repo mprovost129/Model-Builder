@@ -38,6 +38,8 @@ export type LayeredAssembly = {
   kind: AssemblyKind;
   layers: AssemblyLayer[];
   name: string;
+  /** Wall-only finish layer used to generate non-overlapping caps at open ends. */
+  wallEndCapLayerId?: string | null;
 };
 
 export type BuildingStory = {
@@ -164,6 +166,7 @@ export function createDefaultWallType(): LayeredAssembly {
     id: "wall-type-01",
     kind: "wall-structure",
     name: "2x4 Exterior Wall",
+    wallEndCapLayerId: null,
     layers: [
       { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
       { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", participatesInJoin: true, role: "sheathing", thickness: 0.4375, wallGroup: "exterior" },
@@ -297,8 +300,12 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
       previousGroupIndex = groupIndex;
       if (layer.wallGroup === "main" && layer.thickness > 0) hasPositiveMainLayer = true;
     }
+    if (
+      assembly.wallEndCapLayerId !== null &&
+      (typeof assembly.wallEndCapLayerId !== "string" || !assembly.layers.some((layer) => layer.id === assembly.wallEndCapLayerId && layer.role === "finish" && layer.thickness > 0))
+    ) return false;
     if (!hasPositiveMainLayer) return false;
-  } else if (assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
+  } else if (assembly.wallEndCapLayerId !== undefined || assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
     return false;
   }
   return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;

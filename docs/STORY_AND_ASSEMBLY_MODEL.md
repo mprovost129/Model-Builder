@@ -95,13 +95,20 @@ T-junctions. Non-participating layers remain square at their editable Wall path
 endpoint. This gives zero-thickness membranes and other special construction
 layers an explicit connection policy without changing the Wall reference line.
 
+A Wall Type can optionally designate one positive-thickness Finish layer as its
+open-end cap. At a truly open or manually disconnected endpoint, every layer
+body stops behind the cap by that Finish layer's thickness and one cap solid
+spans the complete wall assembly. This creates buildable, non-overlapping finish
+geometry. Automatic joins, straight continuations, and unresolved shared nodes
+remain uncapped so their junction logic stays authoritative.
+
 ## Current Implementation
 
 - Startup and New Plan open a blank model space in Top view. The default First
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-20 project files store the Building Datum, ordered Stories, active and
+- Version-21 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -152,7 +159,9 @@ layers an explicit connection policy without changing the Wall reference line.
 - Manage > Wall Types edits reusable exterior-to-interior layered assemblies in
   three explicit groups. Group totals are calculated independently, layer order
   is constrained within each group, and the last Main layer cannot be removed.
-  Each layer can opt into automatic junction cleanup or remain square-ended.
+  Each layer can opt into automatic junction cleanup or remain square-ended. A
+  positive Finish layer can be selected as the open-end cap; selecting None
+  leaves every open Wall end square with no wrap.
   Existing Walls retain an assigned type; new Walls use the active type.
 - Version-15 and version-16 wall types are upgraded automatically. Framing
   layers become Main; surrounding layers are classified Exterior or Interior.
@@ -164,8 +173,8 @@ layers an explicit connection policy without changing the Wall reference line.
 
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Add true material end-cap and finish-wrap geometry, building on the completed
-   per-layer join policy and Wall priority overrides, then add Wall openings.
+3. Extend the completed single-layer open-end caps into configurable return
+   depths and multi-layer finish-wrap rules, then add Wall openings.
 4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions

@@ -66,6 +66,21 @@ test("defines reusable exterior-to-interior layered wall types", () => {
   assert.equal(building.wallTypes[0].layers.at(-1)?.name, "Interior Finish");
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.wallGroup), ["exterior", "exterior", "main", "interior"]);
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.participatesInJoin), [true, true, true, true]);
+  assert.equal(building.wallTypes[0].wallEndCapLayerId, null);
+});
+
+test("allows one positive finish layer to cap open wall ends", () => {
+  const building = createDefaultBuildingStructure();
+  building.wallTypes[0].wallEndCapLayerId = building.wallTypes[0].layers[0].id;
+  assert.equal(buildingStructureIsValid(building), true);
+
+  const framingCap = createDefaultBuildingStructure();
+  framingCap.wallTypes[0].wallEndCapLayerId = framingCap.wallTypes[0].layers.find((layer) => layer.role === "framing")?.id ?? null;
+  assert.equal(buildingStructureIsValid(framingCap), false);
+
+  const missingCap = createDefaultBuildingStructure();
+  missingCap.wallTypes[0].wallEndCapLayerId = "missing-layer";
+  assert.equal(buildingStructureIsValid(missingCap), false);
 });
 
 test("requires an ordered positive-thickness Main group in every wall type", () => {

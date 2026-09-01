@@ -282,6 +282,7 @@ import {
   automaticWallJoinCount,
   buildAutomaticWallJoinPlan,
   unresolvedWallJunctionCount,
+  wallEndCapFootprints,
   wallLayerFootprint,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
@@ -1341,6 +1342,24 @@ function updateWallView(
     mesh.position.z = line.start.z;
     mesh.userData.lineId = line.id;
     mesh.userData.wallLayer = layer.name;
+    view.group.add(mesh);
+    view.meshes.push(mesh);
+    view.materials.push(material);
+  });
+  wallEndCapFootprints(line, wallType, joinPlan).forEach((footprint) => {
+    const layer = wallType.layers[footprint.layerIndex];
+    const shape = new THREE.Shape();
+    shape.moveTo(footprint.startExterior.x, footprint.startExterior.y);
+    shape.lineTo(footprint.startInterior.x, footprint.startInterior.y);
+    shape.lineTo(footprint.endInterior.x, footprint.endInterior.y);
+    shape.lineTo(footprint.endExterior.x, footprint.endExterior.y);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: story.roughCeilingHeight, steps: 1 });
+    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.z = line.start.z;
+    mesh.userData.lineId = line.id;
+    mesh.userData.wallLayer = `${layer.name} end cap`;
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
@@ -8007,6 +8026,7 @@ function StoryAssemblyEditor({
   const updateLayer = (index: number, change: Partial<LayeredAssembly["layers"][number]>) => {
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
     next.layers[index] = { ...next.layers[index], ...change };
+    if (isWallAssembly && next.wallEndCapLayerId === next.layers[index].id && (next.layers[index].role !== "finish" || next.layers[index].thickness <= 0)) next.wallEndCapLayerId = null;
     if (isWallAssembly && change.wallGroup !== undefined) {
       next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
     }
@@ -8022,6 +8042,7 @@ function StoryAssemblyEditor({
   };
   const removeLayer = (index: number) => {
     const next = { ...assembly, layers: assembly.layers.filter((_, candidate) => candidate !== index).map((layer) => ({ ...layer })) };
+    if (isWallAssembly && assembly.layers[index]?.id === next.wallEndCapLayerId) next.wallEndCapLayerId = null;
     onChange(next);
   };
   const mainLayerCount = assembly.layers.filter((layer) => layer.wallGroup === "main").length;
@@ -8267,10 +8288,11 @@ function WallTypeManagerDialog({
           <main className="story-editor">
             <section className="story-editor-summary">
               <label><span>Type name</span><input value={selected.name} maxLength={80} onChange={(event) => replaceSelected({ ...selected, name: event.target.value })} /></label>
+              <label><span>Open-end cap</span><select value={selected.wallEndCapLayerId ?? ""} onChange={(event) => replaceSelected({ ...selected, wallEndCapLayerId: event.target.value || null })} aria-label="Wall open-end cap layer"><option value="">None</option>{selected.layers.filter((layer) => layer.role === "finish" && layer.thickness > 0).map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></label>
               <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
             </section>
             <StoryAssemblyEditor assembly={selected} onChange={replaceSelected} />
-            <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core and will control wall reference-line, joining, bearing, platform, foundation, and dimension behavior as those controls are added. New walls use the active type; existing walls retain their assigned type until changed.</p>
+            <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core. An optional finish layer can cap truly open or manually disconnected ends; body layers stop behind the cap so solids do not overlap. New walls use the active type; existing walls retain their assigned type until changed.</p>
           </main>
         </div>
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
@@ -8409,7 +8431,7 @@ export function ModelBuilderApp() {
   const selectedLine = findLineObject(editor.present, selectedLineId);
   const selectedWallJoinPlan = selectedLine?.architecturalRole === "wall"
     ? buildAutomaticWallJoinPlan(editor.present.lines, editor.present.building.wallTypes)
-    : { endpointJoins: new Map(), passThroughCounts: new Map(), unresolvedCounts: new Map() };
+    : { endpointJoins: new Map(), occupiedEndpoints: new Map(), passThroughCounts: new Map(), unresolvedCounts: new Map() };
   const selectedWallJoinCount = selectedLine
     ? automaticWallJoinCount(selectedLine.id, selectedWallJoinPlan)
     : 0;
