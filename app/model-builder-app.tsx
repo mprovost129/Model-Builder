@@ -655,6 +655,7 @@ function continueSeedFromHistory(document: ModelDocument, history: ContinuableEn
 type CadDraftingSettings = {
   activeElevation: number;
   gridSpacing: number;
+  gridVisible: boolean;
   objectSnapEnabled: boolean;
   objectSnapModes: ObjectSnapMode[];
   orthoEnabled: boolean;
@@ -675,6 +676,7 @@ function formatDraftingSpacing(value: number): string {
 const DEFAULT_CAD_DRAFTING_SETTINGS: CadDraftingSettings = {
   activeElevation: 0,
   gridSpacing: 12,
+  gridVisible: true,
   objectSnapEnabled: true,
   objectSnapModes: DEFAULT_OBJECT_SNAP_MODES,
   orthoEnabled: false,
@@ -697,6 +699,7 @@ function storedCadDraftingSettings(): CadDraftingSettings {
     return {
       activeElevation: typeof value.activeElevation === "number" && Number.isFinite(value.activeElevation) ? snapToSixteenth(value.activeElevation) : 0,
       gridSpacing: GRID_SPACING_OPTIONS.includes(value.gridSpacing as typeof GRID_SPACING_OPTIONS[number]) ? value.gridSpacing! : DEFAULT_CAD_DRAFTING_SETTINGS.gridSpacing,
+      gridVisible: value.gridVisible !== false,
       objectSnapEnabled: value.objectSnapEnabled !== false,
       objectSnapModes: [...new Set(migratedModes)],
       orthoEnabled: value.orthoEnabled === true,
@@ -1125,6 +1128,7 @@ function DraftLineIcon() {
 type ViewportProps = {
   activeElevation: number;
   gridSpacing: number;
+  gridVisible: boolean;
   interfaceTheme: InterfaceTheme;
   arcCommand: ArcViewportCommand | null;
   arcContinueSeed: ArcContinueSeed | null;
@@ -1950,6 +1954,7 @@ function disposeBoxGripSet(scene: THREE.Scene, gripSet: BoxGripSet) {
 function Viewport({
   activeElevation,
   gridSpacing,
+  gridVisible,
   interfaceTheme,
   arcCommand,
   arcContinueSeed,
@@ -2670,10 +2675,6 @@ function Viewport({
     const fillLight = new THREE.DirectionalLight(0x76b8ff, 0.65);
     fillLight.position.set(220, 120, 160);
     scene.add(fillLight);
-
-    const axes = new THREE.AxesHelper(52);
-    axes.position.set(-190, -150, 0.2);
-    scene.add(axes);
 
     const moveGizmo = createMoveGizmo(scene);
     moveGizmoRef.current = moveGizmo;
@@ -6186,9 +6187,11 @@ function Viewport({
     const scene = sceneRef.current;
     if (!scene) return;
     const divisions = Math.max(2, Math.round(960 / gridSpacing));
-    const grid = new THREE.GridHelper(divisions * gridSpacing, divisions, 0x5d7188, 0x2a3541);
+    const colors = interfaceTheme === "light" ? [0x7f9bb0, 0xc7d1d7] : [0x5d7188, 0x2a3541];
+    const grid = new THREE.GridHelper(divisions * gridSpacing, divisions, colors[0], colors[1]);
     grid.rotation.set(...gridPlacementRef.current.rotation);
     grid.position.set(...gridPlacementRef.current.position);
+    grid.visible = gridVisible;
     const materials = Array.isArray(grid.material) ? grid.material : [grid.material];
     materials.forEach((material) => {
       material.transparent = true;
@@ -6202,17 +6205,12 @@ function Viewport({
       materials.forEach((material) => material.dispose());
       if (gridRef.current === grid) gridRef.current = null;
     };
-  }, [gridSpacing]);
+  }, [gridSpacing, gridVisible, interfaceTheme]);
 
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     scene.background = new THREE.Color(interfaceTheme === "light" ? 0xf1f3f3 : 0x151b22);
-    const grid = gridRef.current;
-    if (!grid) return;
-    const materials = Array.isArray(grid.material) ? grid.material : [grid.material];
-    const colors = interfaceTheme === "light" ? [0x7f9bb0, 0xc7d1d7] : [0x5d7188, 0x2a3541];
-    materials.forEach((material, index) => material.color.setHex(colors[index] ?? colors.at(-1)!));
   }, [interfaceTheme]);
 
   useEffect(() => {
@@ -6819,9 +6817,17 @@ function Viewport({
       {polylineMode && !dragStatus ? <div className="move-grip-hint is-drawing">POLYLINE · click or type points · distance follows cursor · U undoes · C closes</div> : null}
       {rectangleMode && !dragStatus ? <div className="move-grip-hint is-drawing">RECTANGLE · click or type first corner · opposite corner or width × height</div> : null}
       {selectedPolylineId && !polylineMode && !rectangleMode && !dragStatus ? <div className="move-grip-hint">{(() => { const selected = document.polylines.find((polyline) => polyline.id === selectedPolylineId); return selected?.shape === "rectangle" && rectangleSupportsConstrainedGrips(selected) ? "Rectangle selected · corner and edge grips resize · center grip moves" : "Closed polyline selected · drag blue vertex grips to reshape"; })()}</div> : null}
-      <div className="axis-labels" aria-hidden="true">
-        <span className="axis-x">X</span><span className="axis-y">Y</span><span className="axis-z">Z</span>
-      </div>
+      {viewTarget.id === "top" ? (
+        <div className="axis-labels plan-ucs" aria-hidden="true">
+          <i className="plan-ucs-origin" />
+          <span className="plan-ucs-axis plan-ucs-x"><b>X</b></span>
+          <span className="plan-ucs-axis plan-ucs-y"><b>Y</b></span>
+        </div>
+      ) : (
+        <div className="axis-labels perspective-ucs" aria-hidden="true">
+          <span className="axis-x">X</span><span className="axis-y">Y</span><span className="axis-z">Z</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -10803,6 +10809,11 @@ export function ModelBuilderApp() {
         setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }));
         return;
       }
+      if (event.key === "F7") {
+        event.preventDefault();
+        setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }));
+        return;
+      }
       if (event.key === "F8") {
         event.preventDefault();
         setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }));
@@ -12656,7 +12667,8 @@ export function ModelBuilderApp() {
                 <p className="property-grid-note">{activeDrawingNote}</p>
               </PropertyGridSection>
               <PropertyGridSection title="Grid & Snap" meta="Independent controls">
-                <PropertyGridRow label="Visible grid"><select className="property-cell-select" value={cadDraftingSettings.gridSpacing} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, gridSpacing: Number(event.target.value) }))} aria-label="Visible grid spacing">{GRID_SPACING_OPTIONS.map((spacing) => <option key={spacing} value={spacing}>{formatDraftingSpacing(spacing)}</option>)}</select></PropertyGridRow>
+                <PropertyGridRow label="Grid display (F7)"><button type="button" className={cadDraftingSettings.gridVisible ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))}>{cadDraftingSettings.gridVisible ? "● On" : "○ Off"}</button></PropertyGridRow>
+                <PropertyGridRow label="Grid spacing"><select className="property-cell-select" value={cadDraftingSettings.gridSpacing} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, gridSpacing: Number(event.target.value) }))} aria-label="Visible grid spacing">{GRID_SPACING_OPTIONS.map((spacing) => <option key={spacing} value={spacing}>{formatDraftingSpacing(spacing)}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Cursor snap"><select className="property-cell-select" value={cadDraftingSettings.snapIncrement} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, snapIncrement: Number(event.target.value) }))} aria-label="Cursor snap increment">{SNAP_INCREMENT_OPTIONS.map((increment) => <option key={increment} value={increment}>{formatDraftingSpacing(increment)}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Exact input"><span className="property-readout">1/16&quot; precision</span></PropertyGridRow>
                 <p className="property-grid-note">The visible grid does not control the cursor. Freehand points use the cursor snap increment; typed dimensions and object snaps retain 1/16-inch precision.</p>
@@ -12695,7 +12707,8 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Current layer"><span className="property-readout">{activeLayer?.name ?? "Default"}</span></PropertyGridRow>
                 <PropertyGridRow label="Units"><span className="property-readout">Architectural</span></PropertyGridRow>
                 <PropertyGridRow label="Precision"><span className="property-readout">1/16&quot;</span></PropertyGridRow>
-                <PropertyGridRow label="Visible grid"><select className="property-cell-select" value={cadDraftingSettings.gridSpacing} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, gridSpacing: Number(event.target.value) }))} aria-label="Visible grid spacing">{GRID_SPACING_OPTIONS.map((spacing) => <option key={spacing} value={spacing}>{formatDraftingSpacing(spacing)}</option>)}</select></PropertyGridRow>
+                <PropertyGridRow label="Grid display (F7)"><button type="button" className={cadDraftingSettings.gridVisible ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))}>{cadDraftingSettings.gridVisible ? "● On" : "○ Off"}</button></PropertyGridRow>
+                <PropertyGridRow label="Grid spacing"><select className="property-cell-select" value={cadDraftingSettings.gridSpacing} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, gridSpacing: Number(event.target.value) }))} aria-label="Visible grid spacing">{GRID_SPACING_OPTIONS.map((spacing) => <option key={spacing} value={spacing}>{formatDraftingSpacing(spacing)}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Cursor snap"><select className="property-cell-select" value={cadDraftingSettings.snapIncrement} onChange={(event) => setCadDraftingSettings((current) => ({ ...current, snapIncrement: Number(event.target.value) }))} aria-label="Cursor snap increment">{SNAP_INCREMENT_OPTIONS.map((increment) => <option key={increment} value={increment}>{formatDraftingSpacing(increment)}</option>)}</select></PropertyGridRow>
               </PropertyGridSection>
             </>
@@ -12707,6 +12720,7 @@ export function ModelBuilderApp() {
           activeElevation={cadDraftingSettings.activeElevation}
           interfaceTheme={interfaceTheme}
           gridSpacing={cadDraftingSettings.gridSpacing}
+          gridVisible={cadDraftingSettings.gridVisible}
           arcCommand={arcCommand}
           arcContinueSeed={arcContinueSeed}
           arcMethod={arcMethod}
@@ -13011,7 +13025,7 @@ export function ModelBuilderApp() {
       </div>
       <footer className="statusbar">
         <nav className="space-tabs" aria-label="Model and layouts"><button type="button" className="space-menu" aria-label="Space menu">☰</button><button type="button" className="is-active">Model</button><button type="button" disabled title="Layouts are planned">Layout 1 <small>planned</small></button><button type="button" disabled aria-label="Add layout">＋</button></nav>
-        <div className="status-items"><span>{editor.present.objects.length} BOX{editor.present.objects.length === 1 ? "" : "ES"} · {editor.present.lines.length} LINE{editor.present.lines.length === 1 ? "" : "S"} · {editor.present.polylines.length} POLYLINE{editor.present.polylines.length === 1 ? "" : "S"} · {editor.present.circles.length} CIRCLE{editor.present.circles.length === 1 ? "" : "S"} · {editor.present.arcs.length} ARC{editor.present.arcs.length === 1 ? "" : "S"}</span><span>Story: {activeStory.name}</span><span>Layer: {activeLayer?.name ?? "Default"}</span><span>FT-IN</span><span><i className="status-light" />Grid {formatDraftingSpacing(cadDraftingSettings.gridSpacing)}</span><span>Snap {formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</span><button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)">OSNAP</button><button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)">ORTHO</button><button type="button" className={cadDraftingSettings.polarEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, polarEnabled: !current.polarEnabled }))} title="Polar Tracking (F10)">POLAR</button><span>ELEV {formatSignedArchitectural(cadDraftingSettings.activeElevation)}</span><span>{viewTarget.label}</span><span title="Work is automatically recoverable on this device">RECOVERY ON</span></div>
+        <div className="status-items"><span>{editor.present.objects.length} BOX{editor.present.objects.length === 1 ? "" : "ES"} · {editor.present.lines.length} LINE{editor.present.lines.length === 1 ? "" : "S"} · {editor.present.polylines.length} POLYLINE{editor.present.polylines.length === 1 ? "" : "S"} · {editor.present.circles.length} CIRCLE{editor.present.circles.length === 1 ? "" : "S"} · {editor.present.arcs.length} ARC{editor.present.arcs.length === 1 ? "" : "S"}</span><span>Story: {activeStory.name}</span><span>Layer: {activeLayer?.name ?? "Default"}</span><span>FT-IN</span><button type="button" className={cadDraftingSettings.gridVisible ? "status-toggle grid-toggle is-on" : "status-toggle grid-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))} title="Grid Display (F7)" aria-label="Toggle model space grid" aria-pressed={cadDraftingSettings.gridVisible}>GRID <small>{formatDraftingSpacing(cadDraftingSettings.gridSpacing)}</small></button><span>Snap {formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</span><button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)">OSNAP</button><button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)">ORTHO</button><button type="button" className={cadDraftingSettings.polarEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, polarEnabled: !current.polarEnabled }))} title="Polar Tracking (F10)">POLAR</button><span>ELEV {formatSignedArchitectural(cadDraftingSettings.activeElevation)}</span><span>{viewTarget.label}</span><span title="Work is automatically recoverable on this device">RECOVERY ON</span></div>
       </footer>
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}

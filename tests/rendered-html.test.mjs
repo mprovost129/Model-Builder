@@ -78,7 +78,11 @@ test("server-renders the Model Builder workspace", async () => {
   assert.match(html, /Precision 3D modeling in U\.S\. architectural units/);
   assert.match(html, /aria-label="3D navigation cube"/);
   assert.match(html, /aria-label="Home perspective"/);
-  assert.match(html, /Grid <!-- -->1&#x27;-0&quot;/);
+  assert.match(html, /aria-label="Toggle model space grid"/);
+  assert.match(html, /title="Grid Display \(F7\)"/);
+  assert.match(html, /GRID <small>1&#x27;-0&quot;<\/small>/);
+  assert.match(html, /plan-ucs/);
+  assert.doesNotMatch(html, /axis-z/);
   assert.match(html, /Snap <!-- -->1\/16&quot;/);
   assert.match(html, /Object Snap \(F3\)/);
   assert.match(html, /Ortho Mode \(F8\)/);
@@ -261,6 +265,10 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /activePreviewMode/);
   assert.match(component, /onLineUndoSegment/);
   assert.match(component, /CAD_DRAFTING_SETTINGS_STORAGE_KEY/);
+  assert.match(component, /gridVisible/);
+  assert.match(component, /event\.key === "F7"/);
+  assert.match(component, /plan-ucs-x/);
+  assert.doesNotMatch(component, /new THREE\.AxesHelper/);
   assert.match(component, /INTERFACE_THEME_STORAGE_KEY/);
   assert.match(component, /useSyncExternalStore/);
   assert.match(component, /interfaceTheme={interfaceTheme}/);

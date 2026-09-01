@@ -8,7 +8,11 @@ polylines, rectangles, Circles, and Arcs.
 
 ## Current Capabilities
 
-- Three-dimensional perspective workspace with a ground grid and XYZ axes
+- Three-dimensional perspective workspace with an optional ground grid and compact XYZ labels
+- Persistent Grid visibility control in Properties and the status bar, with the
+  standard F7 shortcut
+- View-aware UCS indicator: red X and green Y axes in Top plan view without Z,
+  and compact XYZ letters in three-dimensional views
 - AutoCAD/Revit-inspired workspace shell with quick access, tabbed ribbon,
   project tabs, left Properties, right Model Explorer, command line, and status bar
 - Revit-inspired application hierarchy with a dedicated program control, top-level
