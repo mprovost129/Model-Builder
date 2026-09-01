@@ -37,6 +37,9 @@ test("server-renders the Model Builder workspace", async () => {
   assert.match(html, /aria-label="Tool categories"/);
   assert.match(html, /aria-label="Program menu"/);
   assert.match(html, /aria-label="Quick access"/);
+  assert.match(html, /app-shell theme-light/);
+  assert.match(html, /aria-label="Switch to dark mode"/);
+  assert.match(html, />Light</);
   assert.match(html, /aria-label="Save project as"/);
   assert.match(html, /aria-label="Application menus"/);
   assert.match(html, />File</);
@@ -258,6 +261,9 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /activePreviewMode/);
   assert.match(component, /onLineUndoSegment/);
   assert.match(component, /CAD_DRAFTING_SETTINGS_STORAGE_KEY/);
+  assert.match(component, /INTERFACE_THEME_STORAGE_KEY/);
+  assert.match(component, /useSyncExternalStore/);
+  assert.match(component, /interfaceTheme={interfaceTheme}/);
   assert.match(component, /Additional line snap angles/);
   assert.match(component, /Start Z/);
   assert.match(component, /lineMode/);

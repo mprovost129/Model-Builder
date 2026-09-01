@@ -14,6 +14,8 @@ polylines, rectangles, Circles, and Arcs.
 - Revit-inspired application hierarchy with a dedicated program control, top-level
   New/Open/Save/Save As and history shortcuts, conventional application menus,
   and a separate task-based modeling ribbon
+- Warm light-gray and blue interface theme enabled by default, with a persistent
+  Light/Dark switch and reusable color tokens prepared for future customization
 - Blank-plan setup guide that exposes active Story, floor depth, ceiling height,
   and Wall Type defaults before drawing begins
 - Building view in Model Explorer for direct access to Stories, Wall Types, and

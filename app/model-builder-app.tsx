@@ -27,6 +27,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import * as THREE from "three";
@@ -403,6 +404,42 @@ type RibbonTab = "Home" | "Draw" | "Model" | "Annotate" | "View" | "Manage";
 const LINE_SNAP_ANGLES_STORAGE_KEY = "model-builder:line-snap-angles:v1";
 const CAD_DRAFTING_SETTINGS_STORAGE_KEY = "model-builder:cad-drafting-settings:v3";
 const LEGACY_CAD_DRAFTING_SETTINGS_STORAGE_KEYS = ["model-builder:cad-drafting-settings:v2", "model-builder:cad-drafting-settings:v1"];
+const INTERFACE_THEME_STORAGE_KEY = "model-builder:interface-theme:v1";
+const INTERFACE_THEME_CHANGE_EVENT = "model-builder:interface-theme-change";
+type InterfaceTheme = "dark" | "light";
+let interfaceThemeFallback: InterfaceTheme = "light";
+
+function storedInterfaceTheme(): InterfaceTheme {
+  if (typeof window === "undefined") return "light";
+  try {
+    const stored = window.localStorage.getItem(INTERFACE_THEME_STORAGE_KEY);
+    return stored === "dark" || stored === "light" ? stored : interfaceThemeFallback;
+  } catch {
+    return interfaceThemeFallback;
+  }
+}
+
+function subscribeInterfaceTheme(onStoreChange: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === INTERFACE_THEME_STORAGE_KEY) onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(INTERFACE_THEME_CHANGE_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(INTERFACE_THEME_CHANGE_EVENT, onStoreChange);
+  };
+}
+
+function setStoredInterfaceTheme(theme: InterfaceTheme) {
+  interfaceThemeFallback = theme;
+  try {
+    window.localStorage.setItem(INTERFACE_THEME_STORAGE_KEY, theme);
+  } catch {
+    // The selected theme remains available through the current render.
+  }
+  window.dispatchEvent(new Event(INTERFACE_THEME_CHANGE_EVENT));
+}
 const CAD_SNAP_LABELS: Record<CadSnapKind, string> = {
   center: "CEN",
   corner: "CORNER",
@@ -1088,6 +1125,7 @@ function DraftLineIcon() {
 type ViewportProps = {
   activeElevation: number;
   gridSpacing: number;
+  interfaceTheme: InterfaceTheme;
   arcCommand: ArcViewportCommand | null;
   arcContinueSeed: ArcContinueSeed | null;
   arcMethod: ArcMethod;
@@ -1912,6 +1950,7 @@ function disposeBoxGripSet(scene: THREE.Scene, gripSet: BoxGripSet) {
 function Viewport({
   activeElevation,
   gridSpacing,
+  interfaceTheme,
   arcCommand,
   arcContinueSeed,
   arcMethod,
@@ -6166,6 +6205,17 @@ function Viewport({
   }, [gridSpacing]);
 
   useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.background = new THREE.Color(interfaceTheme === "light" ? 0xf1f3f3 : 0x151b22);
+    const grid = gridRef.current;
+    if (!grid) return;
+    const materials = Array.isArray(grid.material) ? grid.material : [grid.material];
+    const colors = interfaceTheme === "light" ? [0x7f9bb0, 0xc7d1d7] : [0x5d7188, 0x2a3541];
+    materials.forEach((material, index) => material.color.setHex(colors[index] ?? colors.at(-1)!));
+  }, [interfaceTheme]);
+
+  useEffect(() => {
     if (skipNextViewApplyRef.current) {
       skipNextViewApplyRef.current = false;
       return;
@@ -8528,6 +8578,7 @@ export function ModelBuilderApp() {
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
   const [showStartGuide, setShowStartGuide] = useState(true);
   const [topMenu, setTopMenu] = useState<"edit" | "file" | "help" | "program" | "tools" | "view" | "window" | null>(null);
+  const interfaceTheme = useSyncExternalStore(subscribeInterfaceTheme, storedInterfaceTheme, () => "light");
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
   const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.top);
@@ -8743,6 +8794,10 @@ export function ModelBuilderApp() {
       // Drafting settings remain available for the current session.
     }
   }, [cadDraftingSettings]);
+
+  useEffect(() => {
+    document.documentElement.style.colorScheme = interfaceTheme;
+  }, [interfaceTheme]);
 
   const commonGroupId = selectedObjects.length > 1 &&
     selectedObjects[0]?.groupId &&
@@ -12068,7 +12123,7 @@ export function ModelBuilderApp() {
   };
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell theme-${interfaceTheme}`}>
       <input
         ref={fileInputRef}
         className="project-file-input"
@@ -12104,6 +12159,17 @@ export function ModelBuilderApp() {
           {isDirty ? <span className="dirty-mark" title="Unsaved changes">•</span> : null}
         </label>
         <span className="workspace-name">2D + 3D Modeling</span>
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light")}
+          title={`Switch to ${interfaceTheme === "light" ? "dark" : "light"} mode`}
+          aria-label={`Switch to ${interfaceTheme === "light" ? "dark" : "light"} mode`}
+          aria-pressed={interfaceTheme === "dark"}
+        >
+          <span aria-hidden="true">{interfaceTheme === "light" ? "☾" : "☀"}</span>
+          <small>{interfaceTheme === "light" ? "Light" : "Dark"}</small>
+        </button>
         <button className="help-button" type="button" title="Help" aria-label="Help">?</button>
         {topMenu === "program" ? (
           <div className="program-menu" role="menu" aria-label="Program menu">
@@ -12129,7 +12195,7 @@ export function ModelBuilderApp() {
                 <div className="application-menu" role="menu" aria-label={`${label} menu`}>
                   {menu === "file" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><span>New Plan</span><kbd>Ctrl+N</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><span>Open…</span><kbd>Ctrl+O</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProject)}><span>Save</span><kbd>Ctrl+S</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProjectAs)}><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button></> : null}
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
-                  {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>Home Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button></> : null}
+                  {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>Home Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
                   {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
                   {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
@@ -12639,6 +12705,7 @@ export function ModelBuilderApp() {
         <div className="viewport-workspace">
         <Viewport
           activeElevation={cadDraftingSettings.activeElevation}
+          interfaceTheme={interfaceTheme}
           gridSpacing={cadDraftingSettings.gridSpacing}
           arcCommand={arcCommand}
           arcContinueSeed={arcContinueSeed}
