@@ -245,6 +245,7 @@ import {
   updateCircleObject,
   updateLineGrip,
   updateLineObject,
+  updateWallPlacement,
   updatePolylineObjectGrip,
   updatePolylineObject,
   updatePolylineObjectVertex,
@@ -265,6 +266,7 @@ import {
   calculateStoryElevations,
   cloneBuildingStructure,
   removeBuildingStory,
+  wallLayerCenterOffsets,
   wallLayerGroupThickness,
   WALL_LAYER_GROUPS,
   type AssemblyKind,
@@ -272,7 +274,9 @@ import {
   type AssemblyLayerRole,
   type BuildingStructure,
   type LayeredAssembly,
+  type WallExteriorSide,
   type WallLayerGroup,
+  type WallReferenceLine,
 } from "@/lib/building-stories";
 import {
   createProjectDocument,
@@ -1308,11 +1312,10 @@ function updateWallView(view: WallView, line: LineObject, story: BuildingStructu
   if (length < 1 / 16) return;
   const normalX = -dy / length;
   const normalY = dx / length;
-  const totalThickness = assemblyTotalThickness(wallType);
-  let layerEdge = -totalThickness / 2;
-  wallType.layers.forEach((layer) => {
+  const layerOffsets = wallLayerCenterOffsets(wallType, line.wallReferenceLine ?? "wall-center", line.wallExteriorSide ?? "left");
+  wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
-    const centerOffset = layerEdge + layer.thickness / 2;
+    const centerOffset = layerOffsets[index];
     const geometry = new THREE.BoxGeometry(length, layer.thickness, story.roughCeilingHeight);
     const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
     const mesh = new THREE.Mesh(geometry, material);
@@ -1327,7 +1330,6 @@ function updateWallView(view: WallView, line: LineObject, story: BuildingStructu
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
-    layerEdge += layer.thickness;
   });
 }
 
@@ -7836,6 +7838,8 @@ function WallGeometryControl({
 }) {
   const story = building.stories.find((candidate) => candidate.id === line.storyId);
   const calculation = calculateStoryElevations(building).find((candidate) => candidate.storyId === line.storyId);
+  const referenceLabel = WALL_REFERENCE_LINE_LABELS[line.wallReferenceLine ?? "wall-center"];
+  const exteriorSideLabel = line.wallExteriorSide === "right" ? "right" : "left";
   const updatePoint = (endpoint: "start" | "end", axis: "x" | "y", draft: string) => {
     const value = parseSignedArchitectural(draft);
     if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
@@ -7854,7 +7858,7 @@ function WallGeometryControl({
       <PropertyGridRow label="Rough floor"><span className="property-readout">{calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span></PropertyGridRow>
       <PropertyGridRow label="Rough ceiling"><span className="property-readout">{calculation ? formatSignedArchitectural(calculation.roughCeilingElevation) : "—"}</span></PropertyGridRow>
       <PropertyGridRow label="Wall height"><span className="property-readout">{story ? formatArchitectural(story.roughCeilingHeight) : "—"}</span></PropertyGridRow>
-      <p className="property-grid-note">The line is the wall centerline. X and Y define its plan path; its base and top follow the assigned Story rough framing.</p>
+      <p className="property-grid-note">X and Y define the {referenceLabel.toLowerCase()}. Looking from Start to End, the exterior is on the {exteriorSideLabel}; base and top follow the assigned Story rough framing.</p>
     </PropertyGridSection>
   );
 }
@@ -7889,6 +7893,13 @@ const WALL_LAYER_GROUP_LABELS: Record<WallLayerGroup, string> = {
   exterior: "Exterior Layers",
   main: "Main Layers",
   interior: "Interior Layers",
+};
+
+const WALL_REFERENCE_LINE_LABELS: Record<WallReferenceLine, string> = {
+  "wall-center": "Wall centerline",
+  "exterior-main": "Exterior face of Main",
+  "center-main": "Center of Main",
+  "interior-main": "Interior face of Main",
 };
 
 function nextAssemblyLayerId(assembly: LayeredAssembly): string {
@@ -9699,7 +9710,7 @@ export function ModelBuilderApp() {
     setWallMode(true);
     setLastCommandName("wall");
     setDrawingPlaneFromBuilding(editor.present.building);
-    setFileNotice({ text: "Wall active. Draw the wall centerline; base and height follow the active Story rough framing.", tone: "info" });
+    setFileNotice({ text: "Wall active. Draw the exterior face of the Main layer; the exterior defaults to the left of Start → End.", tone: "info" });
   }, [activateLineMode, editor.present.building, setDrawingPlaneFromBuilding]);
 
   const activateArcMode = useCallback((method: ArcMethod = arcMethod) => {
@@ -10871,6 +10882,13 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next });
   }, [editor.present, selectedLine]);
 
+  const setSelectedWallPlacement = useCallback((change: { exteriorSide?: WallExteriorSide; referenceLine?: WallReferenceLine }) => {
+    if (!selectedLine) return;
+    const next = updateWallPlacement(editor.present, selectedLine.id, change);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+  }, [editor.present, selectedLine]);
+
   const toggleSelectedLineLock = useCallback(() => {
     if (!selectedLine) return;
     const next = setLineLocked(editor.present, selectedLine.id, !selectedLine.locked);
@@ -11625,7 +11643,7 @@ export function ModelBuilderApp() {
         : dragStatus.kind === "scale"
           ? `Scale ${dragStatus.factor ?? 1}× — 0.1 snap; hold Shift for 0.01 precision.`
         : dragStatus.kind === "line" || dragStatus.kind === "line-grip"
-          ? `${dragStatus.kind === "line" ? wallMode ? "Draw wall centerline" : "Draw line" : "Edit line"} — ${formatArchitectural(dragStatus.distance)} at ${dragStatus.angle ?? 0}°${dragStatus.snapped ? " — object snap" : dragStatus.polarAngle !== null && dragStatus.polarAngle !== undefined ? ` — polar ${dragStatus.polarAngle}°` : " — 1/16 inch grid"}.`
+          ? `${dragStatus.kind === "line" ? wallMode ? "Draw wall reference line" : "Draw line" : "Edit line"} — ${formatArchitectural(dragStatus.distance)} at ${dragStatus.angle ?? 0}°${dragStatus.snapped ? " — object snap" : dragStatus.polarAngle !== null && dragStatus.polarAngle !== undefined ? ` — polar ${dragStatus.polarAngle}°` : " — 1/16 inch grid"}.`
         : dragStatus.kind === "polyline" || dragStatus.kind === "polyline-grip" || dragStatus.kind === "rectangle"
           ? `${dragStatus.kind === "rectangle" ? "Draw rectangle" : dragStatus.kind === "polyline-grip" ? "Edit polyline vertex" : "Draw polyline"} — ${formatArchitectural(dragStatus.distance)}${dragStatus.angle !== undefined ? ` at ${dragStatus.angle}°` : ""}${dragStatus.snapped ? " — object snap" : dragStatus.polarAngle !== null && dragStatus.polarAngle !== undefined ? ` — polar ${dragStatus.polarAngle}°` : " — 1/16 inch grid"}.`
         : dragStatus.kind === "circle" || dragStatus.kind === "circle-grip"
@@ -11668,7 +11686,7 @@ export function ModelBuilderApp() {
     : lineMode
       ? lineAnchor
         ? `${wallMode ? "WALL" : "LINE"} — next point or distance · U undoes · C closes · Escape exits.`
-        : wallMode ? `WALL — specify the first centerline point on ${activeStory.name}.` : "LINE — specify first point by click, X,Y, or X,Y,Z. Z defaults to 0."
+        : wallMode ? `WALL — specify the first Main-layer reference point on ${activeStory.name}.` : "LINE — specify first point by click, X,Y, or X,Y,Z. Z defaults to 0."
     : polylineMode
       ? polylineAnchor
         ? `POLYLINE · ${polylineSegmentMode.toUpperCase()} · W ${formatArchitectural(polylineWidth)} — ${polylineSegmentMode === "arc" ? "through-point, then endpoint" : "next vertex or distance"} · A/L switches · U undoes · C closes.`
@@ -11714,7 +11732,7 @@ export function ModelBuilderApp() {
     : circleMode
     ? `${circleMethodDefinition(circleMethod).description}. Exact and @relative coordinates are accepted. Plain dimensions follow the pointer for point-defined methods. All construction points stay on one elevation plane.`
     : lineMode
-    ? wallMode ? `Draw the wall centerline with Line-grade snaps and exact input. New walls use ${editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId)?.name ?? "the active wall type"} and follow ${activeStory.name} rough floor and ceiling.` : "Use the command input below. A plain distance follows the cursor. Exact and @relative points are accepted. U undoes the previous segment; C closes the chain."
+    ? wallMode ? `Draw the exterior face of the Main layer with Line-grade snaps and exact input. The exterior defaults left of Start → End. New walls use ${editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId)?.name ?? "the active wall type"} and follow ${activeStory.name} rough floor and ceiling.` : "Use the command input below. A plain distance follows the cursor. Exact and @relative points are accepted. U undoes the previous segment; C closes the chain."
     : polylineMode
       ? "Line mode adds straight segments. Arc mode uses a through-point and endpoint to store a true curved segment. A/L switches modes; WIDTH plus a dimension sets constant width. U undoes, C closes, and Enter finishes open."
       : `Specify two corners by click or exact coordinates. After the first corner, use @X,Y or enter dimensions such as 12' x 8'; the cursor chooses the quadrant.`;
@@ -12053,12 +12071,14 @@ export function ModelBuilderApp() {
             </PropertyGridSection>
           ) : selectedLine ? (
             <PropertyGridSection ariaLabel="Line properties" title="General" meta={selectedLine.architecturalRole === "wall" ? "Architectural" : "3D entity"}>
-              <PropertyGridRow label="Type"><span className="property-readout">{selectedLine.architecturalRole === "wall" ? "Wall centerline" : "Line"}</span></PropertyGridRow>
+              <PropertyGridRow label="Type"><span className="property-readout">{selectedLine.architecturalRole === "wall" ? "Wall reference line" : "Line"}</span></PropertyGridRow>
               <PropertyGridRow label="Story"><select className="property-cell-select" value={selectedLine.storyId} onChange={(event) => assignSelectedEntityStory({ id: selectedLine.id, kind: "line" }, event.target.value)} aria-label="Line Story" disabled={!selectedLineIsEditable}>{editor.present.building.stories.map((story) => <option key={story.id} value={story.id}>{story.name}</option>)}</select></PropertyGridRow>
               <PropertyGridRow label="Layer"><select className="property-cell-select" value={selectedLine.layerId} onChange={(event) => assignSelectedLineLayer(event.target.value)} aria-label="Line layer" disabled={!selectedLineIsEditable}>{editor.present.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}{layer.locked ? " (locked)" : ""}{!layer.visible ? " (hidden)" : ""}</option>)}</select></PropertyGridRow>
               {selectedLine.architecturalRole === "wall" ? <>
                 <PropertyGridRow label="Wall type"><select className="property-cell-select" value={selectedLine.wallTypeId ?? editor.present.building.activeWallTypeId} onChange={(event) => assignSelectedWallType(event.target.value)} aria-label="Wall type" disabled={!selectedLineIsEditable}>{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Thickness"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(editor.present.building.wallTypes.find((wallType) => wallType.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]))}</span></PropertyGridRow>
+                <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "wall-center"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
+                <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
               </> : null}
               <PropertyGridRow label="Locked"><button className={selectedLine.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedLineLock}>{selectedLine.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>
               <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>{selectedLine.architecturalRole === "wall" ? "Convert to Line" : "Create Wall"}</button></div>

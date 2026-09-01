@@ -8,6 +8,8 @@ import {
   cloneBuildingStructure,
   createDefaultBuildingStructure,
   removeBuildingStory,
+  wallLayerCenterOffsets,
+  wallReferenceDistanceFromExterior,
 } from "../lib/building-stories.ts";
 
 test("uses rough framing rather than finishes to calculate the next Story datum", () => {
@@ -81,6 +83,17 @@ test("requires an ordered positive-thickness Main group in every wall type", () 
   assert.ok(mainLayer);
   mainLayer.thickness = 0;
   assert.equal(buildingStructureIsValid(zeroDepthMain), false);
+});
+
+test("positions wall layers from selectable Main reference lines and exterior sides", () => {
+  const wallType = createDefaultBuildingStructure().wallTypes[0];
+  assert.equal(wallReferenceDistanceFromExterior(wallType, "exterior-main"), 0.9375);
+  assert.equal(wallReferenceDistanceFromExterior(wallType, "center-main"), 2.6875);
+  assert.equal(wallReferenceDistanceFromExterior(wallType, "interior-main"), 4.4375);
+  assert.equal(wallReferenceDistanceFromExterior(wallType, "wall-center"), 2.46875);
+  assert.deepEqual(wallLayerCenterOffsets(wallType, "exterior-main", "left"), [0.6875, 0.21875, -1.75, -3.75]);
+  assert.deepEqual(wallLayerCenterOffsets(wallType, "exterior-main", "right"), [-0.6875, -0.21875, 1.75, 3.75]);
+  assert.deepEqual(wallLayerCenterOffsets(wallType, "wall-center", "left"), [2.21875, 1.75, -0.21875, -2.21875]);
 });
 
 test("calculates Stories below the anchored First Floor downward", () => {

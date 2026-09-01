@@ -91,10 +91,11 @@ belongs to Main.
 
 ## Current Implementation
 
-- Version-17 project files store the Building Datum, ordered Stories, active and
+- Version-18 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
-  Exterior/Main/Interior group of every wall layer.
+  Exterior/Main/Interior group of every wall layer. Each Wall also stores its
+  exterior side and selected reference line.
 - Legacy version-1 through version-12 projects open with a default First Floor;
   version-13 entities are assigned to the saved anchor Story during upgrade.
 - Manage > Stories opens the Story and Assembly Manager.
@@ -113,9 +114,14 @@ belongs to Main.
   Story rough floor, and the viewport builds separate structural and finish layer
   solids directly from that Story's live assemblies.
 - `W` or Model > Wall draws straight, layered Walls with the same exact input,
-  snaps, and chained-segment workflow as Line. A Wall's centerline stays
-  grip-editable while its base and height follow its assigned Story rough floor
-  and rough ceiling.
+  snaps, and chained-segment workflow as Line. New Walls use the exterior face
+  of the Main group as their reference line and place the exterior to the left
+  of the Start-to-End direction. The reference line stays grip-editable while
+  the base and height follow the assigned Story rough floor and rough ceiling.
+- A selected Wall can use Wall centerline, exterior face of Main, center of Main,
+  or interior face of Main as its stable reference. Its exterior side can be
+  flipped without reversing or moving the drawn path. Changing the Wall type
+  rebuilds layers around the selected reference line.
 - Manage > Wall Types edits reusable exterior-to-interior layered assemblies in
   three explicit groups. Group totals are calculated independently, layer order
   is constrained within each group, and the last Main layer cannot be removed.
@@ -123,13 +129,15 @@ belongs to Main.
 - Version-15 and version-16 wall types are upgraded automatically. Framing
   layers become Main; surrounding layers are classified Exterior or Interior.
   If an older wall has no framing role, its thickest layer becomes Main.
+- Version-17 Walls upgrade to Wall centerline so their existing geometry does
+  not shift. New Walls use the Main-group reference behavior.
 
 ## Next Steps
 
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Add wall direction and selectable reference-line control against the Main
-   group, followed by automatic corner cleanup, joins, and openings.
+3. Add automatic wall corner cleanup and Main-layer-aware joins, followed by
+   openings.
 4. Detect Rooms from wall boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions

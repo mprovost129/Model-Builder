@@ -60,6 +60,7 @@ import {
   stretchModelEntities,
   updateLineGrip,
   updateLineObject,
+  updateWallPlacement,
   updateCircleGrip,
   updateArcGrip,
   updatePolylineObjectVertex,
@@ -1193,6 +1194,8 @@ test("converts a Line into a layered Wall controlled by its Story", () => {
   assert.ok(wall);
   assert.equal(wall.lines[0].architecturalRole, "wall");
   assert.equal(wall.lines[0].wallTypeId, wall.building.activeWallTypeId);
+  assert.equal(wall.lines[0].wallReferenceLine, "exterior-main");
+  assert.equal(wall.lines[0].wallExteriorSide, "left");
   assert.equal(wall.lines[0].start.z, 0);
   assert.equal(wall.lines[0].end.z, 0);
 
@@ -1200,6 +1203,11 @@ test("converts a Line into a layered Wall controlled by its Story", () => {
   assert.ok(edited);
   assert.equal(edited.lines[0].start.z, 0);
   assert.equal(edited.lines[0].end.z, 0);
+
+  const placed = updateWallPlacement(edited, added.line.id, { exteriorSide: "right", referenceLine: "center-main" });
+  assert.ok(placed);
+  assert.equal(placed.lines[0].wallExteriorSide, "right");
+  assert.equal(placed.lines[0].wallReferenceLine, "center-main");
 });
 
 test("keeps Walls on their Story when moved or copied and reassigns removed wall types", () => {
@@ -1227,6 +1235,19 @@ test("keeps Walls on their Story when moved or copied and reassigns removed wall
   const normalized = updateDocumentBuilding({ ...reassigned, building: revised }, removed);
   assert.ok(normalized);
   assert.equal(normalized.lines[0].wallTypeId, removed.activeWallTypeId);
+});
+
+test("flips a Wall's handedness when mirroring so the physical exterior remains mirrored", () => {
+  const added = addLineObject(DEFAULT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 144, y: 0, z: 0 });
+  assert.ok(added);
+  const wall = createWallFromLine(added.document, added.line.id);
+  assert.ok(wall);
+  const mirrored = mirrorModelEntities(wall, [{ id: added.line.id, kind: "line" }], { x: 0, y: -120, z: 0 }, { x: 0, y: 120, z: 0 }, false);
+  assert.ok(mirrored);
+  assert.deepEqual(mirrored.document.lines[0].start, { x: 0, y: 0, z: 0 });
+  assert.deepEqual(mirrored.document.lines[0].end, { x: -144, y: 0, z: 0 });
+  assert.equal(mirrored.document.lines[0].wallExteriorSide, "right");
+  assert.equal(mirrored.document.lines[0].wallReferenceLine, "exterior-main");
 });
 
 test("protects straight Walls from unsupported curved and chamfered corner conversions", () => {

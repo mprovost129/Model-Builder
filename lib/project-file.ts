@@ -39,18 +39,22 @@ import {
   cloneBuildingStructure,
   createDefaultCeilingStructure,
   createDefaultBuildingStructure,
+  WALL_EXTERIOR_SIDES,
   WALL_LAYER_GROUPS,
+  WALL_REFERENCE_LINES,
   type AssemblyKind,
   type AssemblyLayer,
   type AssemblyLayerRole,
   type BuildingStory,
   type BuildingStructure,
   type LayeredAssembly,
+  type WallExteriorSide,
   type WallLayerGroup,
+  type WallReferenceLine,
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 17;
+export const PROJECT_FILE_VERSION = 18;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -326,7 +330,7 @@ function readLayer(value: unknown): ModelLayer | null {
   };
 }
 
-function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean): LineObject | null {
+function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean): LineObject | null {
   if (!isRecord(value) || value.type !== "line" || !isRecord(value.start) || !isRecord(value.end)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -346,7 +350,19 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   const wallTypeId = supportsWalls
     ? value.wallTypeId === null ? null : typeof value.wallTypeId === "string" ? value.wallTypeId : undefined
     : null;
-  if (architecturalRole === undefined || wallTypeId === undefined || (architecturalRole === "wall") !== (wallTypeId !== null)) return null;
+  const wallExteriorSide = supportsWallPlacement
+    ? value.wallExteriorSide === null ? null : typeof value.wallExteriorSide === "string" && WALL_EXTERIOR_SIDES.includes(value.wallExteriorSide as WallExteriorSide) ? value.wallExteriorSide as WallExteriorSide : undefined
+    : architecturalRole === "wall" ? "left" : null;
+  const wallReferenceLine = supportsWallPlacement
+    ? value.wallReferenceLine === null ? null : typeof value.wallReferenceLine === "string" && WALL_REFERENCE_LINES.includes(value.wallReferenceLine as WallReferenceLine) ? value.wallReferenceLine as WallReferenceLine : undefined
+    : architecturalRole === "wall" ? "wall-center" : null;
+  if (
+    architecturalRole === undefined ||
+    wallTypeId === undefined ||
+    wallExteriorSide === undefined ||
+    wallReferenceLine === undefined ||
+    (architecturalRole === "wall") !== (wallTypeId !== null && wallExteriorSide !== null && wallReferenceLine !== null)
+  ) return null;
   if (!isFiniteNumber(startX) || !isFiniteNumber(startY) || !isFiniteNumber(startZ) ||
       !isFiniteNumber(endX) || !isFiniteNumber(endY) || !isFiniteNumber(endZ)) return null;
   const numbers = [startX, startY, startZ, endX, endY, endZ];
@@ -362,6 +378,8 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
     start: { x: startX, y: startY, z: startZ },
     storyId,
     type: "line",
+    wallExteriorSide,
+    wallReferenceLine,
     wallTypeId,
   };
 }
@@ -623,7 +641,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.lines) || value.lines.length > MAXIMUM_LINE_COUNT) {
       return { ok: false, error: "The project line collection is missing or invalid." };
     }
-    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15));
+    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18));
     if (parsedLines.some((line) => line === null)) {
       return { ok: false, error: "One or more drawing lines are invalid." };
     }

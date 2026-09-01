@@ -11,6 +11,10 @@ export type AssemblyLayerRole =
 
 export const WALL_LAYER_GROUPS = ["exterior", "main", "interior"] as const;
 export type WallLayerGroup = (typeof WALL_LAYER_GROUPS)[number];
+export const WALL_REFERENCE_LINES = ["wall-center", "exterior-main", "center-main", "interior-main"] as const;
+export type WallReferenceLine = (typeof WALL_REFERENCE_LINES)[number];
+export const WALL_EXTERIOR_SIDES = ["left", "right"] as const;
+export type WallExteriorSide = (typeof WALL_EXTERIOR_SIDES)[number];
 
 export type AssemblyLayer = {
   id: string;
@@ -217,6 +221,30 @@ export function wallLayerGroupThickness(assembly: LayeredAssembly, group: WallLa
   return snapToSixteenth(
     assembly.layers.reduce((total, layer) => total + (layer.wallGroup === group ? layer.thickness : 0), 0),
   );
+}
+
+export function wallReferenceDistanceFromExterior(assembly: LayeredAssembly, referenceLine: WallReferenceLine): number {
+  const exteriorThickness = wallLayerGroupThickness(assembly, "exterior");
+  const mainThickness = wallLayerGroupThickness(assembly, "main");
+  if (referenceLine === "exterior-main") return exteriorThickness;
+  if (referenceLine === "center-main") return exteriorThickness + mainThickness / 2;
+  if (referenceLine === "interior-main") return exteriorThickness + mainThickness;
+  return assemblyTotalThickness(assembly) / 2;
+}
+
+/** Layer-center offsets from the drawn reference line along its left-hand normal. */
+export function wallLayerCenterOffsets(
+  assembly: LayeredAssembly,
+  referenceLine: WallReferenceLine,
+  exteriorSide: WallExteriorSide,
+): number[] {
+  const referenceDistance = wallReferenceDistanceFromExterior(assembly, referenceLine);
+  let distanceFromExterior = 0;
+  return assembly.layers.map((layer) => {
+    const inwardDistance = distanceFromExterior + layer.thickness / 2 - referenceDistance;
+    distanceFromExterior += layer.thickness;
+    return exteriorSide === "left" ? -inwardDistance : inwardDistance;
+  });
 }
 
 function stringsAreValid(values: Array<{ limit: number; value: string }>): boolean {
