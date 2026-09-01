@@ -58,7 +58,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 21;
+export const PROJECT_FILE_VERSION = 22;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -158,7 +158,7 @@ function inferLegacyWallLayerGroups(layers: AssemblyLayer[]): AssemblyLayer[] {
   }));
 }
 
-function readLayeredAssembly(value: unknown, kind: AssemblyKind, supportsWallGroups = false, supportsWallJoinMetadata = false, supportsWallEndCaps = false): LayeredAssembly | null {
+function readLayeredAssembly(value: unknown, kind: AssemblyKind, supportsWallGroups = false, supportsWallJoinMetadata = false, wallEndCapVersion: 0 | 1 | 2 = 0): LayeredAssembly | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
@@ -178,8 +178,15 @@ function readLayeredAssembly(value: unknown, kind: AssemblyKind, supportsWallGro
     name: value.name.trim(),
   };
   if (kind === "wall-structure") {
-    if (supportsWallEndCaps && value.wallEndCapLayerId !== null && typeof value.wallEndCapLayerId !== "string") return null;
-    assembly.wallEndCapLayerId = supportsWallEndCaps ? value.wallEndCapLayerId as string | null : null;
+    if (wallEndCapVersion === 2) {
+      if (!Array.isArray(value.wallEndCapLayerIds) || value.wallEndCapLayerIds.some((layerId) => typeof layerId !== "string")) return null;
+      assembly.wallEndCapLayerIds = value.wallEndCapLayerIds as string[];
+    } else if (wallEndCapVersion === 1) {
+      if (value.wallEndCapLayerId !== null && typeof value.wallEndCapLayerId !== "string") return null;
+      assembly.wallEndCapLayerIds = typeof value.wallEndCapLayerId === "string" ? [value.wallEndCapLayerId] : [];
+    } else {
+      assembly.wallEndCapLayerIds = [];
+    }
   }
   return assembly;
 }
@@ -209,7 +216,7 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, supportsWallEndCaps: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -221,7 +228,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   if (stories.some((story) => story === null)) return null;
   const defaults = createDefaultBuildingStructure();
   const wallTypes = supportsWallTypes && Array.isArray(value.wallTypes)
-    ? value.wallTypes.map((wallType) => readLayeredAssembly(wallType, "wall-structure", supportsWallGroups, supportsWallJoinMetadata, supportsWallEndCaps))
+    ? value.wallTypes.map((wallType) => readLayeredAssembly(wallType, "wall-structure", supportsWallGroups, supportsWallJoinMetadata, wallEndCapVersion))
     : defaults.wallTypes;
   if (wallTypes.some((wallType) => wallType === null)) return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : defaults.activeWallTypeId;
@@ -563,7 +570,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 21);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

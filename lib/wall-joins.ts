@@ -480,6 +480,24 @@ function joinedBoundaryPoint(
     : ownPoint;
 }
 
+function selectedEndCapLayers(wallType: LayeredAssembly) {
+  const selectedIds = new Set(wallType.wallEndCapLayerIds ?? []);
+  return wallType.layers.flatMap((layer, layerIndex) => selectedIds.has(layer.id) && layer.role === "finish" && layer.thickness > 0
+    ? [{ layer, layerIndex }]
+    : []);
+}
+
+function endCapDepths(line: LineObject, wallType: LayeredAssembly) {
+  const layers = selectedEndCapLayers(wallType);
+  const totalDepth = layers.reduce((total, item) => total + item.layer.thickness, 0);
+  const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
+  const scale = totalDepth > 0 ? Math.min(1, length / 2 / totalDepth) : 0;
+  return {
+    layers: layers.map((item) => ({ ...item, depth: item.layer.thickness * scale })),
+    totalDepth: totalDepth * scale,
+  };
+}
+
 export function wallLayerFootprint(
   line: LineObject,
   wallType: LayeredAssembly,
@@ -496,20 +514,18 @@ export function wallLayerFootprint(
     endExterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "exterior", participatesInJoin ? joins?.end : undefined, linesById, wallTypesById),
     endInterior: joinedBoundaryPoint(line, "end", wallType, layerIndex, "interior", participatesInJoin ? joins?.end : undefined, linesById, wallTypesById),
   };
-  const capLayer = wallType.layers.find((layer) => layer.id === wallType.wallEndCapLayerId);
   const direction = lineDirection(line);
-  if (!capLayer || !direction) return footprint;
-  const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
-  const capDepth = Math.min(capLayer.thickness, length / 2);
+  const { totalDepth } = endCapDepths(line, wallType);
+  if (totalDepth <= 0 || !direction) return footprint;
   const startIsOpen = !joins?.start && !joinPlan.occupiedEndpoints.get(line.id)?.has("start");
   const endIsOpen = !joins?.end && !joinPlan.occupiedEndpoints.get(line.id)?.has("end");
   if (startIsOpen) {
-    footprint.startExterior = { x: footprint.startExterior.x + direction.x * capDepth, y: footprint.startExterior.y + direction.y * capDepth };
-    footprint.startInterior = { x: footprint.startInterior.x + direction.x * capDepth, y: footprint.startInterior.y + direction.y * capDepth };
+    footprint.startExterior = { x: footprint.startExterior.x + direction.x * totalDepth, y: footprint.startExterior.y + direction.y * totalDepth };
+    footprint.startInterior = { x: footprint.startInterior.x + direction.x * totalDepth, y: footprint.startInterior.y + direction.y * totalDepth };
   }
   if (endIsOpen) {
-    footprint.endExterior = { x: footprint.endExterior.x - direction.x * capDepth, y: footprint.endExterior.y - direction.y * capDepth };
-    footprint.endInterior = { x: footprint.endInterior.x - direction.x * capDepth, y: footprint.endInterior.y - direction.y * capDepth };
+    footprint.endExterior = { x: footprint.endExterior.x - direction.x * totalDepth, y: footprint.endExterior.y - direction.y * totalDepth };
+    footprint.endInterior = { x: footprint.endInterior.x - direction.x * totalDepth, y: footprint.endInterior.y - direction.y * totalDepth };
   }
   return footprint;
 }
@@ -519,11 +535,9 @@ export function wallEndCapFootprints(
   wallType: LayeredAssembly,
   joinPlan: AutomaticWallJoinPlan,
 ): WallEndCapFootprint[] {
-  const layerIndex = wallType.layers.findIndex((layer) => layer.id === wallType.wallEndCapLayerId && layer.role === "finish" && layer.thickness > 0);
   const direction = lineDirection(line);
-  if (layerIndex < 0 || !direction) return [];
-  const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
-  const depth = Math.min(wallType.layers[layerIndex].thickness, length / 2);
+  const { layers } = endCapDepths(line, wallType);
+  if (layers.length === 0 || !direction) return [];
   const firstOffsets = boundaryOffsets(wallType, line, 0);
   const lastOffsets = boundaryOffsets(wallType, line, wallType.layers.length - 1);
   const exteriorOffset = firstOffsets.exterior;
@@ -533,12 +547,36 @@ export function wallEndCapFootprints(
   if (!joins?.start && !joinPlan.occupiedEndpoints.get(line.id)?.has("start")) {
     const startExterior = offsetEndpoint(line, "start", exteriorOffset);
     const startInterior = offsetEndpoint(line, "start", interiorOffset);
-    result.push({ endpoint: "start", layerIndex, startExterior, startInterior, endExterior: { x: startExterior.x + direction.x * depth, y: startExterior.y + direction.y * depth }, endInterior: { x: startInterior.x + direction.x * depth, y: startInterior.y + direction.y * depth } });
+    let cursor = 0;
+    layers.forEach(({ depth, layerIndex }) => {
+      const nextCursor = cursor + depth;
+      result.push({
+        endpoint: "start",
+        layerIndex,
+        startExterior: { x: startExterior.x + direction.x * cursor, y: startExterior.y + direction.y * cursor },
+        startInterior: { x: startInterior.x + direction.x * cursor, y: startInterior.y + direction.y * cursor },
+        endExterior: { x: startExterior.x + direction.x * nextCursor, y: startExterior.y + direction.y * nextCursor },
+        endInterior: { x: startInterior.x + direction.x * nextCursor, y: startInterior.y + direction.y * nextCursor },
+      });
+      cursor = nextCursor;
+    });
   }
   if (!joins?.end && !joinPlan.occupiedEndpoints.get(line.id)?.has("end")) {
     const endExterior = offsetEndpoint(line, "end", exteriorOffset);
     const endInterior = offsetEndpoint(line, "end", interiorOffset);
-    result.push({ endpoint: "end", layerIndex, endExterior, endInterior, startExterior: { x: endExterior.x - direction.x * depth, y: endExterior.y - direction.y * depth }, startInterior: { x: endInterior.x - direction.x * depth, y: endInterior.y - direction.y * depth } });
+    let cursor = 0;
+    layers.forEach(({ depth, layerIndex }) => {
+      const nextCursor = cursor + depth;
+      result.push({
+        endpoint: "end",
+        layerIndex,
+        startExterior: { x: endExterior.x - direction.x * nextCursor, y: endExterior.y - direction.y * nextCursor },
+        startInterior: { x: endInterior.x - direction.x * nextCursor, y: endInterior.y - direction.y * nextCursor },
+        endExterior: { x: endExterior.x - direction.x * cursor, y: endExterior.y - direction.y * cursor },
+        endInterior: { x: endInterior.x - direction.x * cursor, y: endInterior.y - direction.y * cursor },
+      });
+      cursor = nextCursor;
+    });
   }
   return result;
 }

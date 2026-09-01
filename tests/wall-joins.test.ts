@@ -198,7 +198,7 @@ test("respects a manual square endpoint without reporting an unresolved junction
 test("builds non-overlapping finish caps at truly open wall ends", () => {
   const line = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 });
   const types = wallTypes();
-  types[0].wallEndCapLayerId = types[0].layers[0].id;
+  types[0].wallEndCapLayerIds = [types[0].layers[0].id];
   const plan = buildAutomaticWallJoinPlan([line], types);
   const footprint = wallLayerFootprint(line, types[0], 2, plan, new Map([[line.id, line]]), typeMap(types));
   const caps = wallEndCapFootprints(line, types[0], plan);
@@ -219,7 +219,7 @@ test("does not cap shared straight or automatically joined endpoints", () => {
   const corner = wall("wall-03", { x: 240, y: 0 }, { x: 240, y: 120 });
   const lines = [first, continuation, corner];
   const types = wallTypes();
-  types[0].wallEndCapLayerId = types[0].layers[0].id;
+  types[0].wallEndCapLayerIds = [types[0].layers[0].id];
   const plan = buildAutomaticWallJoinPlan(lines, types);
 
   assert.deepEqual(wallEndCapFootprints(first, types[0], plan).map((cap) => cap.endpoint), ["start"]);
@@ -231,9 +231,30 @@ test("caps endpoints explicitly disconnected from automatic cleanup", () => {
   const first = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 }, { wallEndJoinMode: "square" });
   const second = wall("wall-02", { x: 120, y: 0 }, { x: 120, y: 120 }, { wallStartJoinMode: "square" });
   const types = wallTypes();
-  types[0].wallEndCapLayerId = types[0].layers.at(-1)?.id ?? null;
+  types[0].wallEndCapLayerIds = [types[0].layers.at(-1)?.id ?? ""];
   const plan = buildAutomaticWallJoinPlan([first, second], types);
 
   assert.deepEqual(wallEndCapFootprints(first, types[0], plan).map((cap) => cap.endpoint), ["start", "end"]);
   assert.deepEqual(wallEndCapFootprints(second, types[0], plan).map((cap) => cap.endpoint), ["start", "end"]);
+});
+
+test("stacks multiple finish wraps without overlaps", () => {
+  const line = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 });
+  const types = wallTypes();
+  types[0].wallEndCapLayerIds = [types[0].layers[0].id, types[0].layers.at(-1)?.id ?? ""];
+  const plan = buildAutomaticWallJoinPlan([line], types);
+  const caps = wallEndCapFootprints(line, types[0], plan);
+  const startCaps = caps.filter((cap) => cap.endpoint === "start");
+  const endCaps = caps.filter((cap) => cap.endpoint === "end");
+  const body = wallLayerFootprint(line, types[0], 2, plan, new Map([[line.id, line]]), typeMap(types));
+
+  assert.equal(startCaps.length, 2);
+  assert.equal(endCaps.length, 2);
+  assert.deepEqual(startCaps.map((cap) => cap.layerIndex), [0, 3]);
+  assert.equal(startCaps[0].startExterior.x, 0);
+  assert.equal(startCaps[0].endExterior.x, 0.5);
+  assert.equal(startCaps[1].startExterior.x, startCaps[0].endExterior.x);
+  assert.equal(startCaps[1].endExterior.x, 1);
+  assert.equal(body.startExterior.x, 1);
+  assert.equal(body.endExterior.x, 119);
 });

@@ -8026,7 +8026,9 @@ function StoryAssemblyEditor({
   const updateLayer = (index: number, change: Partial<LayeredAssembly["layers"][number]>) => {
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
     next.layers[index] = { ...next.layers[index], ...change };
-    if (isWallAssembly && next.wallEndCapLayerId === next.layers[index].id && (next.layers[index].role !== "finish" || next.layers[index].thickness <= 0)) next.wallEndCapLayerId = null;
+    if (isWallAssembly && (next.layers[index].role !== "finish" || next.layers[index].thickness <= 0)) {
+      next.wallEndCapLayerIds = (next.wallEndCapLayerIds ?? []).filter((layerId) => layerId !== next.layers[index].id);
+    }
     if (isWallAssembly && change.wallGroup !== undefined) {
       next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
     }
@@ -8042,8 +8044,14 @@ function StoryAssemblyEditor({
   };
   const removeLayer = (index: number) => {
     const next = { ...assembly, layers: assembly.layers.filter((_, candidate) => candidate !== index).map((layer) => ({ ...layer })) };
-    if (isWallAssembly && assembly.layers[index]?.id === next.wallEndCapLayerId) next.wallEndCapLayerId = null;
+    if (isWallAssembly) next.wallEndCapLayerIds = (next.wallEndCapLayerIds ?? []).filter((layerId) => layerId !== assembly.layers[index]?.id);
     onChange(next);
+  };
+  const toggleEndCapLayer = (layerId: string, enabled: boolean) => {
+    const selectedIds = new Set(assembly.wallEndCapLayerIds ?? []);
+    if (enabled) selectedIds.add(layerId);
+    else selectedIds.delete(layerId);
+    onChange({ ...assembly, wallEndCapLayerIds: assembly.layers.flatMap((layer) => selectedIds.has(layer.id) ? [layer.id] : []) });
   };
   const mainLayerCount = assembly.layers.filter((layer) => layer.wallGroup === "main").length;
   const renderLayer = (layer: AssemblyLayer, index: number) => {
@@ -8067,6 +8075,7 @@ function StoryAssemblyEditor({
         </select>
         <StoryDimensionInput allowZero={isWallAssembly} key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
         {isWallAssembly ? <label className="story-layer-join" title="When enabled, this layer is trimmed or mitered by automatic wall junctions."><input type="checkbox" checked={layer.participatesInJoin ?? true} onChange={(event) => updateLayer(index, { participatesInJoin: event.target.checked })} aria-label={`${layer.name} participates in automatic wall joins`} /><span>{layer.participatesInJoin === false ? "Square" : "Auto"}</span></label> : null}
+        {isWallAssembly ? <label className="story-layer-join" title={layer.role === "finish" && layer.thickness > 0 ? "Wrap this finish across truly open wall ends." : "Only positive-thickness Finish layers can wrap open wall ends."}><input type="checkbox" checked={(assembly.wallEndCapLayerIds ?? []).includes(layer.id)} disabled={layer.role !== "finish" || layer.thickness <= 0} onChange={(event) => toggleEndCapLayer(layer.id, event.target.checked)} aria-label={`${layer.name} wraps open wall ends`} /><span>{(assembly.wallEndCapLayerIds ?? []).includes(layer.id) ? "Wrap" : "Off"}</span></label> : null}
         <div className="story-layer-actions"><button type="button" onClick={() => moveLayer(index, -1)} disabled={!previousLayer || (isWallAssembly && previousLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} up`}>↑</button><button type="button" onClick={() => moveLayer(index, 1)} disabled={!nextLayer || (isWallAssembly && nextLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} down`}>↓</button><button type="button" onClick={() => removeLayer(index)} disabled={isOnlyMainLayer} aria-label={`Remove ${layer.name}`}>×</button></div>
       </div>
     );
@@ -8077,7 +8086,7 @@ function StoryAssemblyEditor({
         <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story datums"}</span></div>
         <b>{formatArchitectural(assemblyTotalThickness(assembly))}</b>
       </header>
-      <div className={isWallAssembly ? "story-layer-grid story-layer-head has-wall-group" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isWallAssembly ? <span>Group</span> : null}<span>Role</span><span>Thickness</span>{isWallAssembly ? <span>Join</span> : null}<span>Order</span></div>
+      <div className={isWallAssembly ? "story-layer-grid story-layer-head has-wall-group" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isWallAssembly ? <span>Group</span> : null}<span>Role</span><span>Thickness</span>{isWallAssembly ? <><span>Join</span><span>End</span></> : null}<span>Order</span></div>
       {isWallAssembly ? WALL_LAYER_GROUPS.map((group) => (
         <div className="story-wall-layer-group" key={group}>
           <div className={`story-wall-group-heading is-${group}`}><strong>{WALL_LAYER_GROUP_LABELS[group]}</strong><span>{group === "main" ? "Structural core and future reference layer" : group === "exterior" ? "Outside of the Main layer" : "Room side of the Main layer"}</span><b>{formatArchitectural(wallLayerGroupThickness(assembly, group))}</b></div>
@@ -8251,11 +8260,13 @@ function WallTypeManagerDialog({
   const addType = () => {
     if (draft.wallTypes.length >= 32) return;
     const id = nextWallTypeId(draft);
+    const layerIdMap = new Map(selected.layers.map((layer, index) => [layer.id, `${id}-${String(index + 1).padStart(2, "0")}`]));
     const copy: LayeredAssembly = {
       ...selected,
       id,
       name: `${selected.name} Copy`,
-      layers: selected.layers.map((layer, index) => ({ ...layer, id: `${id}-${String(index + 1).padStart(2, "0")}` })),
+      layers: selected.layers.map((layer) => ({ ...layer, id: layerIdMap.get(layer.id) ?? layer.id })),
+      wallEndCapLayerIds: (selected.wallEndCapLayerIds ?? []).flatMap((layerId) => layerIdMap.get(layerId) ?? []),
     };
     setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: id, wallTypes: [...current.wallTypes.map((wallType) => ({ ...wallType, layers: wallType.layers.map((layer) => ({ ...layer })) })), copy] }));
     setSelectedId(id);
@@ -8288,11 +8299,11 @@ function WallTypeManagerDialog({
           <main className="story-editor">
             <section className="story-editor-summary">
               <label><span>Type name</span><input value={selected.name} maxLength={80} onChange={(event) => replaceSelected({ ...selected, name: event.target.value })} /></label>
-              <label><span>Open-end cap</span><select value={selected.wallEndCapLayerId ?? ""} onChange={(event) => replaceSelected({ ...selected, wallEndCapLayerId: event.target.value || null })} aria-label="Wall open-end cap layer"><option value="">None</option>{selected.layers.filter((layer) => layer.role === "finish" && layer.thickness > 0).map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></label>
+              <label><span>Open-end wrap</span><output>{selected.wallEndCapLayerIds?.length ? `${selected.wallEndCapLayerIds.length} finish layer${selected.wallEndCapLayerIds.length === 1 ? "" : "s"}` : "None"}</output></label>
               <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
             </section>
             <StoryAssemblyEditor assembly={selected} onChange={replaceSelected} />
-            <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core. An optional finish layer can cap truly open or manually disconnected ends; body layers stop behind the cap so solids do not overlap. New walls use the active type; existing walls retain their assigned type until changed.</p>
+            <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core. Use End to stack one or more positive Finish layers across truly open or manually disconnected ends. Each wrap uses its material thickness, and body layers stop behind the complete stack so solids do not overlap. New walls use the active type; existing walls retain their assigned type until changed.</p>
           </main>
         </div>
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}

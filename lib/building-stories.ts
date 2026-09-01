@@ -38,8 +38,8 @@ export type LayeredAssembly = {
   kind: AssemblyKind;
   layers: AssemblyLayer[];
   name: string;
-  /** Wall-only finish layer used to generate non-overlapping caps at open ends. */
-  wallEndCapLayerId?: string | null;
+  /** Wall-only ordered finish layers used to generate non-overlapping wraps at open ends. */
+  wallEndCapLayerIds?: string[];
 };
 
 export type BuildingStory = {
@@ -166,7 +166,7 @@ export function createDefaultWallType(): LayeredAssembly {
     id: "wall-type-01",
     kind: "wall-structure",
     name: "2x4 Exterior Wall",
-    wallEndCapLayerId: null,
+    wallEndCapLayerIds: [],
     layers: [
       { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
       { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", participatesInJoin: true, role: "sheathing", thickness: 0.4375, wallGroup: "exterior" },
@@ -204,7 +204,9 @@ export function cloneAssemblyLayer(layer: AssemblyLayer): AssemblyLayer {
 }
 
 export function cloneLayeredAssembly(assembly: LayeredAssembly): LayeredAssembly {
-  return { ...assembly, layers: assembly.layers.map(cloneAssemblyLayer) };
+  const clone = { ...assembly, layers: assembly.layers.map(cloneAssemblyLayer) };
+  if (assembly.wallEndCapLayerIds) clone.wallEndCapLayerIds = [...assembly.wallEndCapLayerIds];
+  return clone;
 }
 
 export function cloneBuildingStory(story: BuildingStory): BuildingStory {
@@ -300,12 +302,10 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
       previousGroupIndex = groupIndex;
       if (layer.wallGroup === "main" && layer.thickness > 0) hasPositiveMainLayer = true;
     }
-    if (
-      assembly.wallEndCapLayerId !== null &&
-      (typeof assembly.wallEndCapLayerId !== "string" || !assembly.layers.some((layer) => layer.id === assembly.wallEndCapLayerId && layer.role === "finish" && layer.thickness > 0))
-    ) return false;
+    if (!Array.isArray(assembly.wallEndCapLayerIds) || new Set(assembly.wallEndCapLayerIds).size !== assembly.wallEndCapLayerIds.length) return false;
+    if (assembly.wallEndCapLayerIds.some((layerId) => !assembly.layers.some((layer) => layer.id === layerId && layer.role === "finish" && layer.thickness > 0))) return false;
     if (!hasPositiveMainLayer) return false;
-  } else if (assembly.wallEndCapLayerId !== undefined || assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
+  } else if (assembly.wallEndCapLayerIds !== undefined || assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
     return false;
   }
   return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;

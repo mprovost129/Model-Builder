@@ -95,12 +95,13 @@ T-junctions. Non-participating layers remain square at their editable Wall path
 endpoint. This gives zero-thickness membranes and other special construction
 layers an explicit connection policy without changing the Wall reference line.
 
-A Wall Type can optionally designate one positive-thickness Finish layer as its
-open-end cap. At a truly open or manually disconnected endpoint, every layer
-body stops behind the cap by that Finish layer's thickness and one cap solid
-spans the complete wall assembly. This creates buildable, non-overlapping finish
-geometry. Automatic joins, straight continuations, and unresolved shared nodes
-remain uncapped so their junction logic stays authoritative.
+A Wall Type can optionally designate one or more positive-thickness Finish
+layers as its ordered open-end wrap. At a truly open or manually disconnected
+endpoint, every layer body stops behind the complete wrap stack. Each selected
+Finish layer contributes one full-width band using its actual material thickness,
+in the wall assembly's exterior-to-interior order. The bands meet without
+overlapping. Automatic joins, straight continuations, and unresolved shared
+nodes remain unwrapped so their junction logic stays authoritative.
 
 ## Current Implementation
 
@@ -108,7 +109,7 @@ remain uncapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-21 project files store the Building Datum, ordered Stories, active and
+- Version-22 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -159,9 +160,9 @@ remain uncapped so their junction logic stays authoritative.
 - Manage > Wall Types edits reusable exterior-to-interior layered assemblies in
   three explicit groups. Group totals are calculated independently, layer order
   is constrained within each group, and the last Main layer cannot be removed.
-  Each layer can opt into automatic junction cleanup or remain square-ended. A
-  positive Finish layer can be selected as the open-end cap; selecting None
-  leaves every open Wall end square with no wrap.
+  Each layer can opt into automatic junction cleanup or remain square-ended.
+  Any positive Finish layers can independently opt into the ordered open-end
+  wrap; selecting none leaves every open Wall end square with no wrap.
   Existing Walls retain an assigned type; new Walls use the active type.
 - Version-15 and version-16 wall types are upgraded automatically. Framing
   layers become Main; surrounding layers are classified Exterior or Interior.
@@ -173,8 +174,8 @@ remain uncapped so their junction logic stays authoritative.
 
 1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Extend the completed single-layer open-end caps into configurable return
-   depths and multi-layer finish-wrap rules, then add Wall openings.
+3. Add wall openings, then extend the completed multi-layer open-end wraps with
+   opening-specific returns and configurable return depths.
 4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
    floor, ceiling, and assembly defaults.
 5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions
