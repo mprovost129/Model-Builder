@@ -41,7 +41,7 @@ button { color: inherit; }
 
 .app-shell {
   display: grid;
-  grid-template-rows: 32px 29px 92px 30px minmax(0, 1fr) 34px 29px;
+  grid-template-rows: 36px 27px 29px 92px 30px minmax(0, 1fr) 34px 29px;
   width: 100vw;
   height: 100vh;
   min-width: 940px;
@@ -49,18 +49,31 @@ button { color: inherit; }
 }
 
 .appbar {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 8px;
-  background: #293440;
-  border-bottom: 1px solid #3f4b58;
-  z-index: 8;
+  gap: 6px;
+  padding: 0 9px 0 0;
+  background: #27323d;
+  border-bottom: 1px solid #46525e;
+  box-shadow: inset 0 1px rgb(255 255 255 / 3%);
+  z-index: 42;
 }
 
-.brand { display: flex; align-items: center; gap: 6px; padding-right: 4px; }
-.brand .cube-icon { width: 19px; height: 19px; transform: scale(.72); }
-.brand strong { color: var(--accent-soft); font-size: 10px; letter-spacing: .1em; }
+.program-button {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  width: 44px;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid #65522f;
+  background: linear-gradient(#3d3324, #2f281d);
+  cursor: pointer;
+}
+.program-button:hover,
+.program-button[aria-expanded="true"] { background: #493a26; box-shadow: inset 0 -2px var(--accent); }
+.program-button .cube-icon { transform: scale(.78); }
 
 .project-name-shell {
   position: absolute;
@@ -108,6 +121,7 @@ button { color: inherit; }
   display: flex;
   align-items: center;
   gap: 1px;
+  height: 100%;
 }
 
 .quick-access button,
@@ -123,6 +137,8 @@ button { color: inherit; }
 }
 .quick-access button:hover:not(:disabled), .help-button:hover, .fit-view:hover { border-color: #536170; background: #35414e; }
 .quick-access button:disabled { opacity: .34; cursor: default; }
+.quick-access button { position: relative; min-width: 28px; height: 27px; padding: 2px 5px; }
+.quick-access button sup { position: absolute; top: 2px; right: 1px; color: var(--accent-soft); font-size: 7px; font-weight: 700; }
 .quick-separator { width: 1px; height: 16px; margin: 0 3px; background: #4c5864; }
 .workspace-name {
   margin-left: auto;
@@ -131,22 +147,64 @@ button { color: inherit; }
 }
 .help-button { width: 23px; height: 23px; padding: 0; border-color: #52606e; border-radius: 50%; font-size: 11px; }
 
+.program-menu {
+  position: absolute;
+  z-index: 52;
+  top: 35px;
+  left: 0;
+  width: 330px;
+  border: 1px solid #596674;
+  border-radius: 0 0 4px 0;
+  background: #1c242d;
+  box-shadow: 0 16px 38px rgb(0 0 0 / 52%);
+}
+.program-menu > header { display: flex; align-items: center; gap: 11px; min-height: 57px; padding: 9px 13px; border-bottom: 1px solid #3d4853; background: #26313b; }
+.program-menu > header .cube-icon { transform: scale(.78); }
+.program-menu > header > span { display: grid; gap: 2px; }
+.program-menu > header strong { color: #f0d49d; font-size: 12px; }
+.program-menu > header small { color: #8d9aa6; font-size: 8px; }
+.program-menu-primary { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; padding: 7px; background: #151c23; }
+.program-menu-primary > button { display: grid; grid-template-columns: 31px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 55px; padding: 7px 8px; border: 1px solid transparent; border-radius: 2px; background: #202a34; text-align: left; cursor: pointer; }
+.program-menu-primary > button:hover { border-color: #806735; background: #332a1d; }
+.program-menu-primary > button > b { color: #e6bd70; font-size: 20px; font-weight: 400; text-align: center; }
+.program-menu-primary > button > span { display: grid; gap: 3px; min-width: 0; }
+.program-menu-primary strong { color: #e3e9ee; font-size: 9px; }
+.program-menu-primary small { color: #7f8c98; font-size: 7px; line-height: 1.35; }
+.program-menu > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 6px 10px; border-top: 1px solid #3d4853; color: #aab5bf; background: #202832; font-size: 8px; }
+.program-menu > footer small { color: #7f8c98; }
+
+.menu-strip {
+  position: relative;
+  z-index: 41;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 7px;
+  border-bottom: 1px solid #3b4651;
+  background: #1b222a;
+}
+.menu-bar-item { position: relative; display: flex; }
+.menu-bar-item > button { min-width: 54px; padding: 0 11px; border: 0; border-right: 1px solid transparent; border-left: 1px solid transparent; background: transparent; color: #c3ccd4; font-size: 10px; cursor: pointer; }
+.menu-bar-item > button:hover,
+.menu-bar-item > button.is-open { border-color: #46525e; background: #2d3742; color: #fff; }
+.menu-strip-context { display: flex; align-items: center; margin-left: auto; padding-right: 7px; color: #677582; font: 700 7px var(--font-geist-mono), monospace; letter-spacing: .13em; }
+.application-menu { position: absolute; z-index: 52; top: 26px; left: 0; display: grid; min-width: 245px; padding: 5px; border: 1px solid #596674; border-radius: 0 0 3px 3px; background: #202832; box-shadow: 0 12px 28px rgb(0 0 0 / 48%); }
+.application-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: 2px; background: transparent; color: #d9e0e6; font-size: 9px; text-align: left; cursor: pointer; }
+.application-menu > button:hover:not(:disabled) { border-color: #685631; background: #332a1d; color: #f0d49d; }
+.application-menu > button:disabled { color: #64717d; cursor: default; }
+.application-menu kbd { color: #7f8c98; font: 7px var(--font-geist-mono), monospace; }
+.application-menu hr { width: 100%; height: 1px; margin: 4px 0; border: 0; background: #3c4752; }
+.menu-dismiss-layer { position: fixed; z-index: 40; inset: 0; padding: 0; border: 0; background: transparent; cursor: default; }
+
 .ribbon-tabs {
+  position: relative;
+  z-index: 8;
   display: flex;
   align-items: end;
   gap: 1px;
   padding: 0 6px;
   background: #202832;
   border-bottom: 1px solid #43505d;
-}
-.product-name {
-  align-self: center;
-  min-width: 144px;
-  padding-left: 8px;
-  color: var(--accent-soft);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: .13em;
 }
 .ribbon-tabs button {
   align-self: stretch;
@@ -304,7 +362,7 @@ button { color: inherit; }
 .file-notice {
   position: fixed;
   z-index: 20;
-  top: 194px;
+  top: 225px;
   left: 50%;
   display: flex;
   align-items: center;
@@ -331,7 +389,7 @@ button { color: inherit; }
 .recovery-notice {
   position: fixed;
   z-index: 20;
-  top: 194px;
+  top: 225px;
   left: 50%;
   display: flex;
   align-items: center;

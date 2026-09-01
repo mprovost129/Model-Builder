@@ -8527,6 +8527,7 @@ export function ModelBuilderApp() {
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
   const [showStartGuide, setShowStartGuide] = useState(true);
+  const [topMenu, setTopMenu] = useState<"edit" | "file" | "help" | "program" | "tools" | "view" | "window" | null>(null);
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
   const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.top);
@@ -11604,9 +11605,9 @@ export function ModelBuilderApp() {
     setFileNotice({ text: "Started a blank new plan in Top view. Adjust Stories and Wall Types, then begin drawing.", tone: "info" });
   }, [confirmDiscard, setDrawingPlaneFromBuilding, setSelectionForDocument]);
 
-  const saveProject = useCallback(() => {
+  const saveProjectWithName = useCallback((requestedName: string) => {
     const now = new Date().toISOString();
-    const name = normalizedProjectName;
+    const name = requestedName.trim() || "Untitled Model";
     const project = createProjectDocument({
       createdAt: projectCreatedAt,
       document: editor.present,
@@ -11633,7 +11634,17 @@ export function ModelBuilderApp() {
       text: `Saved ${projectFilename(name)} to Downloads.`,
       tone: "success",
     });
-  }, [editor.present, normalizedProjectName, projectCreatedAt]);
+  }, [editor.present, projectCreatedAt]);
+
+  const saveProject = useCallback(() => {
+    saveProjectWithName(normalizedProjectName);
+  }, [normalizedProjectName, saveProjectWithName]);
+
+  const saveProjectAs = useCallback(() => {
+    const requestedName = window.prompt("Save project as", normalizedProjectName);
+    if (requestedName === null) return;
+    saveProjectWithName(requestedName);
+  }, [normalizedProjectName, saveProjectWithName]);
 
   const requestOpen = useCallback(() => {
     if (!confirmDiscard()) return;
@@ -11865,9 +11876,14 @@ export function ModelBuilderApp() {
   useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        newProject();
+        return;
+      }
       if (event.key.toLowerCase() === "s") {
         event.preventDefault();
-        saveProject();
+        if (event.shiftKey) saveProjectAs(); else saveProject();
         return;
       }
       if (event.key.toLowerCase() === "o") {
@@ -11897,7 +11913,7 @@ export function ModelBuilderApp() {
     };
     window.addEventListener("keydown", handleHistoryShortcut);
     return () => window.removeEventListener("keydown", handleHistoryShortcut);
-  }, [lineMode, polylineMode, redo, requestOpen, saveProject, undo]);
+  }, [lineMode, newProject, polylineMode, redo, requestOpen, saveProject, saveProjectAs, undo]);
 
   useEffect(() => {
     const warnBeforeClose = (event: BeforeUnloadEvent) => {
@@ -12046,6 +12062,10 @@ export function ModelBuilderApp() {
       : `Specify two corners by click or exact coordinates. After the first corner, use @X,Y or enter dimensions such as 12' x 8'; the cursor chooses the quadrant.`;
 
   const activeStoryCalculation = calculateStoryElevations(editor.present.building).find((calculation) => calculation.storyId === activeStory.id);
+  const runTopMenuCommand = (command: () => void) => {
+    setTopMenu(null);
+    command();
+  };
 
   return (
     <main className="app-shell">
@@ -12059,14 +12079,14 @@ export function ModelBuilderApp() {
         aria-hidden="true"
       />
       <header className="appbar">
-        <div className="brand">
+        <button className="program-button" type="button" onClick={() => setTopMenu((current) => current === "program" ? null : "program")} aria-label="Program menu" aria-haspopup="menu" aria-expanded={topMenu === "program"} title="Program menu">
           <DraftCubeIcon />
-          <strong>MB</strong>
-        </div>
+        </button>
         <nav className="quick-access" aria-label="Quick access">
-          <button type="button" onClick={newProject} title="New blank plan" aria-label="New blank plan">＋</button>
-          <button type="button" onClick={requestOpen} title="Open project (Ctrl+O)" aria-label="Open project">▱</button>
-          <button type="button" onClick={saveProject} title="Save project (Ctrl+S)" aria-label="Save project">▣</button>
+          <button type="button" onClick={newProject} title="New Plan" aria-label="New Plan">＋</button>
+          <button type="button" onClick={requestOpen} title="Open (Ctrl+O)" aria-label="Open project">▱</button>
+          <button type="button" onClick={saveProject} title="Save (Ctrl+S)" aria-label="Save project">▣</button>
+          <button type="button" onClick={saveProjectAs} title="Save As" aria-label="Save project as">▣<sup>+</sup></button>
           <span className="quick-separator" />
           <button type="button" onClick={undo} disabled={!editor.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
           <button type="button" onClick={redo} disabled={!editor.future.length} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
@@ -12085,10 +12105,45 @@ export function ModelBuilderApp() {
         </label>
         <span className="workspace-name">2D + 3D Modeling</span>
         <button className="help-button" type="button" title="Help" aria-label="Help">?</button>
+        {topMenu === "program" ? (
+          <div className="program-menu" role="menu" aria-label="Program menu">
+            <header><DraftCubeIcon /><span><strong>Project</strong><small>File and application commands</small></span></header>
+            <div className="program-menu-primary">
+              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><b>＋</b><span><strong>New Plan</strong><small>Start with a blank Top view</small></span></button>
+              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><b>▱</b><span><strong>Open</strong><small>Open an .mbproj project</small></span></button>
+              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProject)}><b>▣</b><span><strong>Save</strong><small>Save the current project</small></span></button>
+              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProjectAs)}><b>▣</b><span><strong>Save As</strong><small>Save with a different project name</small></span></button>
+            </div>
+            <footer><span>{normalizedProjectName}</span><small>{isDirty ? "Unsaved changes" : "Current project is saved"}</small></footer>
+          </div>
+        ) : null}
       </header>
 
+      <nav className="menu-strip" aria-label="Application menus">
+        {(["File", "Edit", "View", "Window", "Tools", "Help"] as const).map((label) => {
+          const menu = label.toLowerCase() as "edit" | "file" | "help" | "tools" | "view" | "window";
+          return (
+            <div className="menu-bar-item" key={label}>
+              <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={topMenu === menu} className={topMenu === menu ? "is-open" : ""} onClick={() => setTopMenu((current) => current === menu ? null : menu)}>{label}</button>
+              {topMenu === menu ? (
+                <div className="application-menu" role="menu" aria-label={`${label} menu`}>
+                  {menu === "file" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><span>New Plan</span><kbd>Ctrl+N</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><span>Open…</span><kbd>Ctrl+O</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProject)}><span>Save</span><kbd>Ctrl+S</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProjectAs)}><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button></> : null}
+                  {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
+                  {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>Home Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button></> : null}
+                  {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
+                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
+                  {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+        <span className="menu-strip-context">PROJECT TOOLS</span>
+      </nav>
+
+      {topMenu ? <button type="button" className="menu-dismiss-layer" onClick={() => setTopMenu(null)} aria-label="Close application menu" /> : null}
+
       <nav className="ribbon-tabs" aria-label="Tool categories">
-        <span className="product-name">MODEL BUILDER</span>
         {ribbonTabs.map((tab) => (
           <button
             key={tab}

@@ -33,8 +33,17 @@ test("server-renders the Model Builder workspace", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Model Builder<\/title>/i);
-  assert.match(html, /MODEL BUILDER/);
+  assert.match(html, /2D \+ 3D Modeling/);
   assert.match(html, /aria-label="Tool categories"/);
+  assert.match(html, /aria-label="Program menu"/);
+  assert.match(html, /aria-label="Quick access"/);
+  assert.match(html, /aria-label="Save project as"/);
+  assert.match(html, /aria-label="Application menus"/);
+  assert.match(html, />File</);
+  assert.match(html, />Edit</);
+  assert.match(html, />Window</);
+  assert.match(html, />Tools</);
+  assert.match(html, />Help</);
   assert.match(html, /ribbon ribbon-home/);
   assert.match(html, /home-modify-group/);
   assert.match(html, />Home</);
@@ -191,6 +200,10 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /building-browser/);
   assert.match(component, /Project Setup/);
   assert.match(component, /Confirm project settings/);
+  assert.match(component, /saveProjectAs/);
+  assert.match(component, /File and application commands/);
+  assert.match(component, /Home Perspective/);
+  assert.match(component, /Model Explorer · Building/);
   assert.match(component, /stretchModelEntities/);
   assert.match(component, /selectScreenStretchTargets/);
   assert.match(component, /StretchControl/);

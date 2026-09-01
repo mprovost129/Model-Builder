@@ -11,6 +11,9 @@ polylines, rectangles, Circles, and Arcs.
 - Three-dimensional perspective workspace with a ground grid and XYZ axes
 - AutoCAD/Revit-inspired workspace shell with quick access, tabbed ribbon,
   project tabs, left Properties, right Model Explorer, command line, and status bar
+- Revit-inspired application hierarchy with a dedicated program control, top-level
+  New/Open/Save/Save As and history shortcuts, conventional application menus,
+  and a separate task-based modeling ribbon
 - Blank-plan setup guide that exposes active Story, floor depth, ceiling height,
   and Wall Type defaults before drawing begins
 - Building view in Model Explorer for direct access to Stories, Wall Types, and
