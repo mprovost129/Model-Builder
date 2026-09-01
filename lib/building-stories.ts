@@ -1,0 +1,365 @@
+import { snapToSixteenth } from "./architectural-units.ts";
+
+export type AssemblyKind = "ceiling-finish" | "floor-finish" | "floor-structure" | "wall-structure";
+export type AssemblyLayerRole =
+  | "air-gap"
+  | "finish"
+  | "framing"
+  | "membrane"
+  | "sheathing"
+  | "substrate";
+
+export type AssemblyLayer = {
+  id: string;
+  material: string;
+  name: string;
+  role: AssemblyLayerRole;
+  thickness: number;
+};
+
+export type LayeredAssembly = {
+  id: string;
+  kind: AssemblyKind;
+  layers: AssemblyLayer[];
+  name: string;
+};
+
+export type BuildingStory = {
+  ceilingFinish: LayeredAssembly;
+  floorFinish: LayeredAssembly;
+  floorStructure: LayeredAssembly;
+  id: string;
+  name: string;
+  roughCeilingHeight: number;
+};
+
+export type BuildingStructure = {
+  activeWallTypeId: string;
+  activeStoryId: string;
+  anchorStoryId: string;
+  datumElevation: number;
+  stories: BuildingStory[];
+  wallTypes: LayeredAssembly[];
+};
+
+export type CalculatedStoryElevations = {
+  ceilingFinishThickness: number;
+  finishedCeilingElevation: number;
+  finishedClearHeight: number;
+  finishedFloorElevation: number;
+  floorAboveElevation: number | null;
+  floorFinishThickness: number;
+  floorStructureThickness: number;
+  roughCeilingElevation: number;
+  roughFloorElevation: number;
+  storyId: string;
+};
+
+export const MAXIMUM_STORY_COUNT = 12;
+export const MAXIMUM_WALL_TYPE_COUNT = 32;
+export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
+export const MAXIMUM_ASSEMBLY_THICKNESS = 240;
+export const MINIMUM_ROUGH_CEILING_HEIGHT = 12;
+export const MAXIMUM_ROUGH_CEILING_HEIGHT = 600;
+export const MAXIMUM_BUILDING_DATUM = 1_000_000;
+
+const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const STORY_NAME_LIMIT = 80;
+const ASSEMBLY_NAME_LIMIT = 100;
+const LAYER_NAME_LIMIT = 100;
+const MATERIAL_NAME_LIMIT = 120;
+
+function isSixteenth(value: number): boolean {
+  return Math.abs(value * 16 - Math.round(value * 16)) < 1e-8;
+}
+
+function defaultFloorStructure(storyId: string): LayeredAssembly {
+  return {
+    id: `${storyId}-floor-structure`,
+    kind: "floor-structure",
+    name: "12 in. I-Joist Floor",
+    layers: [
+      {
+        id: `${storyId}-floor-structure-01`,
+        material: "OSB",
+        name: "OSB Subfloor",
+        role: "sheathing",
+        thickness: 0.75,
+      },
+      {
+        id: `${storyId}-floor-structure-02`,
+        material: "Engineered Wood",
+        name: "I-Joists",
+        role: "framing",
+        thickness: 11.25,
+      },
+    ],
+  };
+}
+
+function defaultFloorFinish(storyId: string): LayeredAssembly {
+  return {
+    id: `${storyId}-floor-finish`,
+    kind: "floor-finish",
+    name: "Hardwood Floor Finish",
+    layers: [
+      {
+        id: `${storyId}-floor-finish-01`,
+        material: "Hardwood",
+        name: "Hardwood Flooring",
+        role: "finish",
+        thickness: 0.75,
+      },
+    ],
+  };
+}
+
+function defaultCeilingFinish(storyId: string): LayeredAssembly {
+  return {
+    id: `${storyId}-ceiling-finish`,
+    kind: "ceiling-finish",
+    name: "Ceiling Finish",
+    layers: [
+      {
+        id: `${storyId}-ceiling-finish-01`,
+        material: "Gypsum Board",
+        name: "Ceiling Finish",
+        role: "finish",
+        thickness: 1.25,
+      },
+    ],
+  };
+}
+
+export function createDefaultWallType(): LayeredAssembly {
+  return {
+    id: "wall-type-01",
+    kind: "wall-structure",
+    name: "2x4 Exterior Wall",
+    layers: [
+      { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", role: "finish", thickness: 0.5 },
+      { id: "wall-type-01-02", material: "OSB", name: "Wall Sheathing", role: "sheathing", thickness: 0.4375 },
+      { id: "wall-type-01-03", material: "Lumber", name: "2x4 Stud Framing", role: "framing", thickness: 3.5 },
+      { id: "wall-type-01-04", material: "Gypsum Board", name: "Interior Finish", role: "finish", thickness: 0.5 },
+    ],
+  };
+}
+
+export function createBuildingStory(id: string, name: string): BuildingStory {
+  return {
+    ceilingFinish: defaultCeilingFinish(id),
+    floorFinish: defaultFloorFinish(id),
+    floorStructure: defaultFloorStructure(id),
+    id,
+    name,
+    roughCeilingHeight: 109.125,
+  };
+}
+
+export function createDefaultBuildingStructure(): BuildingStructure {
+  return {
+    activeWallTypeId: "wall-type-01",
+    activeStoryId: "story-01",
+    anchorStoryId: "story-01",
+    datumElevation: 0,
+    stories: [createBuildingStory("story-01", "First Floor")],
+    wallTypes: [createDefaultWallType()],
+  };
+}
+
+export function cloneAssemblyLayer(layer: AssemblyLayer): AssemblyLayer {
+  return { ...layer };
+}
+
+export function cloneLayeredAssembly(assembly: LayeredAssembly): LayeredAssembly {
+  return { ...assembly, layers: assembly.layers.map(cloneAssemblyLayer) };
+}
+
+export function cloneBuildingStory(story: BuildingStory): BuildingStory {
+  return {
+    ...story,
+    ceilingFinish: cloneLayeredAssembly(story.ceilingFinish),
+    floorFinish: cloneLayeredAssembly(story.floorFinish),
+    floorStructure: cloneLayeredAssembly(story.floorStructure),
+  };
+}
+
+export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
+  return { ...building, stories: building.stories.map(cloneBuildingStory), wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+}
+
+export function assemblyTotalThickness(assembly: LayeredAssembly): number {
+  return snapToSixteenth(
+    assembly.layers.reduce((total, layer) => total + layer.thickness, 0),
+  );
+}
+
+function stringsAreValid(values: Array<{ limit: number; value: string }>): boolean {
+  return values.every(({ limit, value }) => Boolean(value.trim()) && value.trim().length <= limit);
+}
+
+export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?: AssemblyKind): boolean {
+  if (
+    !IDENTIFIER_PATTERN.test(assembly.id) ||
+    (expectedKind !== undefined && assembly.kind !== expectedKind) ||
+    !stringsAreValid([{ value: assembly.name, limit: ASSEMBLY_NAME_LIMIT }]) ||
+    assembly.layers.length > MAXIMUM_ASSEMBLY_LAYER_COUNT
+  ) {
+    return false;
+  }
+  const ids = new Set<string>();
+  for (const layer of assembly.layers) {
+    if (
+      !IDENTIFIER_PATTERN.test(layer.id) ||
+      ids.has(layer.id) ||
+      !stringsAreValid([
+        { value: layer.name, limit: LAYER_NAME_LIMIT },
+        { value: layer.material, limit: MATERIAL_NAME_LIMIT },
+      ]) ||
+      !["air-gap", "finish", "framing", "membrane", "sheathing", "substrate"].includes(layer.role) ||
+      !Number.isFinite(layer.thickness) ||
+      layer.thickness < 0 ||
+      layer.thickness > MAXIMUM_ASSEMBLY_THICKNESS ||
+      !isSixteenth(layer.thickness)
+    ) {
+      return false;
+    }
+    ids.add(layer.id);
+  }
+  return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;
+}
+
+export function buildingStructureIsValid(building: BuildingStructure): boolean {
+  if (
+    !Number.isFinite(building.datumElevation) ||
+    Math.abs(building.datumElevation) > MAXIMUM_BUILDING_DATUM ||
+    !isSixteenth(building.datumElevation) ||
+    building.stories.length < 1 ||
+    building.stories.length > MAXIMUM_STORY_COUNT ||
+    building.wallTypes.length < 1 ||
+    building.wallTypes.length > MAXIMUM_WALL_TYPE_COUNT
+  ) {
+    return false;
+  }
+  const wallTypeIds = new Set<string>();
+  const wallTypeNames = new Set<string>();
+  for (const wallType of building.wallTypes) {
+    const normalizedName = wallType.name.trim().toLowerCase();
+    if (
+      wallTypeIds.has(wallType.id) ||
+      wallTypeNames.has(normalizedName) ||
+      !layeredAssemblyIsValid(wallType, "wall-structure") ||
+      assemblyTotalThickness(wallType) < 1 / 16
+    ) return false;
+    wallTypeIds.add(wallType.id);
+    wallTypeNames.add(normalizedName);
+  }
+  const storyIds = new Set<string>();
+  const storyNames = new Set<string>();
+  for (const story of building.stories) {
+    const normalizedName = story.name.trim().toLowerCase();
+    if (
+      !IDENTIFIER_PATTERN.test(story.id) ||
+      storyIds.has(story.id) ||
+      !stringsAreValid([{ value: story.name, limit: STORY_NAME_LIMIT }]) ||
+      storyNames.has(normalizedName) ||
+      !Number.isFinite(story.roughCeilingHeight) ||
+      story.roughCeilingHeight < MINIMUM_ROUGH_CEILING_HEIGHT ||
+      story.roughCeilingHeight > MAXIMUM_ROUGH_CEILING_HEIGHT ||
+      !isSixteenth(story.roughCeilingHeight) ||
+      !layeredAssemblyIsValid(story.floorStructure, "floor-structure") ||
+      !layeredAssemblyIsValid(story.floorFinish, "floor-finish") ||
+      !layeredAssemblyIsValid(story.ceilingFinish, "ceiling-finish") ||
+      story.roughCeilingHeight < assemblyTotalThickness(story.floorFinish) + assemblyTotalThickness(story.ceilingFinish)
+    ) {
+      return false;
+    }
+    storyIds.add(story.id);
+    storyNames.add(normalizedName);
+  }
+  return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) && wallTypeIds.has(building.activeWallTypeId);
+}
+
+export function buildingStructuresEqual(first: BuildingStructure, second: BuildingStructure): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
+}
+
+export function calculateStoryElevations(building: BuildingStructure): CalculatedStoryElevations[] {
+  if (!buildingStructureIsValid(building)) return [];
+  const anchorIndex = building.stories.findIndex((story) => story.id === building.anchorStoryId);
+  const roughFloors = new Array<number>(building.stories.length);
+  roughFloors[anchorIndex] = building.datumElevation;
+
+  for (let index = anchorIndex + 1; index < building.stories.length; index += 1) {
+    const storyBelow = building.stories[index - 1];
+    const story = building.stories[index];
+    roughFloors[index] = snapToSixteenth(
+      roughFloors[index - 1] + storyBelow.roughCeilingHeight + assemblyTotalThickness(story.floorStructure),
+    );
+  }
+  for (let index = anchorIndex - 1; index >= 0; index -= 1) {
+    const story = building.stories[index];
+    const storyAbove = building.stories[index + 1];
+    roughFloors[index] = snapToSixteenth(
+      roughFloors[index + 1] - story.roughCeilingHeight - assemblyTotalThickness(storyAbove.floorStructure),
+    );
+  }
+
+  return building.stories.map((story, index) => {
+    const roughFloorElevation = roughFloors[index];
+    const floorStructureThickness = assemblyTotalThickness(story.floorStructure);
+    const floorFinishThickness = assemblyTotalThickness(story.floorFinish);
+    const ceilingFinishThickness = assemblyTotalThickness(story.ceilingFinish);
+    const roughCeilingElevation = snapToSixteenth(roughFloorElevation + story.roughCeilingHeight);
+    return {
+      ceilingFinishThickness,
+      finishedCeilingElevation: snapToSixteenth(roughCeilingElevation - ceilingFinishThickness),
+      finishedClearHeight: snapToSixteenth(story.roughCeilingHeight - floorFinishThickness - ceilingFinishThickness),
+      finishedFloorElevation: snapToSixteenth(roughFloorElevation + floorFinishThickness),
+      floorAboveElevation: index < building.stories.length - 1 ? roughFloors[index + 1] : null,
+      floorFinishThickness,
+      floorStructureThickness,
+      roughCeilingElevation,
+      roughFloorElevation,
+      storyId: story.id,
+    };
+  });
+}
+
+function nextStoryNumber(building: BuildingStructure): number {
+  return Math.max(0, ...building.stories.map((story) => Number(/^story-(\d+)$/i.exec(story.id)?.[1] ?? 0))) + 1;
+}
+
+export function addBuildingStory(
+  building: BuildingStructure,
+  relativeToStoryId: string,
+  placement: "above" | "below",
+): BuildingStructure | null {
+  const relativeIndex = building.stories.findIndex((story) => story.id === relativeToStoryId);
+  if (relativeIndex < 0 || building.stories.length >= MAXIMUM_STORY_COUNT) return null;
+  const number = nextStoryNumber(building);
+  const story = createBuildingStory(`story-${String(number).padStart(2, "0")}`, `Story ${number}`);
+  const insertionIndex = placement === "above" ? relativeIndex + 1 : relativeIndex;
+  const next = cloneBuildingStructure(building);
+  next.stories.splice(insertionIndex, 0, story);
+  next.activeStoryId = story.id;
+  return next;
+}
+
+export function removeBuildingStory(building: BuildingStructure, storyId: string): BuildingStructure | null {
+  const index = building.stories.findIndex((story) => story.id === storyId);
+  if (index < 0 || building.stories.length <= 1) return null;
+  const elevations = calculateStoryElevations(building);
+  const next = cloneBuildingStructure(building);
+  next.stories.splice(index, 1);
+  if (storyId === building.anchorStoryId) {
+    const replacement = next.stories[Math.min(index, next.stories.length - 1)];
+    const oldElevation = elevations.find((elevation) => elevation.storyId === replacement.id);
+    next.anchorStoryId = replacement.id;
+    next.datumElevation = oldElevation?.roughFloorElevation ?? building.datumElevation;
+  }
+  if (storyId === building.activeStoryId) {
+    next.activeStoryId = next.stories[Math.min(index, next.stories.length - 1)].id;
+  }
+  return next;
+}
