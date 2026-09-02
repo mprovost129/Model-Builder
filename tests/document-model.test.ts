@@ -60,6 +60,7 @@ import {
   renameBoxObject,
   removeWallRole,
   refreshRoomsForStory,
+  roomHorizontalPlatformSolution,
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
@@ -1310,6 +1311,16 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   assert.equal(effective.roughFloorElevation, 1.5);
   assert.equal(effective.roughCeilingHeight, 108);
   assert.deepEqual(effective.floorStructure, refreshed.building.stories[0].floorStructure);
+  const platforms = roomHorizontalPlatformSolution(refreshed, office);
+  assert.ok(platforms);
+  assert.equal(platforms.roughFloorElevation, 1.5);
+  assert.equal(platforms.finishedFloorElevation, 2.25);
+  assert.equal(platforms.roughCeilingElevation, 109.5);
+  assert.equal(platforms.ceilingStructureBottomElevation, 109.5);
+  assert.equal(platforms.finishedCeilingElevation, 108.25);
+  assert.deepEqual(platforms.floorStructure, refreshed.building.stories[0].floorStructure);
+  assert.notEqual(platforms.boundary, office.boundary);
+  assert.deepEqual(platforms.boundary, office.boundary);
 
   const otherRoom = refreshed.rooms.find((room) => room.id !== office.id);
   assert.ok(otherRoom);

@@ -106,6 +106,9 @@ polylines, rectangles, Circles, and Arcs.
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling
   height, plus explicit Room-level assembly, ceiling-height, and rough-floor offsets
+- Derived Room floor and ceiling platforms generated from each Room boundary and
+  effective structural/finish assemblies, with calculated finished elevations and
+  unobstructed 2D Top drafting while layered platforms remain visible in 3D views
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an
@@ -271,9 +274,12 @@ guide, the Home ribbon exposes the building workflow, Properties summarizes the
 active project defaults, and Model Explorer has a Building view for Stories,
 Wall Types, and Rooms. Walls now derive their automatic rough base and top from
 adjacent Room overrides, fall back to Story defaults before Rooms are detected,
-and expose mixed adjacent conditions without storing duplicate heights. The next
-engineering milestone is generated floor/ceiling platforms from those same Room
-elevations and assemblies.
+and expose mixed adjacent conditions without storing duplicate heights. Enclosed
+Rooms now also generate layered floor and ceiling platforms from the same effective
+elevations and assembly overrides without storing duplicate Polylines; the Top view
+keeps those 3D solids hidden so plan drafting stays clear. The next engineering
+milestone is a hosted Platform Opening model for stairs, shafts, and open-below
+conditions, followed by finish-edge refinement at Wall faces.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.

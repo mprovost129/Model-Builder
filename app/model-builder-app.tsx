@@ -256,6 +256,7 @@ import {
   updatePolylineObject,
   updatePolylineObjectVertex,
   effectiveRoomSettings,
+  roomHorizontalPlatformSolution,
   wallVerticalExtent,
   type BoxObject,
   type ArcObject,
@@ -269,6 +270,7 @@ import {
   type ModelDocument,
   type ModelEntityRef,
   type RoomObject,
+  type RoomHorizontalPlatformSolution,
   type WallVerticalExtent,
 } from "@/lib/document-model";
 import {
@@ -1311,37 +1313,86 @@ function clearFloorPlatformView(view: FloorPlatformView) {
   view.materials = [];
 }
 
-function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObject, story: BuildingStructure["stories"][number]) {
-  clearFloorPlatformView(view);
-  const path = polylinePathPoints(polyline);
-  if (path.length < 4) return;
+function platformShape(boundary: PolylineGeometry) {
+  const path = polylinePathPoints(boundary);
+  if (path.length < 4) return null;
   const outline = path.slice(0, -1);
   const shape = new THREE.Shape();
   shape.moveTo(outline[0].x, outline[0].y);
   outline.slice(1).forEach((point) => shape.lineTo(point.x, point.y));
   shape.closePath();
-  const addLayer = (thickness: number, baseZ: number, role: AssemblyLayerRole, label: string) => {
-    if (thickness < 1 / 16) return;
-    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: thickness, steps: 1 });
-    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[role], metalness: 0, opacity: 0.9, roughness: 0.86, side: THREE.DoubleSide, transparent: true });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.z = baseZ;
-    mesh.userData.polylineId = polyline.id;
-    mesh.userData.floorLayer = label;
-    view.group.add(mesh);
-    view.meshes.push(mesh);
-    view.materials.push(material);
-  };
+  return shape;
+}
+
+function addHorizontalPlatformLayer(
+  view: FloorPlatformView,
+  shape: THREE.Shape,
+  thickness: number,
+  baseZ: number,
+  role: AssemblyLayerRole,
+  userData: Record<string, string>,
+) {
+  if (thickness < 1 / 16) return;
+  const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: thickness, steps: 1 });
+  const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[role], metalness: 0, opacity: 0.86, roughness: 0.86, side: THREE.DoubleSide, transparent: true });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.z = baseZ;
+  Object.assign(mesh.userData, userData);
+  view.group.add(mesh);
+  view.meshes.push(mesh);
+  view.materials.push(material);
+}
+
+function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObject, story: BuildingStructure["stories"][number]) {
+  clearFloorPlatformView(view);
+  const shape = platformShape(polyline);
+  if (!shape) return;
   let structureTop = polyline.elevation;
   story.floorStructure.layers.forEach((layer) => {
     const base = structureTop - layer.thickness;
-    addLayer(layer.thickness, base, layer.role, layer.name);
+    addHorizontalPlatformLayer(view, shape, layer.thickness, base, layer.role, { floorLayer: layer.name, polylineId: polyline.id });
     structureTop = base;
   });
   let finishBase = polyline.elevation;
   [...story.floorFinish.layers].reverse().forEach((layer) => {
-    addLayer(layer.thickness, finishBase, layer.role, layer.name);
+    addHorizontalPlatformLayer(view, shape, layer.thickness, finishBase, layer.role, { floorLayer: layer.name, polylineId: polyline.id });
     finishBase += layer.thickness;
+  });
+}
+
+function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizontalPlatformSolution) {
+  clearFloorPlatformView(view);
+  const shape = platformShape(solution.boundary);
+  if (!shape) return;
+  const addRoomLayer = (thickness: number, baseZ: number, role: AssemblyLayerRole, layerName: string, platformKind: string) => {
+    addHorizontalPlatformLayer(view, shape, thickness, baseZ, role, {
+      platformKind,
+      roomId: solution.roomId,
+      roomLayer: layerName,
+    });
+  };
+  let floorStructureTop = solution.roughFloorElevation;
+  solution.floorStructure.layers.forEach((layer) => {
+    const base = floorStructureTop - layer.thickness;
+    addRoomLayer(layer.thickness, base, layer.role, layer.name, "floor-structure");
+    floorStructureTop = base;
+  });
+  let floorFinishBase = solution.roughFloorElevation;
+  [...solution.floorFinish.layers].reverse().forEach((layer) => {
+    addRoomLayer(layer.thickness, floorFinishBase, layer.role, layer.name, "floor-finish");
+    floorFinishBase += layer.thickness;
+  });
+  let ceilingStructureTop = solution.roughCeilingElevation;
+  solution.ceilingStructure.layers.forEach((layer) => {
+    const base = ceilingStructureTop - layer.thickness;
+    addRoomLayer(layer.thickness, base, layer.role, layer.name, "ceiling-structure");
+    ceilingStructureTop = base;
+  });
+  let ceilingFinishTop = solution.ceilingStructureBottomElevation;
+  solution.ceilingFinish.layers.forEach((layer) => {
+    const base = ceilingFinishTop - layer.thickness;
+    addRoomLayer(layer.thickness, base, layer.role, layer.name, "ceiling-finish");
+    ceilingFinishTop = base;
   });
 }
 
@@ -2093,6 +2144,7 @@ function Viewport({
   const circleViewsRef = useRef(new Map<string, ViewportLine>());
   const polylineViewsRef = useRef(new Map<string, ViewportLine>());
   const floorPlatformViewsRef = useRef(new Map<string, FloorPlatformView>());
+  const roomPlatformViewsRef = useRef(new Map<string, FloorPlatformView>());
   const moveGizmoRef = useRef<MoveGizmo | null>(null);
   const rotationGizmoRef = useRef<RotationGizmo | null>(null);
   const scaleGizmoRef = useRef<ScaleGizmo | null>(null);
@@ -2712,6 +2764,7 @@ function Viewport({
       polylineViews.set(polyline.id, view);
     });
     const floorPlatformViews = floorPlatformViewsRef.current;
+    const roomPlatformViews = roomPlatformViewsRef.current;
     const circleViews = circleViewsRef.current;
     documentRef.current.circles.forEach((circle) => {
       const view = createViewportCircle(scene, circle.id);
@@ -2777,6 +2830,9 @@ function Viewport({
         findLayer(documentRef.current, circle.layerId)?.visible,
       );
       const arcs = documentRef.current.arcs.filter((arc) => findLayer(documentRef.current, arc.layerId)?.visible);
+      const roomPlatforms = documentRef.current.rooms
+        .map((room) => roomHorizontalPlatformSolution(documentRef.current, room))
+        .filter((solution): solution is RoomHorizontalPlatformSolution => solution !== null);
       const bounds = objects.map(boxWorldBounds);
       const lineXs = lines.flatMap((line) => [line.start.x, line.end.x]);
       const lineYs = lines.flatMap((line) => [line.start.y, line.end.y]);
@@ -2792,16 +2848,24 @@ function Viewport({
       const circleYs = circles.flatMap((circle) => [circle.center.y - circle.radius, circle.center.y + circle.radius]);
       const arcXs = arcs.flatMap((arc) => [arc.center.x - arc.radius, arc.center.x + arc.radius]);
       const arcYs = arcs.flatMap((arc) => [arc.center.y - arc.radius, arc.center.y + arc.radius]);
-      const hasGeometry = Boolean(objects.length || lines.length || polylines.length || circles.length || arcs.length);
+      const roomXs = roomPlatforms.flatMap((solution) => solution.boundary.vertices.map((point) => point.x));
+      const roomYs = roomPlatforms.flatMap((solution) => solution.boundary.vertices.map((point) => point.y));
+      const roomZs = roomPlatforms.flatMap((solution) => [
+        solution.roughFloorElevation - assemblyTotalThickness(solution.floorStructure),
+        solution.finishedFloorElevation,
+        solution.finishedCeilingElevation,
+        solution.roughCeilingElevation,
+      ]);
+      const hasGeometry = Boolean(objects.length || lines.length || polylines.length || circles.length || arcs.length || roomPlatforms.length);
       const min = new THREE.Vector3(
-        hasGeometry ? Math.min(...bounds.map((bound) => bound.minimum.x), ...lineXs, ...polylineXs, ...circleXs, ...arcXs) : -48,
-        hasGeometry ? Math.min(...bounds.map((bound) => bound.minimum.y), ...lineYs, ...polylineYs, ...circleYs, ...arcYs) : -48,
-        hasGeometry ? Math.min(...bounds.map((bound) => bound.minimum.z), ...lineZs, ...polylines.map((polyline) => polyline.elevation), ...circles.map((circle) => circle.center.z), ...arcs.map((arc) => arc.center.z)) : 0,
+        hasGeometry ? Math.min(...bounds.map((bound) => bound.minimum.x), ...lineXs, ...polylineXs, ...circleXs, ...arcXs, ...roomXs) : -48,
+        hasGeometry ? Math.min(...bounds.map((bound) => bound.minimum.y), ...lineYs, ...polylineYs, ...circleYs, ...arcYs, ...roomYs) : -48,
+        hasGeometry ? Math.min(...bounds.map((bound) => bound.minimum.z), ...lineZs, ...polylines.map((polyline) => polyline.elevation), ...circles.map((circle) => circle.center.z), ...arcs.map((arc) => arc.center.z), ...roomZs) : 0,
       );
       const max = new THREE.Vector3(
-        hasGeometry ? Math.max(...bounds.map((bound) => bound.maximum.x), ...lineXs, ...polylineXs, ...circleXs, ...arcXs) : 48,
-        hasGeometry ? Math.max(...bounds.map((bound) => bound.maximum.y), ...lineYs, ...polylineYs, ...circleYs, ...arcYs) : 48,
-        hasGeometry ? Math.max(...bounds.map((bound) => bound.maximum.z), ...lineZs, ...polylines.map((polyline) => polyline.elevation), ...circles.map((circle) => circle.center.z), ...arcs.map((arc) => arc.center.z)) : 96,
+        hasGeometry ? Math.max(...bounds.map((bound) => bound.maximum.x), ...lineXs, ...polylineXs, ...circleXs, ...arcXs, ...roomXs) : 48,
+        hasGeometry ? Math.max(...bounds.map((bound) => bound.maximum.y), ...lineYs, ...polylineYs, ...circleYs, ...arcYs, ...roomYs) : 48,
+        hasGeometry ? Math.max(...bounds.map((bound) => bound.maximum.z), ...lineZs, ...polylines.map((polyline) => polyline.elevation), ...circles.map((circle) => circle.center.z), ...arcs.map((arc) => arc.center.z), ...roomZs) : 96,
       );
       const size = max.clone().sub(min);
       const maximum = Math.max(size.x, size.y, size.z, 1);
@@ -6149,6 +6213,8 @@ function Viewport({
       polylineViews.clear();
       floorPlatformViews.forEach((view) => disposeFloorPlatformView(scene, view));
       floorPlatformViews.clear();
+      roomPlatformViews.forEach((view) => disposeFloorPlatformView(scene, view));
+      roomPlatformViews.clear();
       circleViews.forEach((view) => disposeViewportLine(scene, view));
       circleViews.clear();
       arcViews.forEach((view) => disposeViewportLine(scene, view));
@@ -6357,6 +6423,27 @@ function Viewport({
       const story = document.building.stories.find((candidate) => candidate.id === polyline.storyId);
       if (story) updateFloorPlatformView(view, polyline, story);
       view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true));
+    });
+    const currentRoomIds = new Set(document.rooms.map((room) => room.id));
+    roomPlatformViewsRef.current.forEach((view, roomId) => {
+      if (!currentRoomIds.has(roomId)) {
+        disposeFloorPlatformView(scene, view);
+        roomPlatformViewsRef.current.delete(roomId);
+      }
+    });
+    document.rooms.forEach((room) => {
+      let view = roomPlatformViewsRef.current.get(room.id);
+      if (!view) {
+        view = createFloorPlatformView(scene);
+        roomPlatformViewsRef.current.set(room.id, view);
+      }
+      const solution = roomHorizontalPlatformSolution(document, room);
+      if (solution) updateRoomPlatformView(view, solution);
+      const boundaryWallsVisible = room.boundaryWallIds.some((wallId) => {
+        const wall = document.lines.find((line) => line.id === wallId);
+        return Boolean(wall && (findLayer(document, wall.layerId)?.visible ?? true));
+      });
+      view.group.visible = Boolean(solution && boundaryWallsVisible);
     });
     const currentCircleIds = new Set(document.circles.map((circle) => circle.id));
     circleViewsRef.current.forEach((view, circleId) => {
@@ -6573,6 +6660,15 @@ function Viewport({
       });
     });
   }, [document, hoveredEntityKey, selectedEntityKeys]);
+
+  useEffect(() => {
+    const showGeneratedRoomPlatforms = viewTarget.id !== "top";
+    roomPlatformViewsRef.current.forEach((view) => {
+      view.meshes.forEach((mesh) => {
+        mesh.visible = showGeneratedRoomPlatforms;
+      });
+    });
+  }, [document, viewTarget]);
 
   useEffect(() => {
     circleViewsRef.current.forEach((view, circleId) => {
@@ -8474,6 +8570,7 @@ function RoomManagerDialog({
   const selected = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
   const storyElevation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id)?.roughFloorElevation ?? 0;
   const effective = selected ? effectiveRoomSettings(selected, story, storyElevation) : null;
+  const generatedPlatforms = selected ? roomHorizontalPlatformSolution(draft, selected) : null;
   const formatRoomArea = (room: RoomObject) => `${(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft`;
   const selectStory = (storyId: string) => {
     setSelectedStoryId(storyId);
@@ -8549,6 +8646,12 @@ function RoomManagerDialog({
                 <div><span>Floor finish</span><strong>{formatArchitectural(assemblyTotalThickness(effective.floorFinish))}</strong></div>
                 <div><span>Ceiling structure</span><strong>{formatArchitectural(assemblyTotalThickness(effective.ceilingStructure))}</strong></div>
                 <div><span>Ceiling finish</span><strong>{formatArchitectural(assemblyTotalThickness(effective.ceilingFinish))}</strong></div>
+              </section>
+              <section className="story-calculated-grid room-calculated-grid" aria-label="Generated Room platforms">
+                <div><span>Generated floor structure top</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.roughFloorElevation) : "—"}</strong></div>
+                <div><span>Generated finished floor</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedFloorElevation) : "—"}</strong></div>
+                <div><span>Generated rough ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.roughCeilingElevation) : "—"}</strong></div>
+                <div><span>Generated finished ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedCeilingElevation) : "—"}</strong></div>
               </section>
               {overrideEditor("floorStructureOverride", "Floor structure")}
               {overrideEditor("floorFinishOverride", "Floor finish")}
