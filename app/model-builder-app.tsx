@@ -1406,7 +1406,7 @@ function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObje
 
 function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizontalPlatformSolution) {
   clearFloorPlatformView(view);
-  const floorShape = platformShape(solution.boundary, solution.floorOpeningBoundaries);
+  const floorShape = platformShape(solution.floorBoundary, solution.floorOpeningBoundaries);
   const ceilingShape = platformShape(solution.boundary, solution.ceilingOpeningBoundaries);
   if (!floorShape || !ceilingShape) return;
   const addRoomLayer = (thickness: number, baseZ: number, role: AssemblyLayerRole, layerName: string, platformKind: string) => {
@@ -2902,8 +2902,8 @@ function Viewport({
       const circleYs = circles.flatMap((circle) => [circle.center.y - circle.radius, circle.center.y + circle.radius]);
       const arcXs = arcs.flatMap((arc) => [arc.center.x - arc.radius, arc.center.x + arc.radius]);
       const arcYs = arcs.flatMap((arc) => [arc.center.y - arc.radius, arc.center.y + arc.radius]);
-      const roomXs = roomPlatforms.flatMap((solution) => solution.boundary.vertices.map((point) => point.x));
-      const roomYs = roomPlatforms.flatMap((solution) => solution.boundary.vertices.map((point) => point.y));
+      const roomXs = roomPlatforms.flatMap((solution) => [solution.boundary, solution.floorBoundary].flatMap((boundary) => boundary.vertices.map((point) => point.x)));
+      const roomYs = roomPlatforms.flatMap((solution) => [solution.boundary, solution.floorBoundary].flatMap((boundary) => boundary.vertices.map((point) => point.y)));
       const roomZs = roomPlatforms.flatMap((solution) => [
         solution.roughFloorElevation - assemblyTotalThickness(solution.floorStructure),
         solution.finishedFloorElevation,
@@ -8625,6 +8625,8 @@ function RoomManagerDialog({
   const storyElevation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id)?.roughFloorElevation ?? 0;
   const effective = selected ? effectiveRoomSettings(selected, story, storyElevation) : null;
   const generatedPlatforms = selected ? roomHorizontalPlatformSolution(draft, selected) : null;
+  const perimeterFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "perimeter-main-exterior").length ?? 0;
+  const sharedFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "shared-wall-reference").length ?? 0;
   const formatRoomArea = (room: RoomObject) => `${(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft`;
   const selectStory = (storyId: string) => {
     setSelectedStoryId(storyId);
@@ -8755,6 +8757,19 @@ function RoomManagerDialog({
                 <div><span>Generated finished floor</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedFloorElevation) : "—"}</strong></div>
                 <div><span>Generated rough ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.roughCeilingElevation) : "—"}</strong></div>
                 <div><span>Generated finished ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedCeilingElevation) : "—"}</strong></div>
+              </section>
+              <section className="room-platform-edges" aria-label="Resolved floor platform edges">
+                <header><div><strong>Floor Platform Edges</strong><span>Automatic Wall-aware edge rules</span></div><output>{perimeterFloorEdgeCount} perimeter · {sharedFloorEdgeCount} shared</output></header>
+                {generatedPlatforms?.floorEdgeConditions.map((edge, index) => {
+                  const wall = edge.wallId ? draft.lines.find((line) => line.id === edge.wallId) : null;
+                  const ruleLabel = edge.rule === "perimeter-main-exterior"
+                    ? "Exterior face of Main layer"
+                    : edge.rule === "shared-wall-reference"
+                      ? "Shared Room boundary"
+                      : "Room boundary fallback";
+                  return <div className="room-platform-edge" key={`${edge.wallId ?? "fallback"}-${index}`}><span>{wall?.name ?? `Boundary edge ${index + 1}`}</span><strong>{ruleLabel}</strong><small>{Math.abs(edge.offsetFromReference) < 1 / 32 ? "On Wall reference" : `${formatArchitectural(Math.abs(edge.offsetFromReference))} from Wall reference`}</small></div>;
+                })}
+                <p>Mudsills, garage separation Walls, and other special conditions will use explicit per-edge overrides; the automatic rule remains unchanged.</p>
               </section>
               <section className="room-platform-openings" aria-label="Platform Openings">
                 <header><div><strong>Platform Openings</strong><span>Hosted cuts for stairs, shafts, and open-below areas</span></div><button type="button" onClick={addOpening}>+ Add Opening</button></header>

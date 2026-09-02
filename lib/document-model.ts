@@ -112,6 +112,8 @@ import {
   cloneBuildingStructure,
   cloneLayeredAssembly,
   createDefaultBuildingStructure,
+  wallLayerGroupThickness,
+  wallReferenceDistanceFromExterior,
   MAXIMUM_WALL_JOIN_PRIORITY,
   MINIMUM_WALL_JOIN_PRIORITY,
   MINIMUM_ROUGH_CEILING_HEIGHT,
@@ -244,11 +246,21 @@ export type RoomHorizontalPlatformSolution = EffectiveRoomSettings & {
   ceilingStructureBottomElevation: number;
   finishedCeilingElevation: number;
   finishedFloorElevation: number;
+  floorBoundary: PolylineGeometry;
+  floorEdgeConditions: RoomFloorEdgeCondition[];
   floorOpeningBoundaries: PolylineGeometry[];
   platformOpenings: PlatformOpening[];
   roomId: string;
   roughCeilingElevation: number;
   storyId: string;
+};
+
+export type RoomFloorEdgeCondition = {
+  adjacentRoomCount: number;
+  /** Signed distance from the Wall reference line along its left-hand normal. */
+  offsetFromReference: number;
+  rule: "perimeter-main-exterior" | "room-boundary-fallback" | "shared-wall-reference";
+  wallId: string | null;
 };
 
 export type WallVerticalExtent = {
@@ -622,6 +634,145 @@ export function effectiveRoomSettings(
   };
 }
 
+type FloorEdgeLine = {
+  condition: RoomFloorEdgeCondition;
+  direction: PlanPoint;
+  point: PlanPoint;
+};
+
+function wallForRoomBoundarySegment(
+  segment: ReturnType<typeof polylineSegments>[number],
+  walls: LineObject[],
+): LineObject | null {
+  const tolerance = 1e-5;
+  const midpoint = { x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2 };
+  return walls.find((wall) => {
+    const dx = wall.end.x - wall.start.x;
+    const dy = wall.end.y - wall.start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= tolerance) return false;
+    const cross = (midpoint.x - wall.start.x) * dy - (midpoint.y - wall.start.y) * dx;
+    const projection = ((midpoint.x - wall.start.x) * dx + (midpoint.y - wall.start.y) * dy) / lengthSquared;
+    return Math.abs(cross) <= tolerance * Math.sqrt(lengthSquared) && projection >= -tolerance && projection <= 1 + tolerance;
+  }) ?? null;
+}
+
+function roomBoundaryContainsPoint(room: RoomObject, point: PlanPoint): boolean {
+  const tolerance = 1e-5;
+  return polylineSegments(room.boundary).some((segment) => {
+    const dx = segment.end.x - segment.start.x;
+    const dy = segment.end.y - segment.start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= tolerance) return false;
+    const cross = (point.x - segment.start.x) * dy - (point.y - segment.start.y) * dx;
+    const projection = ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) / lengthSquared;
+    return Math.abs(cross) <= tolerance * Math.sqrt(lengthSquared) && projection >= -tolerance && projection <= 1 + tolerance;
+  });
+}
+
+function intersectFloorEdgeLines(first: FloorEdgeLine, second: FloorEdgeLine, fallback: PlanPoint): PlanPoint {
+  const denominator = first.direction.x * second.direction.y - first.direction.y * second.direction.x;
+  if (Math.abs(denominator) >= 1e-8) {
+    const dx = second.point.x - first.point.x;
+    const dy = second.point.y - first.point.y;
+    const distance = (dx * second.direction.y - dy * second.direction.x) / denominator;
+    return {
+      x: snapToSixteenth(first.point.x + first.direction.x * distance),
+      y: snapToSixteenth(first.point.y + first.direction.y * distance),
+    };
+  }
+  const project = (line: FloorEdgeLine) => {
+    const dx = fallback.x - line.point.x;
+    const dy = fallback.y - line.point.y;
+    const distance = dx * line.direction.x + dy * line.direction.y;
+    return { x: line.point.x + line.direction.x * distance, y: line.point.y + line.direction.y * distance };
+  };
+  const firstProjection = project(first);
+  const secondProjection = project(second);
+  return {
+    x: snapToSixteenth((firstProjection.x + secondProjection.x) / 2),
+    y: snapToSixteenth((firstProjection.y + secondProjection.y) / 2),
+  };
+}
+
+/**
+ * Resolves the default floor outline edge-by-edge instead of copying the Room
+ * center/reference-line loop. Perimeter edges stop at the exterior face of the
+ * Wall type's Main structural group; shared Walls keep one common Room boundary.
+ * The returned conditions intentionally leave room for explicit per-edge rules
+ * such as mudsills and garage separation conditions without special-case geometry.
+ */
+export function roomFloorPlatformBoundary(
+  document: ModelDocument,
+  room: RoomObject,
+): { boundary: PolylineGeometry; conditions: RoomFloorEdgeCondition[] } {
+  const segments = polylineSegments(room.boundary);
+  const storyWalls = document.lines.filter((line) =>
+    line.architecturalRole === "wall" && line.storyId === room.storyId && room.boundaryWallIds.includes(line.id));
+  const edgeLines = segments.map((segment): FloorEdgeLine => {
+    const wall = wallForRoomBoundarySegment(segment, storyWalls);
+    const segmentDx = segment.end.x - segment.start.x;
+    const segmentDy = segment.end.y - segment.start.y;
+    const segmentLength = Math.hypot(segmentDx, segmentDy);
+    const fallbackDirection = segmentLength > 1e-8
+      ? { x: segmentDx / segmentLength, y: segmentDy / segmentLength }
+      : { x: 1, y: 0 };
+    if (!wall) return {
+      condition: { adjacentRoomCount: 0, offsetFromReference: 0, rule: "room-boundary-fallback", wallId: null },
+      direction: fallbackDirection,
+      point: { ...segment.start },
+    };
+    const wallDx = wall.end.x - wall.start.x;
+    const wallDy = wall.end.y - wall.start.y;
+    const wallLength = Math.hypot(wallDx, wallDy);
+    const direction = wallLength > 1e-8
+      ? { x: wallDx / wallLength, y: wallDy / wallLength }
+      : fallbackDirection;
+    const segmentMidpoint = { x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2 };
+    const adjacentRoomCount = document.rooms.filter((candidate) =>
+      candidate.storyId === room.storyId && candidate.boundaryWallIds.includes(wall.id) && roomBoundaryContainsPoint(candidate, segmentMidpoint)).length;
+    if (adjacentRoomCount > 1) return {
+      condition: { adjacentRoomCount, offsetFromReference: 0, rule: "shared-wall-reference", wallId: wall.id },
+      direction,
+      point: { x: wall.start.x, y: wall.start.y },
+    };
+    const wallType = document.building.wallTypes.find((candidate) => candidate.id === wall.wallTypeId);
+    if (!wallType) return {
+      condition: { adjacentRoomCount, offsetFromReference: 0, rule: "room-boundary-fallback", wallId: wall.id },
+      direction,
+      point: { x: wall.start.x, y: wall.start.y },
+    };
+    const distanceFromExterior = wallLayerGroupThickness(wallType, "exterior");
+    const referenceDistance = wallReferenceDistanceFromExterior(wallType, wall.wallReferenceLine ?? "wall-center");
+    const inwardDistance = distanceFromExterior - referenceDistance;
+    const offsetFromReference = (wall.wallExteriorSide ?? "left") === "left" ? -inwardDistance : inwardDistance;
+    return {
+      condition: { adjacentRoomCount, offsetFromReference, rule: "perimeter-main-exterior", wallId: wall.id },
+      direction,
+      point: {
+        x: wall.start.x - direction.y * offsetFromReference,
+        y: wall.start.y + direction.x * offsetFromReference,
+      },
+    };
+  });
+  const conditions = edgeLines.map((edge) => edge.condition);
+  if (edgeLines.length !== room.boundary.vertices.length || edgeLines.length < 3) {
+    return { boundary: clonePolylineGeometry(room.boundary), conditions };
+  }
+  const vertices = room.boundary.vertices.map((vertex, index) =>
+    intersectFloorEdgeLines(edgeLines[(index - 1 + edgeLines.length) % edgeLines.length], edgeLines[index], vertex));
+  const boundary: PolylineGeometry = {
+    bulges: vertices.map(() => 0),
+    closed: true,
+    elevation: room.boundary.elevation,
+    vertices,
+    width: 0,
+  };
+  return polylineGeometryIsValid(boundary) && polylineArea(boundary) > 0
+    ? { boundary, conditions }
+    : { boundary: clonePolylineGeometry(room.boundary), conditions };
+}
+
 /**
  * Resolves the horizontal assemblies generated by one enclosed Room.
  *
@@ -638,6 +789,7 @@ export function roomHorizontalPlatformSolution(
   const storyElevation = calculateStoryElevations(document.building).find((candidate) => candidate.storyId === room.storyId);
   if (!story || !storyElevation || !roomObjectIsValid(room, document)) return null;
   const effective = effectiveRoomSettings(room, story, storyElevation.roughFloorElevation);
+  const floorPlatform = roomFloorPlatformBoundary(document, room);
   const roughCeilingElevation = snapToSixteenth(effective.roughFloorElevation + effective.roughCeilingHeight);
   const ceilingStructureBottomElevation = snapToSixteenth(
     roughCeilingElevation - assemblyTotalThickness(effective.ceilingStructure),
@@ -653,6 +805,8 @@ export function roomHorizontalPlatformSolution(
     finishedFloorElevation: snapToSixteenth(
       effective.roughFloorElevation + assemblyTotalThickness(effective.floorFinish),
     ),
+    floorBoundary: floorPlatform.boundary,
+    floorEdgeConditions: floorPlatform.conditions,
     floorOpeningBoundaries: room.platformOpenings.filter((opening) => opening.cuts === "floor" || opening.cuts === "both").map((opening) => clonePolylineGeometry(opening.boundary)),
     platformOpenings: room.platformOpenings.map(clonePlatformOpening),
     roomId: room.id,

@@ -1324,6 +1324,10 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   assert.deepEqual(platforms.floorStructure, refreshed.building.stories[0].floorStructure);
   assert.notEqual(platforms.boundary, office.boundary);
   assert.deepEqual(platforms.boundary, office.boundary);
+  assert.notEqual(platforms.floorBoundary, office.boundary);
+  assert.equal(platforms.floorEdgeConditions.length, office.boundary.vertices.length);
+  assert.equal(platforms.floorEdgeConditions.filter((edge) => edge.rule === "perimeter-main-exterior").length, 3);
+  assert.equal(platforms.floorEdgeConditions.filter((edge) => edge.rule === "shared-wall-reference").length, 1);
   const addedPlatformOpening = addPlatformOpening(refreshed, office.id, "stairwell", "both");
   assert.ok(addedPlatformOpening);
   assert.equal(addedPlatformOpening.document.rooms.find((room) => room.id === office.id)?.platformOpenings.length, 1);
@@ -1333,6 +1337,7 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   assert.ok(openingSolution);
   assert.equal(openingSolution.floorOpeningBoundaries.length, 1);
   assert.equal(openingSolution.ceilingOpeningBoundaries.length, 0);
+  assert.deepEqual(openingSolution.floorOpeningBoundaries[0], addedPlatformOpening.opening.boundary);
   assert.equal(openingSolution.platformOpenings[0].name, "Main Stair Opening");
   const outsideBoundary = { ...addedPlatformOpening.opening.boundary, vertices: addedPlatformOpening.opening.boundary.vertices.map((point) => ({ x: point.x + 1000, y: point.y })) };
   assert.equal(updatePlatformOpening(withFloorOnlyOpening, office.id, addedPlatformOpening.opening.id, { boundary: outsideBoundary }), null);
@@ -1348,6 +1353,14 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   const sharedWall = refreshed.lines.find((line) => line.id === sharedWallId);
   assert.ok(officeOnlyWall);
   assert.ok(sharedWall);
+  const centeredPerimeter = updateWallPlacement(refreshed, officeOnlyWall.id, { referenceLine: "center-main" });
+  assert.ok(centeredPerimeter);
+  const centeredPlatform = roomHorizontalPlatformSolution(centeredPerimeter, centeredPerimeter.rooms.find((room) => room.id === office.id)!);
+  assert.ok(centeredPlatform);
+  const centeredEdge = centeredPlatform.floorEdgeConditions.find((edge) => edge.wallId === officeOnlyWall.id);
+  assert.ok(centeredEdge);
+  assert.equal(Math.abs(centeredEdge.offsetFromReference), 1.75);
+  assert.notDeepEqual(centeredPlatform.floorBoundary, centeredPlatform.boundary);
   assert.deepEqual(wallVerticalExtent(refreshed, officeOnlyWall), {
     adjacentRoomIds: [office.id],
     baseElevation: 1.5,

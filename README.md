@@ -109,6 +109,9 @@ polylines, rectangles, Circles, and Arcs.
 - Derived Room floor and ceiling platforms generated from each Room boundary and
   effective structural/finish assemblies, with calculated finished elevations and
   unobstructed 2D Top drafting while layered platforms remain visible in 3D views
+- Wall-aware floor platform edges that resolve perimeter edges to the exterior face
+  of each Wall type's Main structural layer, retain shared Room boundaries, and
+  report the resolved rule in Room Manager for future condition-specific overrides
 - Room-hosted Platform Openings for stairwells, shafts, and open-below areas, with
   independent floor, ceiling, or combined cuts, 2D plan outlines, and 3D assembly holes
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
@@ -281,9 +284,12 @@ Rooms now also generate layered floor and ceiling platforms from the same effect
 elevations and assembly overrides without storing duplicate Polylines; the Top view
 keeps those 3D solids hidden so plan drafting stays clear. Hosted Platform Openings
 now cut those derived floor and ceiling assemblies for stairwells, shafts, and
-open-below conditions while retaining a visible plan outline. The next engineering
-milestone is platform finish-edge refinement at Wall faces, followed by vertical
-opening continuity across adjacent Stories.
+  open-below conditions while retaining a visible plan outline. Floor platforms now
+  resolve each perimeter edge to the exterior face of the Wall type's Main structural
+  layer while shared Walls retain a common Room boundary; Room Manager reports every
+  resolved edge condition. The next engineering milestone is explicit per-edge
+  overrides for mudsills, garage separation Walls, and other special platform
+  conditions, followed by vertical opening continuity across adjacent Stories.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
