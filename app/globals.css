@@ -509,14 +509,34 @@ button { color: inherit; }
 .foundation-field-grid .story-field-shell input { height: 29px; border: 0; background: transparent; color: inherit; }
 .foundation-field-grid .story-field-shell small { font-size: 8px; }
 .foundation-sill-settings > p { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
-.opening-type-manager { width: min(1080px, calc(100vw - 48px)); height: min(700px, calc(100vh - 48px)); }
-.opening-type-manager .story-manager-body { grid-template-columns: 230px minmax(600px, 1fr); }
+.opening-type-manager { width: min(1320px, calc(100vw - 48px)); height: min(840px, calc(100vh - 48px)); }
+.opening-type-manager .story-manager-body { grid-template-columns: 220px minmax(540px, 1fr) minmax(320px, 370px); }
 .opening-type-note { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
 .opening-component-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto auto; align-items: end; gap: 7px; padding: 10px 12px 2px; }
 .opening-component-toolbar .story-field { min-width: 0; }
 .opening-component-toolbar button { min-height: 31px; padding: 0 11px; border: 1px solid #536270; border-radius: 2px; background: #1d2832; color: #cfd8df; font-size: 9px; }
 .opening-component-toolbar button:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
 .opening-component-toolbar button:disabled { opacity: .4; }
+.opening-type-preview { min-height: 0; overflow-y: auto; border-left: 1px solid #3e4955; background: #1c242d; }
+.opening-type-preview > header { display: grid; gap: 3px; padding: 11px 12px; border-bottom: 1px solid #3a4651; background: #252f39; }
+.opening-type-preview > header strong { color: #e4e9ed; font-size: 11px; }
+.opening-type-preview > header span { color: #84919d; font-size: 9px; }
+.opening-preview-canvas { padding: 10px; border-bottom: 1px solid #3a4651; background: linear-gradient(180deg, #17212a, #202b34); }
+.opening-preview-canvas svg { display: block; width: 100%; height: auto; min-height: 330px; }
+.opening-preview-rough { fill: rgb(227 173 77 / 4%); stroke: #d5a14a; stroke-width: .8; stroke-dasharray: 2.5 2; vector-effect: non-scaling-stroke; }
+.opening-preview-unit { fill: rgb(134 179 205 / 5%); stroke: #84aabe; stroke-width: .7; vector-effect: non-scaling-stroke; }
+.opening-preview-component { stroke: rgb(12 18 23 / 72%); stroke-width: .55; vector-effect: non-scaling-stroke; }
+.opening-preview-glazing { fill-opacity: .62; }
+.opening-preview-mullion { stroke: #60727d; }
+.opening-preview-dimension { fill: #b8cad4; font: 3.2px var(--font-geist-mono), monospace; letter-spacing: .025em; }
+.opening-preview-facts { display: grid; gap: 0; margin: 0; padding: 8px; }
+.opening-preview-facts > div { display: grid; grid-template-columns: 104px 1fr; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #34404b; }
+.opening-preview-facts dt { color: #84919d; font-size: 8px; text-transform: uppercase; }
+.opening-preview-facts dd { margin: 0; color: #d9e0e5; font-size: 9px; }
+.opening-import-readiness { display: grid; gap: 7px; margin: 8px; padding: 11px; border: 1px solid #3f5665; background: #202c35; }
+.opening-import-readiness strong { color: #d9e4ea; font-size: 9px; }
+.opening-import-readiness p { margin: 0; color: #94a6b2; font-size: 8px; line-height: 1.5; }
+.opening-import-readiness span { padding-top: 7px; border-top: 1px solid #3a4b57; color: #9fc4d7; font: 7px var(--font-geist-mono), monospace; line-height: 1.45; text-transform: uppercase; }
 .framing-manager { width: min(980px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); }
 .framing-manager-body { display: grid; grid-template-columns: 230px minmax(560px, 1fr); min-height: 0; }
 .framing-status-card { display: grid; align-content: start; gap: 12px; padding: 15px 13px; border-right: 1px solid #3e4955; background: #1c242d; }
@@ -749,6 +769,8 @@ button { color: inherit; }
   .room-manager .story-manager-body { grid-template-columns: 190px minmax(560px, 1fr); }
   .foundation-manager .story-manager-body { grid-template-columns: 190px minmax(540px, 1fr); }
   .foundation-manager .foundation-section-preview { display: none; }
+  .opening-type-manager .story-manager-body { grid-template-columns: 190px minmax(540px, 1fr); }
+  .opening-type-preview { display: none; }
   .story-section-preview { display: none; }
 }
 
@@ -2285,6 +2307,22 @@ button { color: inherit; }
 .theme-light .foundation-field-grid .story-field > select,
 .theme-light .foundation-field-grid .room-checkbox-field { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
 .theme-light .opening-component-toolbar button { border-color: var(--ui-border-strong); background: #edf3f6; color: #355266; }
+.theme-light .opening-type-preview { border-color: var(--ui-border); background: #e9eff1; }
+.theme-light .opening-type-preview > header { border-color: var(--ui-border); background: #e1e9ec; }
+.theme-light .opening-type-preview > header strong { color: #304d60; }
+.theme-light .opening-type-preview > header span,
+.theme-light .opening-preview-facts dt { color: var(--muted); }
+.theme-light .opening-preview-canvas { border-color: var(--ui-border); background: linear-gradient(180deg, #f4f7f7, #e5ecee); }
+.theme-light .opening-preview-rough { fill: rgb(179 126 40 / 4%); stroke: #af7927; }
+.theme-light .opening-preview-unit { fill: rgb(76 125 153 / 5%); stroke: #5d8da7; }
+.theme-light .opening-preview-component { stroke: rgb(63 79 89 / 65%); }
+.theme-light .opening-preview-dimension { fill: #3d657b; }
+.theme-light .opening-preview-facts > div { border-color: var(--ui-border); }
+.theme-light .opening-preview-facts dd { color: #3d586a; }
+.theme-light .opening-import-readiness { border-color: #9cb1bc; background: #eef4f5; }
+.theme-light .opening-import-readiness strong { color: #304d60; }
+.theme-light .opening-import-readiness p { color: #627a88; }
+.theme-light .opening-import-readiness span { border-color: #c5d1d6; color: #41738d; }
 .theme-light .framing-status-card { border-color: var(--ui-border); background: #e9eff1; }
 .theme-light .framing-status-card > strong { color: #304d60; }
 .theme-light .framing-status-card label { color: #3d586a; }

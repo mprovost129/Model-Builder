@@ -9274,6 +9274,96 @@ function nextWallHeaderScheduleMark(building: BuildingStructure): string {
   return `H${number}`;
 }
 
+const OPENING_PREVIEW_ROLE_COLORS: Record<OpeningAssemblyComponent["role"], string> = {
+  frame: "#7591a5",
+  glazing: "#9fc9d8",
+  hardware: "#b7a27d",
+  jamb: "#806f5e",
+  mullion: "#d6e1e7",
+  panel: "#a98b67",
+  sash: "#607f94",
+  threshold: "#8a7b6a",
+  trim: "#c4ced4",
+};
+
+function OpeningTypePreview({ openingType, wallType }: { openingType: WallOpeningType; wallType: LayeredAssembly }) {
+  const margin = Math.max(8, openingType.roughWidth * 0.18);
+  const headerBottomHeight = openingType.kind === "door" ? openingType.roughHeight : openingType.defaultHeaderBottomHeight;
+  const roughBottom = openingType.kind === "door" ? 0 : headerBottomHeight - openingType.roughHeight;
+  const lineLength = openingType.roughWidth + margin * 2;
+  const opening: WallOpening = {
+    centerOffset: lineLength / 2,
+    componentOverrides: [],
+    headerBottomHeight,
+    headerTypeIdOverride: null,
+    id: "opening-type-preview",
+    kind: openingType.kind,
+    name: `${openingType.name} Preview`,
+    roughHeight: openingType.roughHeight,
+    roughWidth: openingType.roughWidth,
+    unitHeight: openingType.unitHeight,
+    unitWidth: openingType.unitWidth,
+    wallOpeningTypeId: openingType.id,
+  };
+  const line: LineObject = {
+    architecturalRole: "wall",
+    end: { x: lineLength, y: 0, z: 0 },
+    foundationSupportWallId: null,
+    foundationWallTypeId: null,
+    id: "opening-type-preview-wall",
+    layerId: "layer-default",
+    locked: false,
+    name: "Opening Type Preview Wall",
+    start: { x: 0, y: 0, z: 0 },
+    storyId: "story-preview",
+    type: "line",
+    wallEndJoinMode: "square",
+    wallExteriorSide: "left",
+    wallJoinPriority: 0,
+    wallOpenings: [opening],
+    wallReferenceLine: "main-center",
+    wallStartJoinMode: "square",
+    wallTypeId: wallType.id,
+  };
+  const solids = wallOpeningComponentSolids(line, wallType, new Map([[openingType.id, openingType]]));
+  const maximumHeight = Math.max(headerBottomHeight, roughBottom + openingType.unitOffsetZ + openingType.unitHeight);
+  const verticalMargin = Math.max(10, maximumHeight * 0.16);
+  const canvasHeight = maximumHeight + verticalMargin * 2;
+  const roughLeft = opening.centerOffset - openingType.roughWidth / 2;
+  const unitLeft = opening.centerOffset + openingType.unitOffsetX - openingType.unitWidth / 2;
+  const unitBottom = roughBottom + openingType.unitOffsetZ;
+  return (
+    <aside className="opening-type-preview" aria-label="Door or Window product preview">
+      <header><strong>Live Product Preview</strong><span>Exterior elevation · updates with the Type</span></header>
+      <div className="opening-preview-canvas">
+        <svg viewBox={`0 0 ${lineLength} ${canvasHeight}`} role="img" aria-label={`${openingType.name} exterior elevation preview`}>
+          <rect className="opening-preview-rough" x={roughLeft} y={canvasHeight - headerBottomHeight} width={openingType.roughWidth} height={openingType.roughHeight} />
+          <rect className="opening-preview-unit" x={unitLeft} y={canvasHeight - unitBottom - openingType.unitHeight} width={openingType.unitWidth} height={openingType.unitHeight} />
+          {solids.map((solid, index) => {
+            const xValues = [solid.startExterior.x, solid.startInterior.x, solid.endExterior.x, solid.endInterior.x];
+            const left = Math.min(...xValues);
+            const right = Math.max(...xValues);
+            return <rect key={`${solid.componentId}:${index}`} x={left} y={canvasHeight - solid.baseHeight - solid.height} width={right - left} height={solid.height} fill={OPENING_PREVIEW_ROLE_COLORS[solid.role]} className={`opening-preview-component opening-preview-${solid.role}`}><title>{solid.componentName} · {solid.material}</title></rect>;
+          })}
+          <text className="opening-preview-dimension" x={opening.centerOffset} y={verticalMargin * 0.62} textAnchor="middle">ROUGH {formatArchitectural(openingType.roughWidth)} × {formatArchitectural(openingType.roughHeight)}</text>
+          <text className="opening-preview-dimension" x={opening.centerOffset} y={canvasHeight - verticalMargin * 0.45} textAnchor="middle">UNIT {formatArchitectural(openingType.unitWidth)} × {formatArchitectural(openingType.unitHeight)}</text>
+        </svg>
+      </div>
+      <dl className="opening-preview-facts">
+        <div><dt>Family</dt><dd>{openingType.kind === "door" ? "Door" : "Window"}</dd></div>
+        <div><dt>Header bottom</dt><dd>{formatArchitectural(headerBottomHeight)}</dd></div>
+        <div><dt>Assembly</dt><dd>{openingType.components.length} editable parts</dd></div>
+        <div><dt>Source</dt><dd>Model Builder parametric</dd></div>
+      </dl>
+      <section className="opening-import-readiness">
+        <strong>Manufacturer Import Boundary</strong>
+        <p>Catalog imports will preserve the original source, a web-ready 2D/3D representation, and editable Model Builder opening and framing data as separate records.</p>
+        <span>Recommended first package: SVG elevation + GLB model + product metadata</span>
+      </section>
+    </aside>
+  );
+}
+
 function OpeningTypeManagerDialog({
   document,
   onCancel,
@@ -9515,6 +9605,7 @@ function OpeningTypeManagerDialog({
               <p className="opening-type-note">On-edge plies and spacers are modeled across the Wall Main layer. Interior-rigid assemblies place the structural plies at the exterior and fill the remaining interior cavity. Flat members span the Main layer and stack vertically. Steel is supported as a user-defined rectangular material representation; detailed steel profiles can be added later.</p>
             </section>
           </main>
+          <OpeningTypePreview openingType={selected} wallType={activeWallType} />
         </div>
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
         <footer className="story-manager-footer"><span>{draft.openingTypes.length} opening types · {draft.headerTypes.length} reusable header assemblies · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Opening Types</button></div></footer>

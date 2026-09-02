@@ -121,6 +121,9 @@ polylines, rectangles, Circles, and Arcs.
   Product layout generators build editable flush, one-, two-, four-, and six-panel
   Doors plus fixed, hung, casement, awning, and sliding Window sash arrangements.
   Equal, Colonial, and Prairie divided-lite patterns repeat inside each generated sash.
+  The Type Manager includes a live exterior-elevation preview generated from the same
+  host-aware component solids used by placed openings, with rough-opening, unit-size,
+  header-height, component-count, and source summaries.
   A placed Door or Window can override an individual part's material, visibility,
   profile or divider width, inset, depth, face anchor, offset, and divider count while
   continuing to inherit the Type's component topology and all untouched values.
@@ -345,6 +348,10 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   patterns, operable Window sash arrangements, and divided-lite grids. The generator
   output remains editable component geometry; manufacturer identity and certified
   product profiles are intentionally not inferred from these generic layouts. Those
+  generators now update a live exterior-elevation preview inside the Type Manager.
+  Manufacturer catalog import is planned as a versioned product package containing
+  source provenance, SVG 2D views, a web-ready GLB model, and explicit opening/framing
+  metadata; proprietary CAD/BIM formats will require conversion or dedicated adapters.
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing
   visibility. Wall Types now classify exterior/interior and bearing/non-bearing use

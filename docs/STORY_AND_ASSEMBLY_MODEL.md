@@ -255,6 +255,38 @@ manufacturer identity and validated product-specific dimensions explicitly.
 Version-38 files store the expanded component generators; version-37 and earlier
 files continue to open with their saved component topology.
 
+The Door & Window Type Manager renders a live exterior-elevation preview from the
+same host-aware component solids used by placed openings. It shows the structural
+rough-opening boundary, unit boundary, generated component geometry, rough and unit
+dimensions, bottom-of-header elevation, component count, and current source. Because
+the preview uses the model geometry rather than a separate illustration, edits to
+panels, sashes, glazing, grilles, profiles, insets, and dimensions remain synchronized.
+
+## Manufacturer Catalog and General Object Import Direction
+
+Manufacturer content should enter Model Builder through a versioned product package,
+not as an unidentified mesh or drawing. The preferred first package combines:
+
+- an immutable source record with manufacturer, product line, model number, source
+  URL or file name, source format, revision, and verification date;
+- SVG front/plan/section views for scalable 2D representation;
+- a GLB model for compact web-ready 3D representation;
+- explicit unit, rough-opening, header, host, material, and scheduling metadata; and
+- optional editable Model Builder components when the imported product maps cleanly
+  to the native parametric assembly model.
+
+DWG, DXF, RFA, IFC, and SKP require format-specific adapters or a reviewed conversion
+step. Importing one of these proprietary files must not silently discard assemblies,
+materials, units, nested components, or product metadata. The original manufacturer
+source remains attached for provenance even when converted geometry is used in the
+model.
+
+The general Object importer should share the same asset registry, unit normalization,
+layer assignment, source tracking, validation, and thumbnail pipeline. Hosted Doors
+and Windows remain architectural products with rough-opening and framing behavior;
+ordinary imported Objects remain placed assets and do not acquire Wall-hosting rules
+merely because their source geometry resembles an opening.
+
 Nonzero exterior and interior return depths generate finish solids inside each
 linked rough opening. Each side receives left and right jambs plus a head; Window
 returns also receive a sill. The outermost Wall layer supplies exterior-return
@@ -306,11 +338,14 @@ junction framing.
 
 ## Next Steps
 
-1. Add explicit manufacturer product identity and importable, validated profile
-   libraries on top of the generic Door and Window product generators.
-2. Add manual per-junction framing overrides without making unsafe engineering assumptions.
-3. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
-4. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-5. Add manual per-edge platform overrides for exceptional support details.
-6. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+1. Define and validate the first Model Builder Product Package: manufacturer metadata,
+   SVG 2D views, GLB 3D geometry, native dimensions, and optional editable components.
+2. Build the shared asset registry and import review screen used by manufacturer
+   products and general placed Objects, including units, layer assignment, provenance,
+   validation, and duplicate handling.
+3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
+4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
+5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+6. Add manual per-edge platform overrides for exceptional support details.
+7. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.
