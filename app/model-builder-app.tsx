@@ -165,6 +165,7 @@ import {
   assignPolylineToLayer,
   assignFoundationWallType,
   assignWallFoundationSupport,
+  assignWallOpeningType,
   assignWallType,
   cloneDocument,
   arcIsEditable,
@@ -297,9 +298,11 @@ import {
   cloneBuildingStructure,
   cloneFoundationWallType,
   cloneLayeredAssembly,
+  cloneWallOpeningType,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
   FOUNDATION_WALL_CONDITIONS,
+  MAXIMUM_WALL_OPENING_TYPE_COUNT,
   removeBuildingStory,
   wallLayerGroupThickness,
   WALL_LAYER_GROUPS,
@@ -313,6 +316,7 @@ import {
   type WallExteriorSide,
   type WallJoinMode,
   type WallLayerGroup,
+  type WallOpeningType,
   type WallReferenceLine,
 } from "@/lib/building-stories";
 import {
@@ -8270,13 +8274,17 @@ function WallOpeningNameField({ opening, onUpdate }: { opening: WallOpening; onU
 }
 
 function WallOpeningsControl({
+  building,
   line,
   onAdd,
+  onAssignType,
   onDelete,
   onUpdate,
 }: {
+  building: BuildingStructure;
   line: LineObject;
   onAdd: (kind: WallOpeningKind) => string | null;
+  onAssignType: (openingId: string, typeId: string) => boolean;
   onDelete: (openingId: string) => void;
   onUpdate: (openingId: string, change: Partial<WallOpening>) => boolean;
 }) {
@@ -8286,29 +8294,30 @@ function WallOpeningsControl({
     const id = onAdd(kind);
     if (id) setSelectedId(id);
   };
-  const updateDimension = (field: "centerOffset" | "headerBottomHeight" | "roughHeight" | "roughWidth" | "unitHeight" | "unitWidth", draft: string) => {
+  const updateDimension = (field: "centerOffset" | "headerBottomHeight", draft: string) => {
     const value = parseArchitectural(draft);
     if (value === null || (field === "centerOffset" ? value < 0 : value <= 0)) return false;
     return opening ? onUpdate(opening.id, { [field]: snapToSixteenth(value) }) : false;
   };
+  const componentType = building.openingTypes.find((type) => type.id === opening?.wallOpeningTypeId) ?? null;
+  const compatibleTypes = building.openingTypes.filter((type) => type.kind === opening?.kind);
   return (
     <PropertyGridSection title="Openings" meta={`${line.wallOpenings.length} hosted`}>
       <div className="property-action-row"><button type="button" onClick={() => add("door")}>+ Door</button><button type="button" onClick={() => add("window")}>+ Window</button></div>
       {line.wallOpenings.length > 0 ? <PropertyGridRow label="Opening"><select className="property-cell-select" value={opening?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)} aria-label="Hosted wall opening">{line.wallOpenings.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.kind === "door" ? "Door" : "Window"}</option>)}</select></PropertyGridRow> : <p className="property-grid-note">Add a Door or Window to cut its rough opening through every Wall layer.</p>}
       {opening ? <>
         <WallOpeningNameField key={`${opening.id}:${opening.name}`} opening={opening} onUpdate={(change) => onUpdate(opening.id, change)} />
-        <PropertyGridRow label="Type"><span className="property-readout">{opening.kind === "door" ? "Door" : "Window"}</span></PropertyGridRow>
+        <PropertyGridRow label="Component type"><select className="property-cell-select" value={opening.wallOpeningTypeId ?? ""} onChange={(event) => onAssignType(opening.id, event.target.value)} aria-label="Door or Window component type">{opening.wallOpeningTypeId === null ? <option value="" disabled>Legacy custom opening</option> : null}{compatibleTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
         <LineCoordinateField label="Center from start" unsigned value={opening.centerOffset} onCommit={(draft) => updateDimension("centerOffset", draft)} />
-        <LineCoordinateField label="Unit width" unsigned value={opening.unitWidth} onCommit={(draft) => updateDimension("unitWidth", draft)} />
-        <LineCoordinateField label="Unit height" unsigned value={opening.unitHeight} onCommit={(draft) => updateDimension("unitHeight", draft)} />
-        <LineCoordinateField label="Rough width" unsigned value={opening.roughWidth} onCommit={(draft) => updateDimension("roughWidth", draft)} />
-        <LineCoordinateField label="Rough height" unsigned value={opening.roughHeight} onCommit={(draft) => updateDimension("roughHeight", draft)} />
+        <PropertyGridRow label="Unit size"><span className="property-readout">{formatArchitectural(opening.unitWidth)} × {formatArchitectural(opening.unitHeight)}</span></PropertyGridRow>
+        <PropertyGridRow label="Rough opening"><span className="property-readout">{formatArchitectural(opening.roughWidth)} × {formatArchitectural(opening.roughHeight)}</span></PropertyGridRow>
+        {componentType ? <PropertyGridRow label="Finish returns"><span className="property-readout">Ext {formatArchitectural(componentType.exteriorReturnDepth)} · Int {formatArchitectural(componentType.interiorReturnDepth)}</span></PropertyGridRow> : null}
         {opening.kind === "window" ? <>
           <LineCoordinateField label="Bottom of header" unsigned value={opening.headerBottomHeight} onCommit={(draft) => updateDimension("headerBottomHeight", draft)} />
           <PropertyGridRow label="Rough sill"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight - opening.roughHeight)}</span></PropertyGridRow>
         </> : <PropertyGridRow label="Bottom of header"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight)}</span></PropertyGridRow>}
         <div className="property-action-row single-action"><button type="button" onClick={() => onDelete(opening.id)}>Delete Opening</button></div>
-        <p className="property-grid-note">Unit dimensions describe the inserted product. Rough dimensions control the Wall cut and future framing. Header height is measured to the bottom of the structural header above the Story subfloor.</p>
+        <p className="property-grid-note">The reusable component type controls unit size, rough opening, and future finish returns. Window header height remains an instance placement measured to the bottom of the structural header above the Story subfloor.</p>
       </> : null}
     </PropertyGridSection>
   );
@@ -9009,6 +9018,127 @@ function FoundationWallManagerDialog({
   );
 }
 
+function nextWallOpeningTypeId(building: BuildingStructure, kind: WallOpeningKind): string {
+  const prefix = kind === "door" ? "door-type" : "window-type";
+  const ids = new Set(building.openingTypes.map((type) => type.id));
+  let number = 1;
+  while (ids.has(`${prefix}-${String(number).padStart(2, "0")}`)) number += 1;
+  return `${prefix}-${String(number).padStart(2, "0")}`;
+}
+
+function nextWallOpeningTypeName(building: BuildingStructure, sourceName: string): string {
+  const names = new Set(building.openingTypes.map((type) => type.name.trim().toLocaleLowerCase()));
+  const baseName = `${sourceName.trim()} Copy`;
+  if (!names.has(baseName.toLocaleLowerCase())) return baseName;
+  let number = 2;
+  while (names.has(`${baseName} ${number}`.toLocaleLowerCase())) number += 1;
+  return `${baseName} ${number}`;
+}
+
+function OpeningTypeManagerDialog({
+  document,
+  onCancel,
+  onSave,
+}: {
+  document: ModelDocument;
+  onCancel: () => void;
+  onSave: (building: BuildingStructure) => void;
+}) {
+  const [draft, setDraft] = useState(() => cloneBuildingStructure(document.building));
+  const [selectedId, setSelectedId] = useState(document.building.activeDoorTypeId);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+  const selected = draft.openingTypes.find((type) => type.id === selectedId) ?? draft.openingTypes[0];
+  const usageCount = document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.wallOpeningTypeId === selected.id).length, 0);
+  const kindCount = draft.openingTypes.filter((type) => type.kind === selected.kind).length;
+  const replaceSelected = (change: Partial<WallOpeningType>) => {
+    setDraft((current) => ({ ...cloneBuildingStructure(current), openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), ...change } : cloneWallOpeningType(type)) }));
+    setError("");
+  };
+  const duplicateType = () => {
+    if (draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT) return;
+    const id = nextWallOpeningTypeId(draft, selected.kind);
+    const copy = { ...cloneWallOpeningType(selected), id, name: nextWallOpeningTypeName(draft, selected.name) };
+    setDraft((current) => ({
+      ...cloneBuildingStructure(current),
+      [selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId"]: id,
+      openingTypes: [...current.openingTypes.map(cloneWallOpeningType), copy],
+    }));
+    setSelectedId(id);
+  };
+  const deleteType = () => {
+    if (kindCount <= 1 || usageCount > 0) return;
+    const remaining = draft.openingTypes.filter((type) => type.id !== selected.id).map(cloneWallOpeningType);
+    const activeKey = selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId";
+    const nextActive = draft[activeKey] === selected.id ? remaining.find((type) => type.kind === selected.kind)!.id : draft[activeKey];
+    setDraft((current) => ({ ...cloneBuildingStructure(current), [activeKey]: nextActive, openingTypes: remaining }));
+    setSelectedId(nextActive);
+  };
+  const makeActive = () => setDraft((current) => ({ ...cloneBuildingStructure(current), [selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId"]: selected.id }));
+  const activeId = selected.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId;
+  const save = () => {
+    const next = cloneBuildingStructure(draft);
+    if (!buildingStructureIsValid(next)) {
+      setError("Check names and dimensions. Unit size must fit inside the rough opening, returns cannot be negative, and every project needs at least one Door and one Window type.");
+      return;
+    }
+    onSave(next);
+  };
+  return (
+    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="story-manager wall-type-manager opening-type-manager" role="dialog" aria-modal="true" aria-labelledby="opening-type-manager-title">
+        <header className="story-manager-header"><div><strong id="opening-type-manager-title">Door &amp; Window Type Manager</strong><span>Reusable unit sizes, rough openings, header defaults, and finish-return depths.</span></div><button type="button" onClick={onCancel} aria-label="Close Door and Window Type Manager">×</button></header>
+        <div className="story-manager-body">
+          <aside className="story-list">
+            <header><strong>Component Types</strong><span>{draft.openingTypes.length} defined</span></header>
+            {draft.openingTypes.map((type) => {
+              const isActive = type.id === (type.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId);
+              return <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => setSelectedId(type.id)}><strong>{type.name}</strong><span>{type.kind === "door" ? "Door" : "Window"} · {formatArchitectural(type.unitWidth)} × {formatArchitectural(type.unitHeight)}</span>{isActive ? <small>ACTIVE {type.kind.toUpperCase()}</small> : null}</button>;
+            })}
+            <div className="story-list-actions"><button type="button" onClick={duplicateType} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={kindCount <= 1 || usageCount > 0}>Delete</button></div>
+          </aside>
+          <main className="story-editor opening-type-editor">
+            <section className="story-editor-summary foundation-editor-summary">
+              <label><span>Type name</span><input value={selected.name} maxLength={100} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
+              <label><span>Component family</span><output className="room-output">{selected.kind === "door" ? "Door" : "Window"}</output></label>
+              <button type="button" className={selected.id === activeId ? "is-anchor" : ""} onClick={makeActive}>{selected.id === activeId ? `Active ${selected.kind} type` : `Make active ${selected.kind}`}</button>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Unit &amp; Rough Opening</strong><span>The product size and the structural cut remain separate.</span></div><output>{usageCount} placed</output></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`${selected.id}:uw:${selected.unitWidth}`} label="Unit width" value={selected.unitWidth} onChange={(unitWidth) => replaceSelected({ unitWidth })} />
+                <StoryDimensionInput key={`${selected.id}:uh:${selected.unitHeight}`} label="Unit height" value={selected.unitHeight} onChange={(unitHeight) => replaceSelected({ unitHeight })} />
+                <StoryDimensionInput key={`${selected.id}:rw:${selected.roughWidth}`} label="Rough width" value={selected.roughWidth} onChange={(roughWidth) => replaceSelected({ roughWidth })} />
+                <StoryDimensionInput key={`${selected.id}:rh:${selected.roughHeight}`} label="Rough height" value={selected.roughHeight} onChange={(roughHeight) => replaceSelected({ roughHeight, ...(selected.kind === "door" ? { defaultHeaderBottomHeight: roughHeight } : {}) })} />
+                {selected.kind === "window" ? <StoryDimensionInput key={`${selected.id}:hh:${selected.defaultHeaderBottomHeight}`} label="Default header bottom" value={selected.defaultHeaderBottomHeight} onChange={(defaultHeaderBottomHeight) => replaceSelected({ defaultHeaderBottomHeight })} /> : <label className="story-field"><span>Header bottom</span><output className="room-output">Matches rough height</output></label>}
+              </div>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Finish Returns</strong><span>Reserved geometry inputs for jamb, head, and sill finish development.</span></div></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput allowZero key={`${selected.id}:er:${selected.exteriorReturnDepth}`} label="Exterior return depth" value={selected.exteriorReturnDepth} onChange={(exteriorReturnDepth) => replaceSelected({ exteriorReturnDepth })} />
+                <StoryDimensionInput allowZero key={`${selected.id}:ir:${selected.interiorReturnDepth}`} label="Interior return depth" value={selected.interiorReturnDepth} onChange={(interiorReturnDepth) => replaceSelected({ interiorReturnDepth })} />
+              </div>
+              <p className="opening-type-note">Return depths are stored now so wall-opening finish geometry and quantities can be added without changing the component model. Structural framing will use the rough opening, not the unit size.</p>
+            </section>
+          </main>
+        </div>
+        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
+        <footer className="story-manager-footer"><span>{draft.openingTypes.length} reusable Door and Window types · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Opening Types</button></div></footer>
+      </section>
+    </div>
+  );
+}
+
 type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" | "ceilingStructureOverride" | "ceilingFinishOverride";
 
 function RoomManagerDialog({
@@ -9277,6 +9407,7 @@ export function ModelBuilderApp() {
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
+  const [openingTypeManagerOpen, setOpeningTypeManagerOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
@@ -11995,6 +12126,17 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present, selectedLine]);
 
+  const assignSelectedWallOpeningType = useCallback((openingId: string, typeId: string) => {
+    if (!selectedLine) return false;
+    const next = assignWallOpeningType(editor.present, selectedLine.id, openingId, typeId);
+    if (!next) {
+      setFileNotice({ text: "That component type does not fit the available Wall length or Story height.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    return true;
+  }, [editor.present, selectedLine]);
+
   const deleteSelectedWallOpening = useCallback((openingId: string) => {
     if (!selectedLine) return;
     const opening = selectedLine.wallOpenings.find((candidate) => candidate.id === openingId);
@@ -12255,6 +12397,19 @@ export function ModelBuilderApp() {
     setFoundationManagerOpen(false);
     const activeType = building.foundationWallTypes.find((type) => type.id === building.activeFoundationWallTypeId);
     setFileNotice({ text: `${activeType?.name ?? "Foundation Wall type"} is active for future Foundation Walls.`, tone: "success" });
+  }, [editor.present]);
+
+  const applyOpeningTypes = useCallback((building: BuildingStructure) => {
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "A changed Door or Window type no longer fits one of its placed Wall openings.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setOpeningTypeManagerOpen(false);
+    const activeDoor = building.openingTypes.find((type) => type.id === building.activeDoorTypeId);
+    const activeWindow = building.openingTypes.find((type) => type.id === building.activeWindowTypeId);
+    setFileNotice({ text: `${activeDoor?.name ?? "Door"} and ${activeWindow?.name ?? "Window"} are active for new openings.`, tone: "success" });
   }, [editor.present]);
 
   const applyRoomSettings = useCallback((next: ModelDocument) => {
@@ -12980,7 +13135,7 @@ export function ModelBuilderApp() {
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
                   {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
-                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
+                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
                   {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
                 </div>
               ) : null}
@@ -13186,6 +13341,7 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor and ceiling assemblies, and vertical building defaults"><b>≋</b><span>Floors &amp;<br />Ceilings</span></button>
                 <button type="button" onClick={() => setFoundationManagerOpen(true)} title="Define concrete Foundation Wall, footing, and sill support types"><b>▰</b><span>Foundation</span></button>
                 <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
+                <button type="button" onClick={() => setOpeningTypeManagerOpen(true)} title="Define reusable Door and Window unit sizes, rough openings, headers, and finish returns"><b>▣</b><span>Doors &amp;<br />Windows</span></button>
                 <button type="button" className="is-planned" disabled title="Roof standards will be added with roof modeling"><b>⌂</b><span>Roof</span><small>Planned</small></button>
                 <button type="button" className="is-planned" disabled title="Framing defaults will be added with framing generation"><b>╫</b><span>Framing</span><small>Planned</small></button>
                 <button type="button" className="is-planned" disabled title="Project material definitions are planned"><b>▧</b><span>Materials</span><small>Planned</small></button>
@@ -13430,7 +13586,7 @@ export function ModelBuilderApp() {
             selectedLine.architecturalRole === "wall"
               ? <>
                 <WallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
-                <WallOpeningsControl line={selectedLine} onAdd={addSelectedWallOpening} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
+                <WallOpeningsControl building={editor.present.building} line={selectedLine} onAdd={addSelectedWallOpening} onAssignType={assignSelectedWallOpeningType} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
               </>
               : selectedLine.architecturalRole === "foundation-wall"
                 ? <FoundationWallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}:${selectedLine.foundationWallTypeId}`} line={selectedLine} onUpdate={updateSelectedLine} />
@@ -13809,6 +13965,10 @@ export function ModelBuilderApp() {
                 {editor.present.building.wallTypes.map((wallType) => <button type="button" className={wallType.id === activeWallType.id ? "building-browser-row is-active" : "building-browser-row"} key={wallType.id} onClick={() => setWallTypeManagerOpen(true)}><span className="building-browser-icon">▥</span><span><strong>{wallType.name}</strong><small>{formatArchitectural(assemblyTotalThickness(wallType))} · {wallType.layers.length} layers</small></span>{wallType.id === activeWallType.id ? <b>ACTIVE</b> : null}</button>)}
               </section>
               <section className="building-browser-section">
+                <header><strong>Door &amp; Window Types</strong><span>{editor.present.building.openingTypes.length}</span></header>
+                {editor.present.building.openingTypes.map((type) => <button type="button" className={type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? "building-browser-row is-active" : "building-browser-row"} key={type.id} onClick={() => setOpeningTypeManagerOpen(true)}><span className="building-browser-icon">▣</span><span><strong>{type.name}</strong><small>{type.kind === "door" ? "Door" : "Window"} · RO {formatArchitectural(type.roughWidth)} × {formatArchitectural(type.roughHeight)}</small></span>{type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? <b>ACTIVE</b> : null}</button>)}
+              </section>
+              <section className="building-browser-section">
                 <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>
                 {editor.present.rooms.filter((room) => room.storyId === activeStory.id).map((room) => <button type="button" className="building-browser-row" key={room.id} onClick={() => setRoomManagerOpen(true)}><span className="building-browser-icon">▦</span><span><strong>{room.name}</strong><small>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {room.boundaryWallIds.length} Walls · {room.platformOpenings.length} Openings</small></span></button>)}
                 {!activeStoryRoomCount ? <div className="building-browser-empty"><span>No Rooms detected yet.</span><button type="button" onClick={() => setRoomManagerOpen(true)}>Open Room Manager</button></div> : null}
@@ -13844,6 +14004,7 @@ export function ModelBuilderApp() {
       </footer>
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
+      {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
     </main>

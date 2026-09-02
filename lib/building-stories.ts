@@ -20,6 +20,8 @@ export const WALL_JOIN_MODES = ["auto", "square"] as const;
 export type WallJoinMode = (typeof WALL_JOIN_MODES)[number];
 export const FOUNDATION_WALL_CONDITIONS = ["standard-bearing", "interior-mudsill", "dropped-wall", "garage-wall", "slab-walkout"] as const;
 export type FoundationWallCondition = (typeof FOUNDATION_WALL_CONDITIONS)[number];
+export const WALL_OPENING_KINDS = ["door", "window"] as const;
+export type WallOpeningKind = (typeof WALL_OPENING_KINDS)[number];
 export const MINIMUM_WALL_JOIN_PRIORITY = -100;
 export const MAXIMUM_WALL_JOIN_PRIORITY = 100;
 
@@ -82,13 +84,32 @@ export type FoundationWallType = {
   wallWidth: number;
 };
 
+export type WallOpeningType = {
+  /** Default bottom of the structural header above the Story rough floor. */
+  defaultHeaderBottomHeight: number;
+  /** Finish-return depth measured from the exterior face into the rough opening. */
+  exteriorReturnDepth: number;
+  id: string;
+  /** Finish-return depth measured from the interior face into the rough opening. */
+  interiorReturnDepth: number;
+  kind: WallOpeningKind;
+  name: string;
+  roughHeight: number;
+  roughWidth: number;
+  unitHeight: number;
+  unitWidth: number;
+};
+
 export type BuildingStructure = {
+  activeDoorTypeId: string;
   activeFoundationWallTypeId: string;
+  activeWindowTypeId: string;
   activeWallTypeId: string;
   activeStoryId: string;
   anchorStoryId: string;
   datumElevation: number;
   foundationWallTypes: FoundationWallType[];
+  openingTypes: WallOpeningType[];
   stories: BuildingStory[];
   wallTypes: LayeredAssembly[];
 };
@@ -111,6 +132,7 @@ export type CalculatedStoryElevations = {
 export const MAXIMUM_STORY_COUNT = 12;
 export const MAXIMUM_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_FOUNDATION_WALL_TYPE_COUNT = 32;
+export const MAXIMUM_WALL_OPENING_TYPE_COUNT = 64;
 export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_THICKNESS = 240;
 export const MINIMUM_ROUGH_CEILING_HEIGHT = 12;
@@ -236,6 +258,35 @@ export function createDefaultFoundationWallType(): FoundationWallType {
   };
 }
 
+export function createDefaultWallOpeningTypes(): WallOpeningType[] {
+  return [
+    {
+      defaultHeaderBottomHeight: 82.5,
+      exteriorReturnDepth: 0,
+      id: "door-type-01",
+      interiorReturnDepth: 0,
+      kind: "door",
+      name: "3-0 x 6-8 Door",
+      roughHeight: 82.5,
+      roughWidth: 38,
+      unitHeight: 80,
+      unitWidth: 36,
+    },
+    {
+      defaultHeaderBottomHeight: 80,
+      exteriorReturnDepth: 0,
+      id: "window-type-01",
+      interiorReturnDepth: 0,
+      kind: "window",
+      name: "3-0 x 4-0 Window",
+      roughHeight: 48.5,
+      roughWidth: 36.5,
+      unitHeight: 48,
+      unitWidth: 36,
+    },
+  ];
+}
+
 export function createBuildingStory(id: string, name: string): BuildingStory {
   return {
     ceilingFinish: defaultCeilingFinish(id),
@@ -249,13 +300,17 @@ export function createBuildingStory(id: string, name: string): BuildingStory {
 }
 
 export function createDefaultBuildingStructure(): BuildingStructure {
+  const openingTypes = createDefaultWallOpeningTypes();
   return {
+    activeDoorTypeId: openingTypes.find((type) => type.kind === "door")!.id,
     activeFoundationWallTypeId: "foundation-wall-type-01",
+    activeWindowTypeId: openingTypes.find((type) => type.kind === "window")!.id,
     activeWallTypeId: "wall-type-01",
     activeStoryId: "story-01",
     anchorStoryId: "story-01",
     datumElevation: 0,
     foundationWallTypes: [createDefaultFoundationWallType()],
+    openingTypes,
     stories: [createBuildingStory("story-01", "First Floor")],
     wallTypes: [createDefaultWallType()],
   };
@@ -263,6 +318,10 @@ export function createDefaultBuildingStructure(): BuildingStructure {
 
 export function cloneFoundationWallType(type: FoundationWallType): FoundationWallType {
   return { ...type, footing: { ...type.footing }, sill: { ...type.sill } };
+}
+
+export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
+  return { ...type };
 }
 
 export function cloneAssemblyLayer(layer: AssemblyLayer): AssemblyLayer {
@@ -286,7 +345,7 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), stories: building.stories.map(cloneBuildingStory), wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), openingTypes: building.openingTypes.map(cloneWallOpeningType), stories: building.stories.map(cloneBuildingStory), wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
 }
 
 export function foundationSillStackHeight(type: FoundationWallType): number {
@@ -305,6 +364,20 @@ export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
     (!type.footing.enabled || type.footing.width >= type.wallWidth) &&
     Number.isInteger(type.sill.foundationPlateCount) && type.sill.foundationPlateCount >= 1 && type.sill.foundationPlateCount <= 4 &&
     Number.isInteger(type.sill.upperWallBottomPlateCount) && type.sill.upperWallBottomPlateCount >= 0 && type.sill.upperWallBottomPlateCount <= 2;
+}
+
+export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
+  const positiveDimensions = [type.unitWidth, type.unitHeight, type.roughWidth, type.roughHeight, type.defaultHeaderBottomHeight];
+  const returnDepths = [type.exteriorReturnDepth, type.interiorReturnDepth];
+  return IDENTIFIER_PATTERN.test(type.id) &&
+    stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
+    WALL_OPENING_KINDS.includes(type.kind) &&
+    positiveDimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= 600 && isSixteenth(value)) &&
+    returnDepths.every((value) => Number.isFinite(value) && value >= 0 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    type.unitWidth <= type.roughWidth &&
+    type.unitHeight <= type.roughHeight &&
+    type.defaultHeaderBottomHeight >= type.roughHeight &&
+    (type.kind !== "door" || type.defaultHeaderBottomHeight === type.roughHeight);
 }
 
 export function assemblyTotalThickness(assembly: LayeredAssembly): number {
@@ -405,7 +478,9 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.wallTypes.length < 1 ||
     building.wallTypes.length > MAXIMUM_WALL_TYPE_COUNT ||
     building.foundationWallTypes.length < 1 ||
-    building.foundationWallTypes.length > MAXIMUM_FOUNDATION_WALL_TYPE_COUNT
+    building.foundationWallTypes.length > MAXIMUM_FOUNDATION_WALL_TYPE_COUNT ||
+    building.openingTypes.length < 2 ||
+    building.openingTypes.length > MAXIMUM_WALL_OPENING_TYPE_COUNT
   ) {
     return false;
   }
@@ -429,6 +504,14 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     if (foundationTypeIds.has(foundationType.id) || foundationTypeNames.has(normalizedName) || !foundationWallTypeIsValid(foundationType)) return false;
     foundationTypeIds.add(foundationType.id);
     foundationTypeNames.add(normalizedName);
+  }
+  const openingTypeIds = new Set<string>();
+  const openingTypeNames = new Set<string>();
+  for (const openingType of building.openingTypes) {
+    const normalizedName = openingType.name.trim().toLowerCase();
+    if (openingTypeIds.has(openingType.id) || openingTypeNames.has(normalizedName) || !wallOpeningTypeIsValid(openingType)) return false;
+    openingTypeIds.add(openingType.id);
+    openingTypeNames.add(normalizedName);
   }
   const storyIds = new Set<string>();
   const storyNames = new Set<string>();
@@ -454,7 +537,10 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     storyIds.add(story.id);
     storyNames.add(normalizedName);
   }
-  return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) && wallTypeIds.has(building.activeWallTypeId) && foundationTypeIds.has(building.activeFoundationWallTypeId);
+  return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) &&
+    wallTypeIds.has(building.activeWallTypeId) && foundationTypeIds.has(building.activeFoundationWallTypeId) &&
+    building.openingTypes.some((type) => type.id === building.activeDoorTypeId && type.kind === "door") &&
+    building.openingTypes.some((type) => type.id === building.activeWindowTypeId && type.kind === "window");
 }
 
 export function buildingStructuresEqual(first: BuildingStructure, second: BuildingStructure): boolean {

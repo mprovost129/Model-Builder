@@ -10,6 +10,7 @@ import {
   addPlatformOpening,
   addRectangleObject,
   addWallOpening,
+  assignWallOpeningType,
   addLayer,
   addBoxObject,
   alignBoxObjects,
@@ -1355,6 +1356,7 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   const windowResult = addWallOpening(wall, added.line.id, "window");
   assert.ok(windowResult);
   const windowOpening = windowResult.opening;
+  assert.equal(windowOpening.wallOpeningTypeId, windowResult.document.building.activeWindowTypeId);
   assert.equal(windowOpening.unitWidth, 36);
   assert.equal(windowOpening.roughWidth, 36.5);
   assert.equal(windowOpening.headerBottomHeight, 80);
@@ -1367,6 +1369,28 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   assert.ok(doorResult);
   assert.equal(doorResult.opening.headerBottomHeight, doorResult.opening.roughHeight);
   assert.equal(wallOpeningRoughBottom(doorResult.opening), 0);
+
+  const customTypes = structuredClone(doorResult.document);
+  customTypes.building.openingTypes.push({
+    ...customTypes.building.openingTypes.find((type) => type.kind === "window")!,
+    id: "window-type-02",
+    name: "4-0 x 4-0 Window",
+    roughWidth: 48.5,
+    unitWidth: 48,
+  });
+  const reassigned = assignWallOpeningType(customTypes, added.line.id, windowOpening.id, "window-type-02");
+  assert.ok(reassigned);
+  const reassignedWindow = reassigned.lines[0].wallOpenings.find((opening) => opening.id === windowOpening.id);
+  assert.equal(reassignedWindow?.wallOpeningTypeId, "window-type-02");
+  assert.equal(reassignedWindow?.roughWidth, 48.5);
+
+  const editedTypes = cloneBuildingStructure(windowResult.document.building);
+  const linkedWindowType = editedTypes.openingTypes.find((type) => type.id === windowOpening.wallOpeningTypeId);
+  assert.ok(linkedWindowType);
+  linkedWindowType.roughWidth = 40;
+  const synchronized = updateDocumentBuilding(windowResult.document, editedTypes);
+  assert.ok(synchronized);
+  assert.equal(synchronized.lines[0].wallOpenings[0].roughWidth, 40);
 
   assert.equal(updateWallOpening(doorResult.document, added.line.id, doorResult.opening.id, { centerOffset: windowOpening.centerOffset }), null);
   assert.equal(updateWallOpening(doorResult.document, added.line.id, doorResult.opening.id, { roughWidth: 240 }), null);

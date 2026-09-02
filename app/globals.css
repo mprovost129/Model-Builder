@@ -509,6 +509,9 @@ button { color: inherit; }
 .foundation-field-grid .story-field-shell input { height: 29px; border: 0; background: transparent; color: inherit; }
 .foundation-field-grid .story-field-shell small { font-size: 8px; }
 .foundation-sill-settings > p { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
+.opening-type-manager { width: min(1080px, calc(100vw - 48px)); height: min(700px, calc(100vh - 48px)); }
+.opening-type-manager .story-manager-body { grid-template-columns: 230px minmax(600px, 1fr); }
+.opening-type-note { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
 .foundation-section-preview { min-height: 0; overflow-y: auto; border-left: 1px solid #3e4955; background: #1c242d; }
 .foundation-section-preview > header { display: grid; gap: 3px; padding: 11px 12px; border-bottom: 1px solid #3a4651; background: #252f39; }
 .foundation-section-preview > header strong { font-size: 11px; }

@@ -9,6 +9,7 @@ import {
   createDefaultBuildingStructure,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
+  wallOpeningTypeIsValid,
   removeBuildingStory,
   wallLayerCenterOffsets,
   wallReferenceDistanceFromExterior,
@@ -92,6 +93,26 @@ test("defines reusable Foundation Wall types with condition-based sill ownership
   assert.equal(building.foundationWallTypes[0].footing.width, 16);
   assert.equal(building.foundationWallTypes[0].sill.exteriorSetback, 0);
   assert.equal(buildingStructureIsValid(cloned), true);
+});
+
+test("defines reusable Door and Window component types for rough openings and finish returns", () => {
+  const building = createDefaultBuildingStructure();
+  const door = building.openingTypes.find((type) => type.kind === "door");
+  const window = building.openingTypes.find((type) => type.kind === "window");
+  assert.ok(door);
+  assert.ok(window);
+  assert.equal(building.activeDoorTypeId, door.id);
+  assert.equal(building.activeWindowTypeId, window.id);
+  assert.equal(door.roughWidth, 38);
+  assert.equal(window.defaultHeaderBottomHeight, 80);
+  assert.equal(wallOpeningTypeIsValid(door), true);
+
+  const invalid = { ...window, interiorReturnDepth: -0.5 };
+  assert.equal(wallOpeningTypeIsValid(invalid), false);
+
+  const cloned = cloneBuildingStructure(building);
+  cloned.openingTypes[0].roughWidth = 40;
+  assert.equal(building.openingTypes[0].roughWidth, 38);
 });
 
 test("rejects invalid Foundation Wall support geometry and duplicate type names", () => {

@@ -206,11 +206,28 @@ than hard-coded geometry.
 - Version-17 Walls upgrade to Wall centerline so their existing geometry does
   not shift. New Walls use the Main-group reference behavior.
 
+## Door and Window Component Types
+
+Door and Window Types are reusable project definitions rather than unrelated
+dimensions stored only on each placed opening. Each type owns its unit width and
+height, structural rough-opening width and height, and exterior/interior finish-
+return depths. Window types also provide a default bottom-of-header elevation
+measured from the Story subfloor; the placed Window may override that elevation.
+Door header bottoms remain equal to their rough-opening height.
+
+The project maintains one active Door Type and one active Window Type for new
+openings. A placed opening retains its type identity and a resolved dimensional
+snapshot used by current wall-cut geometry. Changing a type updates its linked
+placements only when every resulting opening still fits its Wall and Story;
+invalid overlaps or heights reject the update instead of corrupting geometry.
+Version-29 and earlier files retain their existing dimensions and link matching
+standard openings to the new default component types during upgrade.
+
 ## Next Steps
 
-1. Extend hosted wall openings with selectable Door/Window library components,
-   opening-specific finish returns, configurable return depths, and framing
-   members generated from the existing rough-opening and header data.
+1. Generate opening-specific jamb, head, and sill finish-return geometry from
+   the reusable Door/Window type depths, then add framing members from the same
+   rough-opening and header data.
 2. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 3. Add manual per-edge platform overrides for exceptional support details.
 4. Add split-level, vaulted-ceiling, and manual wall-height exceptions

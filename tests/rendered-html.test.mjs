@@ -203,6 +203,10 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /updateDocumentBuilding/);
   assert.match(component, /calculateStoryElevations/);
   assert.match(component, /RoomManagerDialog/);
+  assert.match(component, /OpeningTypeManagerDialog/);
+  assert.match(component, /Door &amp; Window Type Manager/);
+  assert.match(component, /assignWallOpeningType/);
+  assert.match(component, /wallOpeningTypeId/);
   assert.match(component, /Detect \/ Update Rooms/);
   assert.match(component, /refreshRoomsForStory/);
   assert.match(component, /wallVerticalExtent/);
