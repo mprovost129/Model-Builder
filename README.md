@@ -111,7 +111,9 @@ polylines, rectangles, Circles, and Arcs.
   elevation measured above the Story subfloor for future framing
 - Reusable Door and Window component types with independent active defaults,
   unit and rough-opening sizes, Window header defaults, and exterior/interior
-  finish-return depths that generate jamb, head, and Window sill geometry; placed openings retain a type link and can be reassigned
+  finish-return depths that generate jamb, head, and Window sill geometry; each type
+  also controls header depth, king/jack counts per side, and Window rough-sill count;
+  placed openings retain a type link and can be reassigned
 - Project-level Wall Framing Defaults that generate studs, bottom and top plates,
   king and jack studs, headers, Window rough sills, and cripple studs from the
   Wall Main layer and structural rough openings, with an optional 3D framing reveal;
@@ -215,7 +217,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-28 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-32 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -317,12 +319,13 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   Stories. Door and Window component definitions now provide reusable unit sizes,
   rough openings, header defaults, and generated finish-return geometry. Those
   structural openings now drive an initial conventional light-frame member layout,
-  with project settings for spacing, member size, plate counts, header depth, and
-  3D framing visibility. Header depth remains an editable rule rather than an
-  engineered span calculation. Resolved corners and T-intersections now drive
-  project-selected corner and partition-backing methods. The next framing
-  milestone is opening-specific header construction, jack/king-stud counts, and
-  manual per-junction overrides.
+  with project settings for spacing, member size, plate counts, and 3D framing
+  visibility. Each reusable Door and Window type controls its own full-Main-depth
+  header depth and king/jack counts; Window types also control stacked rough-sill
+  plates beneath the rough opening. These remain explicit drafting rules rather
+  than engineered span calculations. Resolved corners and T-intersections drive
+  project-selected corner and partition-backing methods. The next framing milestone
+  is built-up header ply/spacer construction and manual per-junction overrides.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.

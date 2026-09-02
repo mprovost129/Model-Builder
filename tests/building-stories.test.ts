@@ -106,10 +106,14 @@ test("defines reusable Door and Window component types for rough openings and fi
   assert.equal(building.activeWindowTypeId, window.id);
   assert.equal(door.roughWidth, 38);
   assert.equal(window.defaultHeaderBottomHeight, 80);
+  assert.deepEqual([door.headerDepth, door.kingStudCountPerSide, door.jackStudCountPerSide, door.windowSillPlateCount], [9.25, 1, 1, 0]);
+  assert.deepEqual([window.headerDepth, window.kingStudCountPerSide, window.jackStudCountPerSide, window.windowSillPlateCount], [9.25, 1, 1, 1]);
   assert.equal(wallOpeningTypeIsValid(door), true);
 
   const invalid = { ...window, interiorReturnDepth: -0.5 };
   assert.equal(wallOpeningTypeIsValid(invalid), false);
+  assert.equal(wallOpeningTypeIsValid({ ...door, windowSillPlateCount: 1 }), false);
+  assert.equal(wallOpeningTypeIsValid({ ...window, jackStudCountPerSide: 5 }), false);
 
   const cloned = cloneBuildingStructure(building);
   cloned.openingTypes[0].roughWidth = 40;

@@ -4,6 +4,7 @@ import {
   wallReferenceDistanceFromExterior,
   type LayeredAssembly,
   type WallFramingSettings,
+  type WallOpeningType,
 } from "./building-stories.ts";
 import type { AutomaticWallJoinPlan, WallEndpoint } from "./wall-joins.ts";
 
@@ -101,6 +102,7 @@ export function wallFramingSolids(
   wallHeight: number,
   joinPlan?: AutomaticWallJoinPlan,
   wallLines: LineObject[] = [line],
+  openingTypesById: ReadonlyMap<string, WallOpeningType> = new Map(),
 ): WallFramingSolid[] {
   if (!settings.enabled || line.architecturalRole !== "wall") return [];
   const direction = lineDirection(line);
@@ -138,6 +140,20 @@ export function wallFramingSolids(
   const topStackHeight = settings.topPlateCount * settings.plateHeight;
   const studTop = wallHeight - topStackHeight;
   const fullStudHeight = studTop - bottomStackHeight;
+  const openingFraming = (opening: LineObject["wallOpenings"][number]) => {
+    const type = opening.wallOpeningTypeId === null ? null : openingTypesById.get(opening.wallOpeningTypeId) ?? null;
+    return type?.kind === opening.kind ? {
+      headerDepth: type.headerDepth,
+      jackStudCountPerSide: type.jackStudCountPerSide,
+      kingStudCountPerSide: type.kingStudCountPerSide,
+      windowSillPlateCount: type.windowSillPlateCount,
+    } : {
+      headerDepth: settings.headerHeight,
+      jackStudCountPerSide: 1,
+      kingStudCountPerSide: 1,
+      windowSillPlateCount: opening.kind === "window" ? 1 : 0,
+    };
+  };
   const doorCuts = line.wallOpenings
     .filter((opening) => opening.kind === "door")
     .map((opening) => ({ start: opening.centerOffset - opening.roughWidth / 2, end: opening.centerOffset + opening.roughWidth / 2 }));
@@ -152,10 +168,14 @@ export function wallFramingSolids(
     center > opening.centerOffset - opening.roughWidth / 2 - settings.studWidth &&
     center < opening.centerOffset + opening.roughWidth / 2 + settings.studWidth
   )));
-  const protectedZones = line.wallOpenings.map((opening) => ({
-    start: opening.centerOffset - opening.roughWidth / 2 - settings.studWidth * 2,
-    end: opening.centerOffset + opening.roughWidth / 2 + settings.studWidth * 2,
-  }));
+  const protectedZones = line.wallOpenings.map((opening) => {
+    const framing = openingFraming(opening);
+    const sideMemberCount = framing.jackStudCountPerSide + framing.kingStudCountPerSide;
+    return {
+      start: opening.centerOffset - opening.roughWidth / 2 - settings.studWidth * sideMemberCount,
+      end: opening.centerOffset + opening.roughWidth / 2 + settings.studWidth * sideMemberCount,
+    };
+  });
   if (settings.partitionBackingStyle === "three-stud") teeCenters.forEach((center) => protectedZones.push({ start: center - settings.studWidth * 2, end: center + settings.studWidth * 2 }));
   const addCommonStud = (start: number) => {
     const end = Math.min(direction.length, start + settings.studWidth);
@@ -193,18 +213,26 @@ export function wallFramingSolids(
     const openingStart = opening.centerOffset - opening.roughWidth / 2;
     const openingEnd = opening.centerOffset + opening.roughWidth / 2;
     const roughBottom = wallOpeningRoughBottom(opening);
-    add("king-stud", openingStart - settings.studWidth * 2, openingStart - settings.studWidth, bottomStackHeight, fullStudHeight, opening.id);
-    add("king-stud", openingEnd + settings.studWidth, openingEnd + settings.studWidth * 2, bottomStackHeight, fullStudHeight, opening.id);
-    add("jack-stud", openingStart - settings.studWidth, openingStart, bottomStackHeight, opening.headerBottomHeight - bottomStackHeight, opening.id);
-    add("jack-stud", openingEnd, openingEnd + settings.studWidth, bottomStackHeight, opening.headerBottomHeight - bottomStackHeight, opening.id);
-    const headerHeight = Math.min(settings.headerHeight, Math.max(0, studTop - opening.headerBottomHeight));
-    add("header", openingStart - settings.studWidth, openingEnd + settings.studWidth, opening.headerBottomHeight, headerHeight, opening.id);
-    if (opening.kind === "window") {
-      add("rough-sill", openingStart, openingEnd, roughBottom, Math.min(settings.plateHeight, opening.roughHeight), opening.id);
+    const framing = openingFraming(opening);
+    for (let index = 0; index < framing.jackStudCountPerSide; index += 1) {
+      add("jack-stud", openingStart - settings.studWidth * (index + 1), openingStart - settings.studWidth * index, bottomStackHeight, opening.headerBottomHeight - bottomStackHeight, opening.id);
+      add("jack-stud", openingEnd + settings.studWidth * index, openingEnd + settings.studWidth * (index + 1), bottomStackHeight, opening.headerBottomHeight - bottomStackHeight, opening.id);
+    }
+    for (let index = 0; index < framing.kingStudCountPerSide; index += 1) {
+      const memberIndex = framing.jackStudCountPerSide + index;
+      add("king-stud", openingStart - settings.studWidth * (memberIndex + 1), openingStart - settings.studWidth * memberIndex, bottomStackHeight, fullStudHeight, opening.id);
+      add("king-stud", openingEnd + settings.studWidth * memberIndex, openingEnd + settings.studWidth * (memberIndex + 1), bottomStackHeight, fullStudHeight, opening.id);
+    }
+    const headerHeight = Math.min(framing.headerDepth, Math.max(0, studTop - opening.headerBottomHeight));
+    const jackBearingWidth = framing.jackStudCountPerSide * settings.studWidth;
+    add("header", openingStart - jackBearingWidth, openingEnd + jackBearingWidth, opening.headerBottomHeight, headerHeight, opening.id);
+    const sillStackHeight = opening.kind === "window" ? framing.windowSillPlateCount * settings.plateHeight : 0;
+    if (opening.kind === "window") for (let index = 0; index < framing.windowSillPlateCount; index += 1) {
+      add("rough-sill", openingStart, openingEnd, roughBottom - (index + 1) * settings.plateHeight, settings.plateHeight, opening.id);
     }
     const headerTop = opening.headerBottomHeight + headerHeight;
     for (let start = Math.ceil(openingStart / settings.studSpacing) * settings.studSpacing; start + settings.studWidth <= openingEnd + TOLERANCE; start += settings.studSpacing) {
-      if (opening.kind === "window") add("cripple-stud", start, start + settings.studWidth, bottomStackHeight, roughBottom - bottomStackHeight, opening.id);
+      if (opening.kind === "window") add("cripple-stud", start, start + settings.studWidth, bottomStackHeight, roughBottom - sillStackHeight - bottomStackHeight, opening.id);
       add("cripple-stud", start, start + settings.studWidth, headerTop, studTop - headerTop, opening.id);
     }
   });

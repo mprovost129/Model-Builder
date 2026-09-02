@@ -45,7 +45,8 @@ test("frames Door and Window rough openings with structural member roles", () =>
     { centerOffset: 60, headerBottomHeight: 82.5, id: "door-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
     { centerOffset: 156, headerBottomHeight: 84, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
   ]);
-  const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125);
+  const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
+  const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, undefined, [line], openingTypes);
   assert.equal(solids.filter((solid) => solid.kind === "header").length, 2);
   assert.equal(solids.filter((solid) => solid.kind === "jack-stud").length, 4);
   assert.equal(solids.filter((solid) => solid.kind === "king-stud").length, 4);
@@ -55,7 +56,27 @@ test("frames Door and Window rough openings with structural member roles", () =>
   const doorHeader = solids.find((solid) => solid.kind === "header" && solid.openingId === "door-01")!;
   assert.deepEqual([doorHeader.startExterior.x, doorHeader.endExterior.x, doorHeader.baseHeight, doorHeader.height], [39.5, 80.5, 82.5, 9.25]);
   const windowSill = solids.find((solid) => solid.kind === "rough-sill")!;
-  assert.deepEqual([windowSill.baseHeight, windowSill.height], [35.5, 1.5]);
+  assert.deepEqual([windowSill.baseHeight, windowSill.height], [34, 1.5]);
+});
+
+test("uses each reusable opening type's header and side-support package", () => {
+  const building = createDefaultBuildingStructure();
+  const windowType = building.openingTypes.find((type) => type.kind === "window")!;
+  windowType.headerDepth = 11.25;
+  windowType.jackStudCountPerSide = 2;
+  windowType.kingStudCountPerSide = 2;
+  windowType.windowSillPlateCount = 2;
+  const line = framedWall([
+    { centerOffset: 120, headerBottomHeight: 84, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
+  ]);
+  const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
+  const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, undefined, [line], openingTypes);
+  assert.equal(solids.filter((solid) => solid.kind === "jack-stud").length, 4);
+  assert.equal(solids.filter((solid) => solid.kind === "king-stud").length, 4);
+  assert.equal(solids.filter((solid) => solid.kind === "rough-sill").length, 2);
+  const header = solids.find((solid) => solid.kind === "header")!;
+  assert.deepEqual([header.startExterior.x, header.endExterior.x, header.height], [98.75, 141.25, 11.25]);
+  assert.deepEqual(solids.filter((solid) => solid.kind === "rough-sill").map((solid) => solid.baseHeight), [34, 32.5]);
 });
 
 test("can disable derived framing without changing Wall or opening geometry", () => {

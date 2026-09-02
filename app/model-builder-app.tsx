@@ -1584,7 +1584,7 @@ function updateWallView(
     view.meshes.push(mesh);
     view.materials.push(material);
   });
-  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height, joinPlan, [...linesById.values()]).forEach((framingMember) => {
+  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height, joinPlan, [...linesById.values()], openingTypesById).forEach((framingMember) => {
     const shape = new THREE.Shape();
     shape.moveTo(framingMember.startExterior.x, framingMember.startExterior.y);
     shape.lineTo(framingMember.startInterior.x, framingMember.startInterior.y);
@@ -9144,7 +9144,7 @@ function OpeningTypeManagerDialog({
   const save = () => {
     const next = cloneBuildingStructure(draft);
     if (!buildingStructureIsValid(next)) {
-      setError("Check names and dimensions. Unit size must fit inside the rough opening, returns cannot be negative, and every project needs at least one Door and one Window type.");
+      setError("Check names, dimensions, and framing counts. Unit size must fit inside the rough opening, returns cannot be negative, and every project needs at least one Door and one Window type.");
       return;
     }
     onSave(next);
@@ -9185,6 +9185,17 @@ function OpeningTypeManagerDialog({
                 <StoryDimensionInput allowZero key={`${selected.id}:ir:${selected.interiorReturnDepth}`} label="Interior return depth" value={selected.interiorReturnDepth} onChange={(interiorReturnDepth) => replaceSelected({ interiorReturnDepth })} />
               </div>
               <p className="opening-type-note">Each nonzero depth generates returns from that Wall face. If their combined depth exceeds a thinner Wall, the two sides meet without overlapping. Structural framing will use the rough opening, not the unit size.</p>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Opening Framing</strong><span>Define the repeatable framing package generated with this component type.</span></div></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`${selected.id}:hd:${selected.headerDepth}`} label="Header depth" value={selected.headerDepth} onChange={(headerDepth) => replaceSelected({ headerDepth })} />
+                <label className="story-field"><span>King studs per side</span><select value={selected.kingStudCountPerSide} onChange={(event) => replaceSelected({ kingStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
+                <label className="story-field"><span>Jack studs per side</span><select value={selected.jackStudCountPerSide} onChange={(event) => replaceSelected({ jackStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
+                {selected.kind === "window" ? <label className="story-field"><span>Rough-sill plates</span><select value={selected.windowSillPlateCount} onChange={(event) => replaceSelected({ windowSillPlateCount: Number(event.target.value) })}>{[0, 1, 2].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : <label className="story-field"><span>Rough sill</span><output className="room-output">Not used for Doors</output></label>}
+                <label className="story-field"><span>Header thickness</span><output className="room-output">Full Wall Main layer</output></label>
+              </div>
+              <p className="opening-type-note">These are explicit drafting and modeling rules, not an engineered span calculation. Header depth is limited by the available space below the top plates; sizing and support counts must be selected for the project&apos;s loads, span, material, and code requirements.</p>
             </section>
           </main>
         </div>
@@ -9268,11 +9279,11 @@ function WallFramingManagerDialog({
             <section className="foundation-setting-section">
               <header><div><strong>Opening Framing</strong><span>Rough dimensions and bottom-of-header elevations remain authoritative.</span></div></header>
               <div className="foundation-field-grid">
-                <StoryDimensionInput key={`header:${draft.headerHeight}`} label="Default header depth" value={draft.headerHeight} onChange={(headerHeight) => replace({ headerHeight })} />
-                <label className="story-field"><span>Generated members</span><output className="room-output">King + jack studs</output></label>
-                <label className="story-field"><span>Window support</span><output className="room-output">Rough sill + cripples</output></label>
+                <StoryDimensionInput key={`header:${draft.headerHeight}`} label="Legacy/custom header depth" value={draft.headerHeight} onChange={(headerHeight) => replace({ headerHeight })} />
+                <label className="story-field"><span>Reusable types</span><output className="room-output">Use type-specific framing</output></label>
+                <label className="story-field"><span>Window support</span><output className="room-output">Type sill + cripples</output></label>
               </div>
-              <p className="opening-type-note">Header depth is an editable project default, not an engineered span calculation. Door bottom plates are cut at the rough opening; Window bottom plates remain continuous.</p>
+              <p className="opening-type-note">The fallback applies only to older custom openings without a reusable type. Door and Window types control their own header depth, king studs, jack studs, and Window rough-sill count. Door bottom plates are cut at the rough opening; Window bottom plates remain continuous.</p>
             </section>
           </main>
         </div>
@@ -14122,7 +14133,7 @@ export function ModelBuilderApp() {
               </section>
               <section className="building-browser-section">
                 <header><strong>Door &amp; Window Types</strong><span>{editor.present.building.openingTypes.length}</span></header>
-                {editor.present.building.openingTypes.map((type) => <button type="button" className={type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? "building-browser-row is-active" : "building-browser-row"} key={type.id} onClick={() => setOpeningTypeManagerOpen(true)}><span className="building-browser-icon">▣</span><span><strong>{type.name}</strong><small>{type.kind === "door" ? "Door" : "Window"} · RO {formatArchitectural(type.roughWidth)} × {formatArchitectural(type.roughHeight)}</small></span>{type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? <b>ACTIVE</b> : null}</button>)}
+                {editor.present.building.openingTypes.map((type) => <button type="button" className={type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? "building-browser-row is-active" : "building-browser-row"} key={type.id} onClick={() => setOpeningTypeManagerOpen(true)}><span className="building-browser-icon">▣</span><span><strong>{type.name}</strong><small>{type.kind === "door" ? "Door" : "Window"} · RO {formatArchitectural(type.roughWidth)} × {formatArchitectural(type.roughHeight)} · {type.kingStudCountPerSide}K/{type.jackStudCountPerSide}J each side</small></span>{type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? <b>ACTIVE</b> : null}</button>)}
               </section>
               <section className="building-browser-section">
                 <header><strong>Wall Framing</strong><span>{editor.present.building.wallFraming.enabled ? "ON" : "OFF"}</span></header>

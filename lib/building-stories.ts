@@ -97,11 +97,19 @@ export type WallOpeningType = {
   /** Finish-return depth measured from the interior face into the rough opening. */
   interiorReturnDepth: number;
   kind: WallOpeningKind;
+  /** Full Main-layer header depth; structural sizing remains user-defined. */
+  headerDepth: number;
+  /** Full-height king studs generated at each side of the rough opening. */
+  kingStudCountPerSide: number;
   name: string;
+  /** Header-bearing jack studs generated at each side of the rough opening. */
+  jackStudCountPerSide: number;
   roughHeight: number;
   roughWidth: number;
   unitHeight: number;
   unitWidth: number;
+  /** Stacked rough-sill plates below a Window opening; always zero for Doors. */
+  windowSillPlateCount: number;
 };
 
 export type WallFramingSettings = {
@@ -283,26 +291,34 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
     {
       defaultHeaderBottomHeight: 82.5,
       exteriorReturnDepth: 0,
+      headerDepth: 9.25,
       id: "door-type-01",
       interiorReturnDepth: 0,
+      jackStudCountPerSide: 1,
+      kingStudCountPerSide: 1,
       kind: "door",
       name: "3-0 x 6-8 Door",
       roughHeight: 82.5,
       roughWidth: 38,
       unitHeight: 80,
       unitWidth: 36,
+      windowSillPlateCount: 0,
     },
     {
       defaultHeaderBottomHeight: 80,
       exteriorReturnDepth: 0,
+      headerDepth: 9.25,
       id: "window-type-01",
       interiorReturnDepth: 0,
+      jackStudCountPerSide: 1,
+      kingStudCountPerSide: 1,
       kind: "window",
       name: "3-0 x 4-0 Window",
       roughHeight: 48.5,
       roughWidth: 36.5,
       unitHeight: 48,
       unitWidth: 36,
+      windowSillPlateCount: 1,
     },
   ];
 }
@@ -405,7 +421,7 @@ export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
 }
 
 export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
-  const positiveDimensions = [type.unitWidth, type.unitHeight, type.roughWidth, type.roughHeight, type.defaultHeaderBottomHeight];
+  const positiveDimensions = [type.unitWidth, type.unitHeight, type.roughWidth, type.roughHeight, type.defaultHeaderBottomHeight, type.headerDepth];
   const returnDepths = [type.exteriorReturnDepth, type.interiorReturnDepth];
   return IDENTIFIER_PATTERN.test(type.id) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
@@ -415,7 +431,10 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     type.unitWidth <= type.roughWidth &&
     type.unitHeight <= type.roughHeight &&
     type.defaultHeaderBottomHeight >= type.roughHeight &&
-    (type.kind !== "door" || type.defaultHeaderBottomHeight === type.roughHeight);
+    Number.isInteger(type.kingStudCountPerSide) && type.kingStudCountPerSide >= 0 && type.kingStudCountPerSide <= 3 &&
+    Number.isInteger(type.jackStudCountPerSide) && type.jackStudCountPerSide >= 0 && type.jackStudCountPerSide <= 4 &&
+    Number.isInteger(type.windowSillPlateCount) && type.windowSillPlateCount >= 0 && type.windowSillPlateCount <= 2 &&
+    (type.kind !== "door" || (type.defaultHeaderBottomHeight === type.roughHeight && type.windowSillPlateCount === 0));
 }
 
 export function wallFramingSettingsAreValid(settings: WallFramingSettings): boolean {
