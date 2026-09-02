@@ -223,6 +223,18 @@ invalid overlaps or heights reject the update instead of corrupting geometry.
 Version-29 and earlier files retain their existing dimensions and link matching
 standard openings to the new default component types during upgrade.
 
+Each Door or Window Type also owns a parametric 3D component tree. The unit
+rectangle is the root coordinate system; a component may instead join inside a
+parent component's clear rectangle. Perimeter, panel/glazing, vertical-divider,
+and horizontal-divider generators currently support frames, jambs, sashes,
+panels, glass, mullions, interior/exterior trim, thresholds, and hardware roles.
+Every component has a stable ID, material, visibility, inset, profile width,
+across-wall depth, face anchor, and depth offset. Changing a parent profile
+rebuilds its children. Unit X and bottom offsets position the assembled product
+inside the separately controlled rough opening. Version-36 files store the
+component graph; version-35 and earlier files upgrade with editable Door and
+Window starter assemblies.
+
 Nonzero exterior and interior return depths generate finish solids inside each
 linked rough opening. Each side receives left and right jambs plus a head; Window
 returns also receive a sill. The outermost Wall layer supplies exterior-return
@@ -274,10 +286,12 @@ junction framing.
 
 ## Next Steps
 
-1. Develop Door/Window product-unit and casing geometry independently of framing.
-2. Add manual per-junction framing overrides without making unsafe engineering assumptions.
-3. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
-4. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-5. Add manual per-edge platform overrides for exceptional support details.
-6. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+1. Add placed-opening component overrides while retaining the reusable Type defaults.
+2. Add specialized product generators for door panels, divided-lite patterns,
+   operable sash arrangements, and manufacturer-specific profiles.
+3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
+4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
+5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+6. Add manual per-edge platform overrides for exceptional support details.
+7. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

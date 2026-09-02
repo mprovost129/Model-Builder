@@ -5,6 +5,8 @@ import {
   wallLayerGroupThickness,
   wallReferenceDistanceFromExterior,
   type LayeredAssembly,
+  type OpeningAssemblyComponent,
+  type OpeningComponentRole,
   type WallOpeningType,
 } from "./building-stories.ts";
 
@@ -53,6 +55,16 @@ export type WallOpeningReturnSolid = WallLayerFootprint & {
   layerIndex: number;
   openingId: string;
   side: "exterior" | "interior";
+};
+
+export type WallOpeningComponentSolid = WallLayerFootprint & {
+  baseHeight: number;
+  componentId: string;
+  componentName: string;
+  height: number;
+  material: string;
+  openingId: string;
+  role: OpeningComponentRole;
 };
 
 type CutLine = {
@@ -664,6 +676,122 @@ export function wallOpeningReturnSolids(
     };
     addForSide("exterior", openingType.exteriorReturnDepth);
     addForSide("interior", openingType.interiorReturnDepth);
+  });
+  return result;
+}
+
+/**
+ * Resolves a Door or Window Type's joined component tree into host-aware 3D
+ * solids. Components share the unit rectangle and can nest inside a parent's
+ * clear rectangle; the rough opening remains the independent structural cut.
+ */
+export function wallOpeningComponentSolids(
+  line: LineObject,
+  wallType: LayeredAssembly,
+  openingTypesById: ReadonlyMap<string, WallOpeningType>,
+): WallOpeningComponentSolid[] {
+  const direction = lineDirection(line);
+  const wallDepth = assemblyTotalThickness(wallType);
+  if (!direction || wallDepth < ENDPOINT_TOLERANCE) return [];
+  const pointAt = (distance: number) => ({ x: line.start.x + direction.x * distance, y: line.start.y + direction.y * distance });
+  const footprint = (start: number, end: number, firstDepth: number, secondDepth: number): WallLayerFootprint => ({
+    startExterior: offsetPointAt(pointAt(start), direction, offsetFromExteriorDistance(wallType, line, firstDepth)),
+    startInterior: offsetPointAt(pointAt(start), direction, offsetFromExteriorDistance(wallType, line, secondDepth)),
+    endExterior: offsetPointAt(pointAt(end), direction, offsetFromExteriorDistance(wallType, line, firstDepth)),
+    endInterior: offsetPointAt(pointAt(end), direction, offsetFromExteriorDistance(wallType, line, secondDepth)),
+  });
+  type Bounds = { bottom: number; left: number; right: number; top: number };
+  const result: WallOpeningComponentSolid[] = [];
+  line.wallOpenings.forEach((opening) => {
+    const openingType = opening.wallOpeningTypeId === null ? null : openingTypesById.get(opening.wallOpeningTypeId);
+    if (!openingType || openingType.kind !== opening.kind) return;
+    const rootBounds: Bounds = {
+      bottom: wallOpeningRoughBottom(opening) + openingType.unitOffsetZ,
+      left: opening.centerOffset + openingType.unitOffsetX - openingType.unitWidth / 2,
+      right: opening.centerOffset + openingType.unitOffsetX + openingType.unitWidth / 2,
+      top: wallOpeningRoughBottom(opening) + openingType.unitOffsetZ + openingType.unitHeight,
+    };
+    const componentsById = new Map(openingType.components.map((component) => [component.id, component]));
+    const clearBounds = new Map<string, Bounds>();
+    const resolveBounds = (component: OpeningAssemblyComponent): { bounds: Bounds; clear: Bounds } | null => {
+      const cached = clearBounds.get(component.id);
+      if (cached) {
+        const bounds = component.geometry === "perimeter" ? {
+          bottom: cached.bottom - component.profileWidth,
+          left: cached.left - component.profileWidth,
+          right: cached.right + component.profileWidth,
+          top: cached.top + component.profileWidth,
+        } : cached;
+        return { bounds, clear: cached };
+      }
+      const parent = component.parentComponentId === null ? null : componentsById.get(component.parentComponentId);
+      const source = parent ? resolveBounds(parent)?.clear : rootBounds;
+      if (!source) return null;
+      const bounds = { bottom: source.bottom + component.inset, left: source.left + component.inset, right: source.right - component.inset, top: source.top - component.inset };
+      if (bounds.right - bounds.left < ENDPOINT_TOLERANCE || bounds.top - bounds.bottom < ENDPOINT_TOLERANCE) return null;
+      const clear = component.geometry === "perimeter" ? {
+        bottom: bounds.bottom + component.profileWidth,
+        left: bounds.left + component.profileWidth,
+        right: bounds.right - component.profileWidth,
+        top: bounds.top - component.profileWidth,
+      } : bounds;
+      if (clear.right - clear.left < ENDPOINT_TOLERANCE || clear.top - clear.bottom < ENDPOINT_TOLERANCE) return null;
+      clearBounds.set(component.id, clear);
+      return { bounds, clear };
+    };
+    openingType.components.forEach((component) => {
+      if (!component.visible) return;
+      const resolved = resolveBounds(component);
+      if (!resolved) return;
+      let firstDepth: number;
+      let secondDepth: number;
+      if (component.depthAnchor === "exterior") {
+        firstDepth = component.depthOffset;
+        secondDepth = component.depthOffset + component.depth;
+      } else if (component.depthAnchor === "interior") {
+        secondDepth = wallDepth - component.depthOffset;
+        firstDepth = secondDepth - component.depth;
+      } else {
+        firstDepth = wallDepth / 2 - component.depth / 2 + component.depthOffset;
+        secondDepth = firstDepth + component.depth;
+      }
+      firstDepth = Math.max(0, Math.min(wallDepth, firstDepth));
+      secondDepth = Math.max(0, Math.min(wallDepth, secondDepth));
+      if (secondDepth - firstDepth < ENDPOINT_TOLERANCE) return;
+      const add = (left: number, right: number, bottom: number, top: number) => {
+        if (right - left < ENDPOINT_TOLERANCE || top - bottom < ENDPOINT_TOLERANCE) return;
+        result.push({
+          ...footprint(left, right, firstDepth, secondDepth),
+          baseHeight: bottom,
+          componentId: component.id,
+          componentName: component.name,
+          height: top - bottom,
+          material: component.material,
+          openingId: opening.id,
+          role: component.role,
+        });
+      };
+      const { bounds } = resolved;
+      if (component.geometry === "perimeter") {
+        const width = Math.min(component.profileWidth, (bounds.right - bounds.left) / 2, (bounds.top - bounds.bottom) / 2);
+        add(bounds.left, bounds.left + width, bounds.bottom, bounds.top);
+        add(bounds.right - width, bounds.right, bounds.bottom, bounds.top);
+        add(bounds.left + width, bounds.right - width, bounds.bottom, bounds.bottom + width);
+        add(bounds.left + width, bounds.right - width, bounds.top - width, bounds.top);
+      } else if (component.geometry === "panel") {
+        add(bounds.left, bounds.right, bounds.bottom, bounds.top);
+      } else if (component.geometry === "vertical-divider") {
+        for (let index = 1; index <= component.divisionCount; index += 1) {
+          const center = bounds.left + (bounds.right - bounds.left) * index / (component.divisionCount + 1);
+          add(center - component.profileWidth / 2, center + component.profileWidth / 2, bounds.bottom, bounds.top);
+        }
+      } else {
+        for (let index = 1; index <= component.divisionCount; index += 1) {
+          const center = bounds.bottom + (bounds.top - bounds.bottom) * index / (component.divisionCount + 1);
+          add(bounds.left, bounds.right, center - component.profileWidth / 2, center + component.profileWidth / 2);
+        }
+      }
+    });
   });
   return result;
 }

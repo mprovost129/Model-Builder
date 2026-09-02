@@ -512,6 +512,11 @@ button { color: inherit; }
 .opening-type-manager { width: min(1080px, calc(100vw - 48px)); height: min(700px, calc(100vh - 48px)); }
 .opening-type-manager .story-manager-body { grid-template-columns: 230px minmax(600px, 1fr); }
 .opening-type-note { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
+.opening-component-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto auto; align-items: end; gap: 7px; padding: 10px 12px 2px; }
+.opening-component-toolbar .story-field { min-width: 0; }
+.opening-component-toolbar button { min-height: 31px; padding: 0 11px; border: 1px solid #536270; border-radius: 2px; background: #1d2832; color: #cfd8df; font-size: 9px; }
+.opening-component-toolbar button:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
+.opening-component-toolbar button:disabled { opacity: .4; }
 .framing-manager { width: min(980px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); }
 .framing-manager-body { display: grid; grid-template-columns: 230px minmax(560px, 1fr); min-height: 0; }
 .framing-status-card { display: grid; align-content: start; gap: 12px; padding: 15px 13px; border-right: 1px solid #3e4955; background: #1c242d; }
@@ -2279,6 +2284,7 @@ button { color: inherit; }
 .theme-light .foundation-field-grid .story-field > input,
 .theme-light .foundation-field-grid .story-field > select,
 .theme-light .foundation-field-grid .room-checkbox-field { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
+.theme-light .opening-component-toolbar button { border-color: var(--ui-border-strong); background: #edf3f6; color: #355266; }
 .theme-light .framing-status-card { border-color: var(--ui-border); background: #e9eff1; }
 .theme-light .framing-status-card > strong { color: #304d60; }
 .theme-light .framing-status-card label { color: #3d586a; }

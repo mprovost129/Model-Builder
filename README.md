@@ -114,6 +114,11 @@ polylines, rectangles, Circles, and Arcs.
 - Reusable Door and Window component types with independent active defaults,
   unit and rough-opening sizes, Window header defaults, and exterior/interior
   finish-return depths that generate jamb, head, and Window sill geometry; each type
+  also owns a joined 3D component tree for frames, jambs, sashes, panels, glazing,
+  mullions, trim, thresholds, and hardware. Components retain stable identities,
+  parent relationships, materials, profiles, inset rules, depth, and face anchoring;
+  editing a parent rebuilds its nested parts while the rough opening remains separate.
+  Each type
   can use its host Wall's classified header default or provide its own assembly,
   king/jack counts per side, and Window
   rough-sill count; built-up headers support on-edge lumber or LVL plies, interior
@@ -324,7 +329,10 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   relationship, with automatic matching for newly aligned Walls. Stairwell, shaft,
   and open-below cuts can now continue as aligned, validated paths through adjacent
   Stories. Door and Window component definitions now provide reusable unit sizes,
-  rough openings, header defaults, and generated finish-return geometry. Those
+  rough openings, header defaults, finish-return geometry, and editable joined 3D
+  assemblies. Frames, jambs, sashes, panels, glazing, mullions, and interior/exterior
+  trim are generated from nested component rules and remain independent of the
+  structural rough opening. Those
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing
   visibility. Wall Types now classify exterior/interior and bearing/non-bearing use
@@ -354,7 +362,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-34 files open and upgrade
+Foundation Wall Type, Door/Window Type, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-35 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

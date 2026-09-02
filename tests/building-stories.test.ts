@@ -120,6 +120,8 @@ test("defines reusable Door and Window component types for rough openings and fi
   assert.equal(building.activeWindowTypeId, window.id);
   assert.equal(door.roughWidth, 38);
   assert.equal(window.defaultHeaderBottomHeight, 80);
+  assert.deepEqual([door.components.length, window.components.length], [4, 6]);
+  assert.deepEqual(window.components.map((component) => component.role), ["frame", "sash", "glazing", "mullion", "trim", "trim"]);
   assert.deepEqual([door.headerDepth, door.kingStudCountPerSide, door.jackStudCountPerSide, door.windowSillPlateCount], [9.25, 1, 1, 0]);
   assert.deepEqual([window.headerDepth, window.kingStudCountPerSide, window.jackStudCountPerSide, window.windowSillPlateCount], [9.25, 1, 1, 1]);
   assert.equal(wallOpeningTypeIsValid(door), true);
@@ -132,10 +134,15 @@ test("defines reusable Door and Window component types for rough openings and fi
   assert.equal(wallOpeningTypeIsValid(invalid), false);
   assert.equal(wallOpeningTypeIsValid({ ...door, windowSillPlateCount: 1 }), false);
   assert.equal(wallOpeningTypeIsValid({ ...window, jackStudCountPerSide: 5 }), false);
+  const cyclicComponents = cloneBuildingStructure(building).openingTypes.find((type) => type.kind === "window")!;
+  cyclicComponents.components[0].parentComponentId = cyclicComponents.components[1].id;
+  assert.equal(wallOpeningTypeIsValid(cyclicComponents), false);
 
   const cloned = cloneBuildingStructure(building);
   cloned.openingTypes[0].roughWidth = 40;
+  cloned.openingTypes[0].components[0].material = "Aluminum";
   assert.equal(building.openingTypes[0].roughWidth, 38);
+  assert.equal(building.openingTypes[0].components[0].material, "Wood");
 });
 
 test("defines reusable lumber, LVL, steel, insulated, flat, and spaced header assemblies", () => {

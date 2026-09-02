@@ -12,6 +12,7 @@ import {
   wallEndCapFootprints,
   wallLayerFootprint,
   wallLayerSolidSegments,
+  wallOpeningComponentSolids,
   wallOpeningReturnSolids,
 } from "../lib/wall-joins.ts";
 import {
@@ -184,6 +185,28 @@ test("limits opposite finish returns to the Wall depth without overlap", () => {
   const interior = returns.find((solid) => solid.side === "interior" && solid.component === "left-jamb")!;
   assert.equal(exterior.startInterior.y, interior.startInterior.y);
   assert.equal(returns.length, 6);
+});
+
+test("builds joined Door and Window component trees as host-aware 3D solids", () => {
+  const source = wall("wall-01", { x: 0, y: 0 }, { x: 240, y: 0 }, {
+    wallOpenings: [
+      { centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+      { centerOffset: 156, headerBottomHeight: 84, headerTypeIdOverride: null, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
+    ],
+  });
+  const building = createDefaultBuildingStructure();
+  const typeMap = new Map(building.openingTypes.map((type) => [type.id, type]));
+  const solids = wallOpeningComponentSolids(source, building.wallTypes[0], typeMap);
+  assert.equal(solids.length, 31);
+  assert.equal(solids.filter((solid) => solid.openingId === "opening-01" && solid.componentId === "component-jamb").length, 4);
+  assert.equal(solids.filter((solid) => solid.openingId === "opening-02" && solid.componentId === "component-frame").length, 4);
+  const glass = solids.find((solid) => solid.openingId === "opening-02" && solid.role === "glazing")!;
+  assert.deepEqual([glass.baseHeight, glass.height, glass.material], [39.75, 40, "Insulated Glass"]);
+
+  const windowType = building.openingTypes.find((type) => type.kind === "window")!;
+  windowType.components.find((component) => component.id === "component-frame")!.profileWidth = 3;
+  const resizedGlass = wallOpeningComponentSolids(source, building.wallTypes[0], typeMap).find((solid) => solid.openingId === "opening-02" && solid.role === "glazing")!;
+  assert.deepEqual([resizedGlass.baseHeight, resizedGlass.height], [40.75, 38]);
 });
 
 function wallTypes() {

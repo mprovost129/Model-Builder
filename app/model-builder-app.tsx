@@ -300,6 +300,10 @@ import {
   cloneWallHeaderType,
   cloneLayeredAssembly,
   cloneWallOpeningType,
+  MAXIMUM_OPENING_COMPONENT_COUNT,
+  OPENING_COMPONENT_DEPTH_ANCHORS,
+  OPENING_COMPONENT_GEOMETRIES,
+  OPENING_COMPONENT_ROLES,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
   FOUNDATION_WALL_CONDITIONS,
@@ -320,6 +324,7 @@ import {
   type FoundationWallCondition,
   type FoundationWallType,
   type LayeredAssembly,
+  type OpeningAssemblyComponent,
   type WallExteriorSide,
   type WallJoinMode,
   type WallCornerFramingStyle,
@@ -338,6 +343,7 @@ import {
   unresolvedWallJunctionCount,
   wallEndCapFootprints,
   wallLayerSolidSegments,
+  wallOpeningComponentSolids,
   wallOpeningReturnSolids,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
@@ -1590,6 +1596,38 @@ function updateWallView(
     mesh.userData.wallLayer = `${layer.name} ${returnSolid.side} ${returnSolid.component}`;
     mesh.userData.wallOpeningId = returnSolid.openingId;
     mesh.userData.wallOpeningReturn = returnSolid.component;
+    view.group.add(mesh);
+    view.meshes.push(mesh);
+    view.materials.push(material);
+  });
+  wallOpeningComponentSolids(line, wallType, openingTypesById).forEach((componentSolid) => {
+    const shape = new THREE.Shape();
+    shape.moveTo(componentSolid.startExterior.x, componentSolid.startExterior.y);
+    shape.lineTo(componentSolid.startInterior.x, componentSolid.startInterior.y);
+    shape.lineTo(componentSolid.endInterior.x, componentSolid.endInterior.y);
+    shape.lineTo(componentSolid.endExterior.x, componentSolid.endExterior.y);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: componentSolid.height, steps: 1 });
+    const roleColors: Record<OpeningAssemblyComponent["role"], number> = {
+      frame: 0xd9d4c7,
+      glazing: 0x8fc4d7,
+      hardware: 0x59646d,
+      jamb: 0xd2c8b5,
+      mullion: 0xe3ded2,
+      panel: 0xb99a78,
+      sash: 0xe0dbcf,
+      threshold: 0x8b8073,
+      trim: 0xeee9dd,
+    };
+    const isGlass = componentSolid.role === "glazing" || componentSolid.material.toLocaleLowerCase().includes("glass");
+    const material = new THREE.MeshStandardMaterial({ color: roleColors[componentSolid.role], depthWrite: !isGlass, metalness: componentSolid.material.toLocaleLowerCase().includes("steel") ? 0.45 : 0, opacity: isGlass ? 0.42 : 0.98, roughness: isGlass ? 0.22 : 0.72, transparent: true });
+    material.userData.baseOpacity = material.opacity;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.z = vertical.baseElevation + componentSolid.baseHeight;
+    mesh.userData.lineId = line.id;
+    mesh.userData.wallOpeningId = componentSolid.openingId;
+    mesh.userData.openingComponentId = componentSolid.componentId;
+    mesh.userData.openingComponentRole = componentSolid.role;
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
@@ -8390,6 +8428,7 @@ function WallOpeningsControl({
       {opening ? <>
         <WallOpeningNameField key={`${opening.id}:${opening.name}`} opening={opening} onUpdate={(change) => onUpdate(opening.id, change)} />
         <PropertyGridRow label="Component type"><select className="property-cell-select" value={opening.wallOpeningTypeId ?? ""} onChange={(event) => onAssignType(opening.id, event.target.value)} aria-label="Door or Window component type">{opening.wallOpeningTypeId === null ? <option value="" disabled>Legacy custom opening</option> : null}{compatibleTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
+        {componentType ? <PropertyGridRow label="3D assembly"><span className="property-readout">{componentType.components.length} joined components</span></PropertyGridRow> : null}
         <LineCoordinateField label="Center from start" unsigned value={opening.centerOffset} onCommit={(draft) => updateDimension("centerOffset", draft)} />
         <PropertyGridRow label="Unit size"><span className="property-readout">{formatArchitectural(opening.unitWidth)} × {formatArchitectural(opening.unitHeight)}</span></PropertyGridRow>
         <PropertyGridRow label="Rough opening"><span className="property-readout">{formatArchitectural(opening.roughWidth)} × {formatArchitectural(opening.roughHeight)}</span></PropertyGridRow>
@@ -9133,6 +9172,21 @@ function nextWallOpeningTypeName(building: BuildingStructure, sourceName: string
   return `${baseName} ${number}`;
 }
 
+function nextOpeningComponentId(type: WallOpeningType): string {
+  const ids = new Set(type.components.map((component) => component.id));
+  let number = 1;
+  while (ids.has(`component-${String(number).padStart(2, "0")}`)) number += 1;
+  return `component-${String(number).padStart(2, "0")}`;
+}
+
+function nextOpeningComponentName(type: WallOpeningType, sourceName = "Component"): string {
+  const names = new Set(type.components.map((component) => component.name.trim().toLocaleLowerCase()));
+  if (!names.has(sourceName.toLocaleLowerCase())) return sourceName;
+  let number = 2;
+  while (names.has(`${sourceName} ${number}`.toLocaleLowerCase())) number += 1;
+  return `${sourceName} ${number}`;
+}
+
 function nextWallHeaderTypeId(building: BuildingStructure): string {
   const ids = new Set(building.headerTypes.map((type) => type.id));
   let number = 1;
@@ -9167,6 +9221,7 @@ function OpeningTypeManagerDialog({
 }) {
   const [draft, setDraft] = useState(() => cloneBuildingStructure(document.building));
   const [selectedId, setSelectedId] = useState(document.building.activeDoorTypeId);
+  const [selectedComponentId, setSelectedComponentId] = useState(document.building.openingTypes.find((type) => type.id === document.building.activeDoorTypeId)?.components[0]?.id ?? "");
   const [error, setError] = useState("");
   useEffect(() => {
     const closeWithEscape = (event: KeyboardEvent) => {
@@ -9179,6 +9234,7 @@ function OpeningTypeManagerDialog({
     return () => window.removeEventListener("keydown", closeWithEscape, true);
   }, [onCancel]);
   const selected = draft.openingTypes.find((type) => type.id === selectedId) ?? draft.openingTypes[0];
+  const selectedComponent = selected.components.find((component) => component.id === selectedComponentId) ?? selected.components[0];
   const activeWallType = draft.wallTypes.find((type) => type.id === draft.activeWallTypeId) ?? draft.wallTypes[0];
   const selectedHeader = draft.headerTypes.find((type) => type.id === (selected.headerTypeId ?? wallDefaultHeaderTypeId(activeWallType))) ?? draft.headerTypes[0];
   const usageCount = document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.wallOpeningTypeId === selected.id).length, 0);
@@ -9190,6 +9246,59 @@ function OpeningTypeManagerDialog({
     setDraft((current) => ({ ...cloneBuildingStructure(current), openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), ...change } : cloneWallOpeningType(type)) }));
     setError("");
   };
+  const replaceSelectedComponent = (change: Partial<OpeningAssemblyComponent>) => {
+    setDraft((current) => ({
+      ...cloneBuildingStructure(current),
+      openingTypes: current.openingTypes.map((type) => type.id === selected.id ? {
+        ...cloneWallOpeningType(type),
+        components: type.components.map((component) => component.id === selectedComponent.id ? { ...component, ...change } : { ...component }),
+      } : cloneWallOpeningType(type)),
+    }));
+    setError("");
+  };
+  const addComponent = () => {
+    if (selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT) return;
+    const id = nextOpeningComponentId(selected);
+    const component: OpeningAssemblyComponent = {
+      depth: 1.5,
+      depthAnchor: "center",
+      depthOffset: 0,
+      divisionCount: 1,
+      geometry: "perimeter",
+      id,
+      inset: 0,
+      material: "Wood",
+      name: nextOpeningComponentName(selected),
+      parentComponentId: null,
+      profileWidth: 1.5,
+      role: "frame",
+      visible: true,
+    };
+    replaceSelected({ components: [...selected.components.map((candidate) => ({ ...candidate })), component] });
+    setSelectedComponentId(id);
+  };
+  const duplicateComponent = () => {
+    if (selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT) return;
+    const id = nextOpeningComponentId(selected);
+    const copy = { ...selectedComponent, id, name: nextOpeningComponentName(selected, `${selectedComponent.name} Copy`), parentComponentId: selectedComponent.parentComponentId };
+    replaceSelected({ components: [...selected.components.map((candidate) => ({ ...candidate })), copy] });
+    setSelectedComponentId(id);
+  };
+  const deleteComponent = () => {
+    if (selected.components.length <= 1 || selected.components.some((candidate) => candidate.parentComponentId === selectedComponent.id)) return;
+    const remaining = selected.components.filter((candidate) => candidate.id !== selectedComponent.id).map((candidate) => ({ ...candidate }));
+    replaceSelected({ components: remaining });
+    setSelectedComponentId(selectedComponent.parentComponentId ?? remaining[0].id);
+  };
+  const componentParentOptions = selected.components.filter((candidate) => {
+    if (candidate.id === selectedComponent.id) return false;
+    let parentId = candidate.parentComponentId;
+    while (parentId !== null) {
+      if (parentId === selectedComponent.id) return false;
+      parentId = selected.components.find((item) => item.id === parentId)?.parentComponentId ?? null;
+    }
+    return true;
+  });
   const replaceSelectedHeader = (change: Partial<WallHeaderType>) => {
     setDraft((current) => ({ ...cloneBuildingStructure(current), headerTypes: current.headerTypes.map((type) => type.id === selectedHeader.id ? { ...cloneWallHeaderType(type), ...change } : cloneWallHeaderType(type)) }));
     setError("");
@@ -9245,7 +9354,7 @@ function OpeningTypeManagerDialog({
             <header><strong>Component Types</strong><span>{draft.openingTypes.length} defined</span></header>
             {draft.openingTypes.map((type) => {
               const isActive = type.id === (type.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId);
-              return <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => setSelectedId(type.id)}><strong>{type.name}</strong><span>{type.kind === "door" ? "Door" : "Window"} · {formatArchitectural(type.unitWidth)} × {formatArchitectural(type.unitHeight)}</span>{isActive ? <small>ACTIVE {type.kind.toUpperCase()}</small> : null}</button>;
+              return <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => { setSelectedId(type.id); setSelectedComponentId(type.components[0]?.id ?? ""); }}><strong>{type.name}</strong><span>{type.kind === "door" ? "Door" : "Window"} · {formatArchitectural(type.unitWidth)} × {formatArchitectural(type.unitHeight)} · {type.components.length} parts</span>{isActive ? <small>ACTIVE {type.kind.toUpperCase()}</small> : null}</button>;
             })}
             <div className="story-list-actions"><button type="button" onClick={duplicateType} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={kindCount <= 1 || usageCount > 0}>Delete</button></div>
           </aside>
@@ -9262,8 +9371,34 @@ function OpeningTypeManagerDialog({
                 <StoryDimensionInput key={`${selected.id}:uh:${selected.unitHeight}`} label="Unit height" value={selected.unitHeight} onChange={(unitHeight) => replaceSelected({ unitHeight })} />
                 <StoryDimensionInput key={`${selected.id}:rw:${selected.roughWidth}`} label="Rough width" value={selected.roughWidth} onChange={(roughWidth) => replaceSelected({ roughWidth })} />
                 <StoryDimensionInput key={`${selected.id}:rh:${selected.roughHeight}`} label="Rough height" value={selected.roughHeight} onChange={(roughHeight) => replaceSelected({ roughHeight, ...(selected.kind === "door" ? { defaultHeaderBottomHeight: roughHeight } : {}) })} />
+                <StoryDimensionInput signed key={`${selected.id}:uox:${selected.unitOffsetX}`} label="Unit horizontal offset" value={selected.unitOffsetX} onChange={(unitOffsetX) => replaceSelected({ unitOffsetX })} />
+                <StoryDimensionInput allowZero key={`${selected.id}:uoz:${selected.unitOffsetZ}`} label="Unit bottom above rough" value={selected.unitOffsetZ} onChange={(unitOffsetZ) => replaceSelected({ unitOffsetZ })} />
                 {selected.kind === "window" ? <StoryDimensionInput key={`${selected.id}:hh:${selected.defaultHeaderBottomHeight}`} label="Default header bottom" value={selected.defaultHeaderBottomHeight} onChange={(defaultHeaderBottomHeight) => replaceSelected({ defaultHeaderBottomHeight })} /> : <label className="story-field"><span>Header bottom</span><output className="room-output">Matches rough height</output></label>}
               </div>
+            </section>
+            <section className="foundation-setting-section opening-component-section">
+              <header><div><strong>3D Assembly Components</strong><span>Joined parametric parts generated inside the independent rough opening.</span></div><output>{selected.components.length} parts</output></header>
+              <div className="opening-component-toolbar">
+                <label className="story-field"><span>Selected component</span><select value={selectedComponent.id} onChange={(event) => setSelectedComponentId(event.target.value)}>{selected.components.map((component) => <option key={component.id} value={component.id}>{component.name} · {component.role}</option>)}</select></label>
+                <button type="button" onClick={addComponent} disabled={selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT}>＋ Add</button>
+                <button type="button" onClick={duplicateComponent} disabled={selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT}>Duplicate</button>
+                <button type="button" onClick={deleteComponent} disabled={selected.components.length <= 1 || selected.components.some((candidate) => candidate.parentComponentId === selectedComponent.id)}>Delete</button>
+              </div>
+              <div className="foundation-field-grid">
+                <label className="story-field"><span>Component name</span><input value={selectedComponent.name} maxLength={100} onChange={(event) => replaceSelectedComponent({ name: event.target.value })} /></label>
+                <label className="story-field"><span>Role</span><select value={selectedComponent.role} onChange={(event) => replaceSelectedComponent({ role: event.target.value as OpeningAssemblyComponent["role"] })}>{OPENING_COMPONENT_ROLES.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</select></label>
+                <label className="story-field"><span>Geometry</span><select value={selectedComponent.geometry} onChange={(event) => replaceSelectedComponent({ geometry: event.target.value as OpeningAssemblyComponent["geometry"] })}>{OPENING_COMPONENT_GEOMETRIES.map((geometry) => <option key={geometry} value={geometry}>{titleCase(geometry)}</option>)}</select></label>
+                <label className="story-field"><span>Joined inside</span><select value={selectedComponent.parentComponentId ?? ""} onChange={(event) => replaceSelectedComponent({ parentComponentId: event.target.value || null })}><option value="">Unit rectangle</option>{componentParentOptions.map((component) => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label>
+                <label className="story-field"><span>Material</span><input value={selectedComponent.material} maxLength={120} onChange={(event) => replaceSelectedComponent({ material: event.target.value })} /></label>
+                <label className="story-field"><span>Display</span><span className="room-checkbox-field"><input type="checkbox" checked={selectedComponent.visible} onChange={(event) => replaceSelectedComponent({ visible: event.target.checked })} /> Visible in model</span></label>
+                <StoryDimensionInput signed key={`${selected.id}:${selectedComponent.id}:inset:${selectedComponent.inset}`} label="Inset from parent" value={selectedComponent.inset} onChange={(inset) => replaceSelectedComponent({ inset })} />
+                <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:profile:${selectedComponent.profileWidth}`} label={selectedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} value={selectedComponent.profileWidth} onChange={(profileWidth) => replaceSelectedComponent({ profileWidth })} />
+                <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:depth:${selectedComponent.depth}`} label="Component depth" value={selectedComponent.depth} onChange={(depth) => replaceSelectedComponent({ depth })} />
+                <label className="story-field"><span>Depth anchor</span><select value={selectedComponent.depthAnchor} onChange={(event) => replaceSelectedComponent({ depthAnchor: event.target.value as OpeningAssemblyComponent["depthAnchor"] })}>{OPENING_COMPONENT_DEPTH_ANCHORS.map((anchor) => <option key={anchor} value={anchor}>{titleCase(anchor)} face</option>)}</select></label>
+                <StoryDimensionInput allowZero key={`${selected.id}:${selectedComponent.id}:do:${selectedComponent.depthOffset}`} label="Depth offset" value={selectedComponent.depthOffset} onChange={(depthOffset) => replaceSelectedComponent({ depthOffset })} />
+                {selectedComponent.geometry.includes("divider") ? <label className="story-field"><span>Divider count</span><select value={selectedComponent.divisionCount} onChange={(event) => replaceSelectedComponent({ divisionCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
+              </div>
+              <p className="opening-type-note">Each part keeps a stable identity for future schedules and placed-object overrides. A child uses its parent&apos;s clear opening, so changing the frame, sash, glass, panel, mullion, jamb, or trim dimensions rebuilds the joined 3D object without changing the structural rough opening.</p>
             </section>
             <section className="foundation-setting-section">
               <header><div><strong>Finish Returns</strong><span>Generate jamb, head, and Window sill finish geometry inside the rough opening.</span></div></header>

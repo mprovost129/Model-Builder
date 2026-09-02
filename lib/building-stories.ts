@@ -32,6 +32,12 @@ export const WALL_LOCATIONS = ["exterior", "interior"] as const;
 export type WallLocation = (typeof WALL_LOCATIONS)[number];
 export const WALL_STRUCTURAL_ROLES = ["bearing", "non-bearing"] as const;
 export type WallStructuralRole = (typeof WALL_STRUCTURAL_ROLES)[number];
+export const OPENING_COMPONENT_ROLES = ["frame", "jamb", "sash", "panel", "glazing", "mullion", "trim", "threshold", "hardware"] as const;
+export type OpeningComponentRole = (typeof OPENING_COMPONENT_ROLES)[number];
+export const OPENING_COMPONENT_GEOMETRIES = ["perimeter", "panel", "vertical-divider", "horizontal-divider"] as const;
+export type OpeningComponentGeometry = (typeof OPENING_COMPONENT_GEOMETRIES)[number];
+export const OPENING_COMPONENT_DEPTH_ANCHORS = ["exterior", "center", "interior"] as const;
+export type OpeningComponentDepthAnchor = (typeof OPENING_COMPONENT_DEPTH_ANCHORS)[number];
 export const WALL_CORNER_FRAMING_STYLES = ["two-stud", "three-stud"] as const;
 export type WallCornerFramingStyle = (typeof WALL_CORNER_FRAMING_STYLES)[number];
 export const WALL_PARTITION_BACKING_STYLES = ["none", "three-stud", "ladder"] as const;
@@ -123,7 +129,30 @@ export type WallHeaderType = {
   spacerThickness: number;
 };
 
+export type OpeningAssemblyComponent = {
+  /** Across-wall placement is resolved against the host Wall thickness. */
+  depthAnchor: OpeningComponentDepthAnchor;
+  depth: number;
+  depthOffset: number;
+  /** Divider count; retained as one for non-divider components. */
+  divisionCount: number;
+  geometry: OpeningComponentGeometry;
+  id: string;
+  /** Positive values shrink and negative values expand the parent rectangle. */
+  inset: number;
+  material: string;
+  name: string;
+  /** Null uses the unit rectangle. Children use their parent's clear rectangle. */
+  parentComponentId: string | null;
+  /** Rail/stile or divider width; retained for panel geometry for stable editing. */
+  profileWidth: number;
+  role: OpeningComponentRole;
+  visible: boolean;
+};
+
 export type WallOpeningType = {
+  /** Joined parametric parts that generate the placed Door or Window model. */
+  components: OpeningAssemblyComponent[];
   /** Default bottom of the structural header above the Story rough floor. */
   defaultHeaderBottomHeight: number;
   /** Finish-return depth measured from the exterior face into the rough opening. */
@@ -144,6 +173,10 @@ export type WallOpeningType = {
   roughHeight: number;
   roughWidth: number;
   unitHeight: number;
+  /** Horizontal unit shift from the center of the rough opening. */
+  unitOffsetX: number;
+  /** Unit bottom above the rough-opening bottom. */
+  unitOffsetZ: number;
   unitWidth: number;
   /** Stacked rough-sill plates below a Window opening; always zero for Doors. */
   windowSillPlateCount: number;
@@ -200,6 +233,7 @@ export const MAXIMUM_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_FOUNDATION_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_WALL_OPENING_TYPE_COUNT = 64;
 export const MAXIMUM_WALL_HEADER_TYPE_COUNT = 32;
+export const MAXIMUM_OPENING_COMPONENT_COUNT = 48;
 export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_THICKNESS = 240;
 export const MINIMUM_ROUGH_CEILING_HEIGHT = 12;
@@ -391,6 +425,7 @@ export function createDefaultFoundationWallType(): FoundationWallType {
 export function createDefaultWallOpeningTypes(): WallOpeningType[] {
   return [
     {
+      components: createDefaultOpeningComponents("door"),
       defaultHeaderBottomHeight: 82.5,
       exteriorReturnDepth: 0,
       headerDepth: 9.25,
@@ -404,10 +439,13 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       roughHeight: 82.5,
       roughWidth: 38,
       unitHeight: 80,
+      unitOffsetX: 0,
+      unitOffsetZ: 0,
       unitWidth: 36,
       windowSillPlateCount: 0,
     },
     {
+      components: createDefaultOpeningComponents("window"),
       defaultHeaderBottomHeight: 80,
       exteriorReturnDepth: 0,
       headerDepth: 9.25,
@@ -421,9 +459,45 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       roughHeight: 48.5,
       roughWidth: 36.5,
       unitHeight: 48,
+      unitOffsetX: 0,
+      unitOffsetZ: 0.25,
       unitWidth: 36,
       windowSillPlateCount: 1,
     },
+  ];
+}
+
+export function createDefaultOpeningComponents(kind: WallOpeningKind): OpeningAssemblyComponent[] {
+  const perimeter = (id: string, name: string, role: OpeningComponentRole, parentComponentId: string | null, inset: number, profileWidth: number, depth: number, depthAnchor: OpeningComponentDepthAnchor): OpeningAssemblyComponent => ({
+    depth,
+    depthAnchor,
+    depthOffset: 0,
+    divisionCount: 1,
+    geometry: "perimeter",
+    id,
+    inset,
+    material: role === "trim" ? "Painted Wood" : kind === "window" ? "Vinyl" : "Wood",
+    name,
+    parentComponentId,
+    profileWidth,
+    role,
+    visible: true,
+  });
+  if (kind === "door") {
+    return [
+      perimeter("component-jamb", "Jamb", "jamb", null, 0, 0.75, 4.5, "center"),
+      { ...perimeter("component-panel", "Door Panel", "panel", "component-jamb", 0.125, 0.25, 1.75, "center"), geometry: "panel", material: "Painted Wood" },
+      perimeter("component-exterior-trim", "Exterior Trim", "trim", null, -2.5, 2.5, 0.75, "exterior"),
+      perimeter("component-interior-trim", "Interior Trim", "trim", null, -2.5, 2.5, 0.75, "interior"),
+    ];
+  }
+  return [
+    perimeter("component-frame", "Frame", "frame", null, 0, 2, 3.25, "center"),
+    perimeter("component-sash", "Sash", "sash", "component-frame", 0.25, 1.5, 1.75, "center"),
+    { ...perimeter("component-glass", "Insulated Glass", "glazing", "component-sash", 0.25, 0.25, 0.25, "center"), geometry: "panel", material: "Insulated Glass" },
+    { ...perimeter("component-meeting-rail", "Meeting Rail", "mullion", "component-sash", 0.25, 0.75, 0.75, "center"), geometry: "horizontal-divider" },
+    perimeter("component-exterior-trim", "Exterior Trim", "trim", null, -3.5, 3.5, 0.75, "exterior"),
+    perimeter("component-interior-trim", "Interior Trim", "trim", null, -3.5, 3.5, 0.75, "interior"),
   ];
 }
 
@@ -480,7 +554,7 @@ export function cloneFoundationWallType(type: FoundationWallType): FoundationWal
 }
 
 export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
-  return { ...type };
+  return { ...type, components: type.components.map((component) => ({ ...component })) };
 }
 
 export function cloneWallHeaderType(type: WallHeaderType): WallHeaderType {
@@ -532,6 +606,52 @@ export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
 export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
   const positiveDimensions = [type.unitWidth, type.unitHeight, type.roughWidth, type.roughHeight, type.defaultHeaderBottomHeight, type.headerDepth];
   const returnDepths = [type.exteriorReturnDepth, type.interiorReturnDepth];
+  const componentIds = new Set<string>();
+  if (!Array.isArray(type.components) || type.components.length < 1 || type.components.length > MAXIMUM_OPENING_COMPONENT_COUNT) return false;
+  for (const component of type.components) {
+    if (!IDENTIFIER_PATTERN.test(component.id) || componentIds.has(component.id) ||
+      !stringsAreValid([{ value: component.name, limit: ASSEMBLY_NAME_LIMIT }, { value: component.material, limit: MATERIAL_NAME_LIMIT }]) ||
+      !OPENING_COMPONENT_ROLES.includes(component.role) || !OPENING_COMPONENT_GEOMETRIES.includes(component.geometry) || !OPENING_COMPONENT_DEPTH_ANCHORS.includes(component.depthAnchor) ||
+      typeof component.visible !== "boolean" ||
+      !Number.isFinite(component.inset) || Math.abs(component.inset) > 48 || !isSixteenth(component.inset) ||
+      !Number.isFinite(component.depth) || component.depth < 1 / 16 || component.depth > MAXIMUM_ASSEMBLY_THICKNESS || !isSixteenth(component.depth) ||
+      !Number.isFinite(component.depthOffset) || component.depthOffset < 0 || component.depthOffset > MAXIMUM_ASSEMBLY_THICKNESS || !isSixteenth(component.depthOffset) ||
+      !Number.isFinite(component.profileWidth) || component.profileWidth < 1 / 16 || component.profileWidth > 48 || !isSixteenth(component.profileWidth) ||
+      !Number.isInteger(component.divisionCount) || component.divisionCount < 1 || component.divisionCount > 8 ||
+      (component.parentComponentId !== null && !IDENTIFIER_PATTERN.test(component.parentComponentId))) return false;
+    componentIds.add(component.id);
+  }
+  if (type.components.some((component) => component.parentComponentId !== null && !componentIds.has(component.parentComponentId))) return false;
+  const byId = new Map(type.components.map((component) => [component.id, component]));
+  for (const component of type.components) {
+    const visited = new Set<string>([component.id]);
+    let parentId = component.parentComponentId;
+    while (parentId !== null) {
+      if (visited.has(parentId)) return false;
+      visited.add(parentId);
+      parentId = byId.get(parentId)?.parentComponentId ?? null;
+    }
+  }
+  const resolvedBounds = new Map<string, { contentHeight: number; contentWidth: number }>();
+  const resolveBounds = (component: OpeningAssemblyComponent): { contentHeight: number; contentWidth: number } | null => {
+    const cached = resolvedBounds.get(component.id);
+    if (cached) return cached;
+    const parent = component.parentComponentId === null ? null : byId.get(component.parentComponentId);
+    const source = parent ? resolveBounds(parent) : { contentHeight: type.unitHeight, contentWidth: type.unitWidth };
+    if (!source) return null;
+    const height = source.contentHeight - component.inset * 2;
+    const width = source.contentWidth - component.inset * 2;
+    if (height < 1 / 16 || width < 1 / 16) return null;
+    const contentHeight = component.geometry === "perimeter" ? height - component.profileWidth * 2 : height;
+    const contentWidth = component.geometry === "perimeter" ? width - component.profileWidth * 2 : width;
+    if (contentHeight < 1 / 16 || contentWidth < 1 / 16 ||
+      (component.geometry === "vertical-divider" && component.profileWidth >= width) ||
+      (component.geometry === "horizontal-divider" && component.profileWidth >= height)) return null;
+    const result = { contentHeight, contentWidth };
+    resolvedBounds.set(component.id, result);
+    return result;
+  };
+  if (type.components.some((component) => resolveBounds(component) === null)) return false;
   return IDENTIFIER_PATTERN.test(type.id) && (type.headerTypeId === null || IDENTIFIER_PATTERN.test(type.headerTypeId)) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
     WALL_OPENING_KINDS.includes(type.kind) &&
@@ -539,6 +659,10 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     returnDepths.every((value) => Number.isFinite(value) && value >= 0 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
     type.unitWidth <= type.roughWidth &&
     type.unitHeight <= type.roughHeight &&
+    Number.isFinite(type.unitOffsetX) && Math.abs(type.unitOffsetX) <= 600 && isSixteenth(type.unitOffsetX) &&
+    Number.isFinite(type.unitOffsetZ) && type.unitOffsetZ >= 0 && type.unitOffsetZ <= 600 && isSixteenth(type.unitOffsetZ) &&
+    Math.abs(type.unitOffsetX) + type.unitWidth / 2 <= type.roughWidth / 2 + 1e-8 &&
+    type.unitOffsetZ + type.unitHeight <= type.roughHeight + 1e-8 &&
     type.defaultHeaderBottomHeight >= type.roughHeight &&
     Number.isInteger(type.kingStudCountPerSide) && type.kingStudCountPerSide >= 0 && type.kingStudCountPerSide <= 3 &&
     Number.isInteger(type.jackStudCountPerSide) && type.jackStudCountPerSide >= 0 && type.jackStudCountPerSide <= 4 &&
