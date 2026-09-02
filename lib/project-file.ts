@@ -53,7 +53,9 @@ import {
   createDefaultBuildingStructure,
   createDefaultWallFramingSettings,
   FOUNDATION_WALL_CONDITIONS,
+  WALL_CORNER_FRAMING_STYLES,
   WALL_OPENING_KINDS,
+  WALL_PARTITION_BACKING_STYLES,
   MAXIMUM_WALL_JOIN_PRIORITY,
   MINIMUM_WALL_JOIN_PRIORITY,
   WALL_EXTERIOR_SIDES,
@@ -73,12 +75,14 @@ import {
   type WallOpeningKind,
   type WallOpeningType,
   type WallFramingSettings,
+  type WallCornerFramingStyle,
+  type WallPartitionBackingStyle,
   type WallLayerGroup,
   type WallReferenceLine,
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 31;
+export const PROJECT_FILE_VERSION = 32;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -266,18 +270,27 @@ function readWallOpeningType(value: unknown): WallOpeningType | null {
   };
 }
 
-function readWallFramingSettings(value: unknown): WallFramingSettings | null {
+function readWallFramingSettings(value: unknown, supportsJunctionSettings: boolean): WallFramingSettings | null {
   if (!isRecord(value) ||
     typeof value.enabled !== "boolean" || typeof value.showInModel !== "boolean" || typeof value.material !== "string" ||
     !isFiniteNumber(value.studSpacing) || !isFiniteNumber(value.studWidth) ||
     !isFiniteNumber(value.plateHeight) || !isFiniteNumber(value.headerHeight) ||
     !isFiniteNumber(value.bottomPlateCount) || !Number.isInteger(value.bottomPlateCount) ||
     !isFiniteNumber(value.topPlateCount) || !Number.isInteger(value.topPlateCount)) return null;
+  const defaults = createDefaultWallFramingSettings();
+  if (supportsJunctionSettings && (
+    typeof value.cornerStyle !== "string" || !WALL_CORNER_FRAMING_STYLES.includes(value.cornerStyle as WallCornerFramingStyle) ||
+    typeof value.partitionBackingStyle !== "string" || !WALL_PARTITION_BACKING_STYLES.includes(value.partitionBackingStyle as WallPartitionBackingStyle) ||
+    !isFiniteNumber(value.ladderBlockSpacing)
+  )) return null;
   return {
     bottomPlateCount: value.bottomPlateCount as number,
+    cornerStyle: supportsJunctionSettings ? value.cornerStyle as WallCornerFramingStyle : defaults.cornerStyle,
     enabled: value.enabled,
     headerHeight: value.headerHeight,
+    ladderBlockSpacing: supportsJunctionSettings ? value.ladderBlockSpacing as number : defaults.ladderBlockSpacing,
     material: value.material.trim(),
+    partitionBackingStyle: supportsJunctionSettings ? value.partitionBackingStyle as WallPartitionBackingStyle : defaults.partitionBackingStyle,
     plateHeight: value.plateHeight,
     showInModel: value.showInModel,
     studSpacing: value.studSpacing,
@@ -311,7 +324,7 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -343,7 +356,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   const activeDoorTypeId = supportsOpeningTypes ? value.activeDoorTypeId : defaults.activeDoorTypeId;
   const activeWindowTypeId = supportsOpeningTypes ? value.activeWindowTypeId : defaults.activeWindowTypeId;
   if (typeof activeDoorTypeId !== "string" || typeof activeWindowTypeId !== "string") return null;
-  const wallFraming = supportsWallFraming ? readWallFramingSettings(value.wallFraming) : createDefaultWallFramingSettings();
+  const wallFraming = supportsWallFraming ? readWallFramingSettings(value.wallFraming, supportsWallJunctionFraming) : createDefaultWallFramingSettings();
   if (!wallFraming) return null;
   const building: BuildingStructure = {
     activeDoorTypeId,
@@ -791,7 +804,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

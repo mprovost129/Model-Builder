@@ -3,6 +3,7 @@ import test from "node:test";
 import { createDefaultBuildingStructure } from "../lib/building-stories.ts";
 import type { LineObject } from "../lib/document-model.ts";
 import { wallFramingSolids } from "../lib/wall-framing.ts";
+import { buildAutomaticWallJoinPlan } from "../lib/wall-joins.ts";
 
 function framedWall(openings: LineObject["wallOpenings"] = []): LineObject {
   return {
@@ -61,4 +62,33 @@ test("can disable derived framing without changing Wall or opening geometry", ()
   const building = createDefaultBuildingStructure();
   building.wallFraming.enabled = false;
   assert.deepEqual(wallFramingSolids(framedWall(), building.wallTypes[0], building.wallFraming, 109.125), []);
+});
+
+test("creates one additional member for a deterministic three-stud corner", () => {
+  const building = createDefaultBuildingStructure();
+  const first = { ...framedWall(), end: { x: 120, y: 0, z: 0 } };
+  const second = { ...framedWall(), id: "wall-02", start: { x: 120, y: 0, z: 0 }, end: { x: 120, y: 120, z: 0 } };
+  const lines = [first, second];
+  const plan = buildAutomaticWallJoinPlan(lines, building.wallTypes);
+  const solids = lines.flatMap((line) => wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, plan, lines));
+  assert.equal(solids.filter((solid) => solid.kind === "corner-stud").length, 1);
+  building.wallFraming.cornerStyle = "two-stud";
+  const efficient = lines.flatMap((line) => wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, plan, lines));
+  assert.equal(efficient.filter((solid) => solid.kind === "corner-stud").length, 0);
+});
+
+test("generates three-stud or ladder backing where a partition tees into a host", () => {
+  const building = createDefaultBuildingStructure();
+  const host = framedWall();
+  const branch = { ...framedWall(), id: "wall-02", start: { x: 120, y: 0, z: 0 }, end: { x: 120, y: -120, z: 0 } };
+  const lines = [host, branch];
+  const plan = buildAutomaticWallJoinPlan(lines, building.wallTypes);
+  const conventional = wallFramingSolids(host, building.wallTypes[0], building.wallFraming, 109.125, plan, lines);
+  assert.equal(conventional.filter((solid) => solid.kind === "backing-stud").length, 3);
+  assert.equal(conventional.filter((solid) => solid.kind === "common-stud" && solid.startExterior.x >= 117 && solid.endExterior.x <= 123).length, 0);
+
+  building.wallFraming.partitionBackingStyle = "ladder";
+  const ladder = wallFramingSolids(host, building.wallTypes[0], building.wallFraming, 109.125, plan, lines);
+  assert.equal(ladder.filter((solid) => solid.kind === "backing-stud").length, 0);
+  assert.deepEqual(ladder.filter((solid) => solid.kind === "backing-block").map((solid) => solid.baseHeight), [25.5, 49.5, 73.5, 97.5]);
 });

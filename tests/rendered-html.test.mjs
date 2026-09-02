@@ -211,6 +211,8 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /Wall Framing Defaults/);
   assert.match(component, /wallFramingSolids/);
   assert.match(component, /Show framing in the 3D model/);
+  assert.match(component, /Three-stud conventional/);
+  assert.match(component, /Ladder blocking/);
   assert.match(component, /Detect \/ Update Rooms/);
   assert.match(component, /refreshRoomsForStory/);
   assert.match(component, /wallVerticalExtent/);

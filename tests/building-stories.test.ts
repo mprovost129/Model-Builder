@@ -120,9 +120,12 @@ test("defines project Wall framing defaults independently from finish assemblies
   const building = createDefaultBuildingStructure();
   assert.deepEqual(building.wallFraming, {
     bottomPlateCount: 1,
+    cornerStyle: "three-stud",
     enabled: true,
     headerHeight: 9.25,
+    ladderBlockSpacing: 24,
     material: "Lumber",
+    partitionBackingStyle: "three-stud",
     plateHeight: 1.5,
     showInModel: false,
     studSpacing: 16,

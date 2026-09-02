@@ -109,7 +109,7 @@ nodes remain unwrapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-31 project files store the Building Datum, ordered Stories, active and
+- Version-32 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -237,8 +237,9 @@ Wall framing is generated from each Wall's Main layer, so the structural layer
 defines member depth and the host Wall continues to own placement and layer
 visibility. Project defaults control stud spacing and width, plate height and
 counts, framing material, header depth, and whether the framing reveal is shown
-in 3D. These defaults are stored in version-31 project files; earlier files open
-with conservative editable defaults.
+in 3D. Junction defaults add a selectable two- or three-stud corner method and
+none, three-stud, or ladder-blocking partition backing. These defaults are stored
+in version-32 project files; earlier files open with conservative editable defaults.
 
 Common studs and continuous top plates are laid out along the Wall. Door and
 Window rough-opening edges generate king and jack studs plus a header whose
@@ -253,10 +254,18 @@ calculation. Span tables, loads, species, grades, and built-up header
 construction must be modeled separately before framing can be treated as a
 structural design result.
 
+Resolved two-Wall corners begin with one end stud from each participating Wall.
+The three-stud option adds one deterministic shared-corner member; the two-stud
+advanced-framing option leaves the insulated corner open for a separate gypsum
+backer or clip system. At a resolved T-intersection, the host Wall can receive
+three-stud backing or horizontal ladder blocks at the configured vertical
+spacing. Unresolved or manually disconnected joins do not receive inferred
+junction framing.
+
 ## Next Steps
 
-1. Add corner, intersection, partition backing, and opening-specific framing
-   rules without making unsafe engineering assumptions.
+1. Add opening-specific header construction, jack/king-stud counts, and manual
+   per-junction overrides without making unsafe engineering assumptions.
 2. Develop Door/Window product-unit and casing geometry independently of framing.
 3. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 4. Add manual per-edge platform overrides for exceptional support details.

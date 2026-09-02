@@ -5,10 +5,14 @@ import {
   type LayeredAssembly,
   type WallFramingSettings,
 } from "./building-stories.ts";
+import type { AutomaticWallJoinPlan, WallEndpoint } from "./wall-joins.ts";
 
 export type WallFramingMemberKind =
+  | "backing-block"
+  | "backing-stud"
   | "bottom-plate"
   | "common-stud"
+  | "corner-stud"
   | "cripple-stud"
   | "header"
   | "jack-stud"
@@ -46,6 +50,30 @@ function offsetPoint(point: { x: number; y: number }, direction: { x: number; y:
   return { x: point.x - direction.y * offset, y: point.y + direction.x * offset };
 }
 
+function distanceAlongLine(line: LineObject, point: { x: number; y: number }) {
+  const direction = lineDirection(line);
+  return direction ? (point.x - line.start.x) * direction.x + (point.y - line.start.y) * direction.y : null;
+}
+
+function endpointPoint(line: LineObject, endpoint: WallEndpoint) {
+  return endpoint === "start" ? line.start : line.end;
+}
+
+function teeCentersForHost(line: LineObject, wallLines: LineObject[], joinPlan: AutomaticWallJoinPlan | undefined) {
+  if (!joinPlan) return [];
+  const centers: number[] = [];
+  wallLines.forEach((branch) => {
+    const joins = joinPlan.endpointJoins.get(branch.id);
+    (["start", "end"] as const).forEach((endpoint) => {
+      const join = joins?.[endpoint];
+      if (join?.kind !== "tee" || join.hostWallId !== line.id) return;
+      const distance = distanceAlongLine(line, endpointPoint(branch, endpoint));
+      if (distance !== null && !centers.some((existing) => Math.abs(existing - distance) < TOLERANCE)) centers.push(distance);
+    });
+  });
+  return centers;
+}
+
 function intervalsOverlap(firstStart: number, firstEnd: number, secondStart: number, secondEnd: number) {
   return firstStart < secondEnd - TOLERANCE && firstEnd > secondStart + TOLERANCE;
 }
@@ -71,6 +99,8 @@ export function wallFramingSolids(
   wallType: LayeredAssembly,
   settings: WallFramingSettings,
   wallHeight: number,
+  joinPlan?: AutomaticWallJoinPlan,
+  wallLines: LineObject[] = [line],
 ): WallFramingSolid[] {
   if (!settings.enabled || line.architecturalRole !== "wall") return [];
   const direction = lineDirection(line);
@@ -118,10 +148,15 @@ export function wallFramingSolids(
     add("top-plate", 0, direction.length, wallHeight - (index + 1) * settings.plateHeight, settings.plateHeight);
   }
 
+  const teeCenters = teeCentersForHost(line, wallLines, joinPlan).filter((center) => !line.wallOpenings.some((opening) => (
+    center > opening.centerOffset - opening.roughWidth / 2 - settings.studWidth &&
+    center < opening.centerOffset + opening.roughWidth / 2 + settings.studWidth
+  )));
   const protectedZones = line.wallOpenings.map((opening) => ({
     start: opening.centerOffset - opening.roughWidth / 2 - settings.studWidth * 2,
     end: opening.centerOffset + opening.roughWidth / 2 + settings.studWidth * 2,
   }));
+  if (settings.partitionBackingStyle === "three-stud") teeCenters.forEach((center) => protectedZones.push({ start: center - settings.studWidth * 2, end: center + settings.studWidth * 2 }));
   const addCommonStud = (start: number) => {
     const end = Math.min(direction.length, start + settings.studWidth);
     if (protectedZones.some((zone) => intervalsOverlap(start, end, zone.start, zone.end))) return;
@@ -129,6 +164,30 @@ export function wallFramingSolids(
   };
   for (let start = 0; start < direction.length - TOLERANCE; start += settings.studSpacing) addCommonStud(start);
   addCommonStud(Math.max(0, direction.length - settings.studWidth));
+
+  if (settings.cornerStyle === "three-stud" && joinPlan) {
+    const joins = joinPlan.endpointJoins.get(line.id);
+    (["start", "end"] as const).forEach((endpoint) => {
+      const join = joins?.[endpoint];
+      if (join?.kind !== "corner" || line.id.localeCompare(join.otherWallId) >= 0) return;
+      const start = endpoint === "start" ? settings.studWidth : direction.length - settings.studWidth * 2;
+      add("corner-stud", start, start + settings.studWidth, bottomStackHeight, fullStudHeight);
+    });
+  }
+
+  if (settings.partitionBackingStyle === "three-stud") teeCenters.forEach((center) => {
+    for (let index = -1; index <= 1; index += 1) {
+      const start = center + (index - 0.5) * settings.studWidth;
+      add("backing-stud", start, start + settings.studWidth, bottomStackHeight, fullStudHeight);
+    }
+  });
+  if (settings.partitionBackingStyle === "ladder") teeCenters.forEach((center) => {
+    const start = center - settings.studSpacing / 2;
+    const end = center + settings.studSpacing / 2;
+    for (let base = bottomStackHeight + settings.ladderBlockSpacing; base + settings.plateHeight <= studTop + TOLERANCE; base += settings.ladderBlockSpacing) {
+      add("backing-block", start, end, base, settings.plateHeight);
+    }
+  });
 
   line.wallOpenings.forEach((opening) => {
     const openingStart = opening.centerOffset - opening.roughWidth / 2;

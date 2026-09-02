@@ -316,9 +316,11 @@ import {
   type LayeredAssembly,
   type WallExteriorSide,
   type WallJoinMode,
+  type WallCornerFramingStyle,
   type WallLayerGroup,
   type WallOpeningType,
   type WallFramingSettings,
+  type WallPartitionBackingStyle,
   type WallReferenceLine,
 } from "@/lib/building-stories";
 import {
@@ -1582,7 +1584,7 @@ function updateWallView(
     view.meshes.push(mesh);
     view.materials.push(material);
   });
-  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height).forEach((framingMember) => {
+  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height, joinPlan, [...linesById.values()]).forEach((framingMember) => {
     const shape = new THREE.Shape();
     shape.moveTo(framingMember.startExterior.x, framingMember.startExterior.y);
     shape.lineTo(framingMember.startInterior.x, framingMember.startInterior.y);
@@ -1590,7 +1592,8 @@ function updateWallView(
     shape.lineTo(framingMember.endExterior.x, framingMember.endExterior.y);
     shape.closePath();
     const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: framingMember.height, steps: 1 });
-    const material = new THREE.MeshStandardMaterial({ color: framingMember.kind === "header" ? 0xad7545 : 0xd2a36c, metalness: 0, opacity: 1, roughness: 0.78 });
+    const framingColor = framingMember.kind === "header" ? 0xad7545 : framingMember.kind === "backing-block" || framingMember.kind === "backing-stud" ? 0xb98751 : framingMember.kind === "corner-stud" ? 0xc8945c : 0xd2a36c;
+    const material = new THREE.MeshStandardMaterial({ color: framingColor, metalness: 0, opacity: 1, roughness: 0.78 });
     material.userData.baseOpacity = material.opacity;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.z = vertical.baseElevation + framingMember.baseHeight;
@@ -9254,6 +9257,15 @@ function WallFramingManagerDialog({
               </div>
             </section>
             <section className="foundation-setting-section">
+              <header><div><strong>Junction Framing</strong><span>Automatic Wall joins determine corners and partition intersections.</span></div></header>
+              <div className="foundation-field-grid">
+                <label className="story-field"><span>Corner method</span><select value={draft.cornerStyle} onChange={(event) => replace({ cornerStyle: event.target.value as WallCornerFramingStyle })}><option value="three-stud">Three-stud conventional</option><option value="two-stud">Two-stud advanced</option></select></label>
+                <label className="story-field"><span>Partition backing</span><select value={draft.partitionBackingStyle} onChange={(event) => replace({ partitionBackingStyle: event.target.value as WallPartitionBackingStyle })}><option value="three-stud">Three-stud backing</option><option value="ladder">Ladder blocking</option><option value="none">None</option></select></label>
+                {draft.partitionBackingStyle === "ladder" ? <StoryDimensionInput key={`ladder:${draft.ladderBlockSpacing}`} label="Ladder block spacing" value={draft.ladderBlockSpacing} onChange={(ladderBlockSpacing) => replace({ ladderBlockSpacing })} /> : null}
+              </div>
+              <p className="opening-type-note">Three-stud corners add one deterministic shared-corner member; the two-stud option leaves one end stud from each participating Wall. Partition backing is generated in the host Wall at resolved T-intersections.</p>
+            </section>
+            <section className="foundation-setting-section">
               <header><div><strong>Opening Framing</strong><span>Rough dimensions and bottom-of-header elevations remain authoritative.</span></div></header>
               <div className="foundation-field-grid">
                 <StoryDimensionInput key={`header:${draft.headerHeight}`} label="Default header depth" value={draft.headerHeight} onChange={(headerHeight) => replace({ headerHeight })} />
@@ -14114,7 +14126,7 @@ export function ModelBuilderApp() {
               </section>
               <section className="building-browser-section">
                 <header><strong>Wall Framing</strong><span>{editor.present.building.wallFraming.enabled ? "ON" : "OFF"}</span></header>
-                <button type="button" className={editor.present.building.wallFraming.showInModel ? "building-browser-row is-active" : "building-browser-row"} onClick={() => setFramingManagerOpen(true)}><span className="building-browser-icon">╫</span><span><strong>{formatArchitectural(editor.present.building.wallFraming.studSpacing)} on center</strong><small>{editor.present.building.wallFraming.bottomPlateCount} bottom · {editor.present.building.wallFraming.topPlateCount} top plates · {formatArchitectural(editor.present.building.wallFraming.headerHeight)} header</small></span>{editor.present.building.wallFraming.showInModel ? <b>VISIBLE</b> : null}</button>
+                <button type="button" className={editor.present.building.wallFraming.showInModel ? "building-browser-row is-active" : "building-browser-row"} onClick={() => setFramingManagerOpen(true)}><span className="building-browser-icon">╫</span><span><strong>{formatArchitectural(editor.present.building.wallFraming.studSpacing)} on center</strong><small>{editor.present.building.wallFraming.cornerStyle === "three-stud" ? "3-stud corners" : "2-stud corners"} · {editor.present.building.wallFraming.partitionBackingStyle === "ladder" ? "ladder backing" : editor.present.building.wallFraming.partitionBackingStyle === "three-stud" ? "3-stud backing" : "no backing"}</small></span>{editor.present.building.wallFraming.showInModel ? <b>VISIBLE</b> : null}</button>
               </section>
               <section className="building-browser-section">
                 <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>

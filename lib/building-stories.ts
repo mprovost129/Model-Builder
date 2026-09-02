@@ -22,6 +22,10 @@ export const FOUNDATION_WALL_CONDITIONS = ["standard-bearing", "interior-mudsill
 export type FoundationWallCondition = (typeof FOUNDATION_WALL_CONDITIONS)[number];
 export const WALL_OPENING_KINDS = ["door", "window"] as const;
 export type WallOpeningKind = (typeof WALL_OPENING_KINDS)[number];
+export const WALL_CORNER_FRAMING_STYLES = ["two-stud", "three-stud"] as const;
+export type WallCornerFramingStyle = (typeof WALL_CORNER_FRAMING_STYLES)[number];
+export const WALL_PARTITION_BACKING_STYLES = ["none", "three-stud", "ladder"] as const;
+export type WallPartitionBackingStyle = (typeof WALL_PARTITION_BACKING_STYLES)[number];
 export const MINIMUM_WALL_JOIN_PRIORITY = -100;
 export const MAXIMUM_WALL_JOIN_PRIORITY = 100;
 
@@ -102,9 +106,12 @@ export type WallOpeningType = {
 
 export type WallFramingSettings = {
   bottomPlateCount: number;
+  cornerStyle: WallCornerFramingStyle;
   enabled: boolean;
   headerHeight: number;
+  ladderBlockSpacing: number;
   material: string;
+  partitionBackingStyle: WallPartitionBackingStyle;
   plateHeight: number;
   showInModel: boolean;
   studSpacing: number;
@@ -303,9 +310,12 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
 export function createDefaultWallFramingSettings(): WallFramingSettings {
   return {
     bottomPlateCount: 1,
+    cornerStyle: "three-stud",
     enabled: true,
     headerHeight: 9.25,
+    ladderBlockSpacing: 24,
     material: "Lumber",
+    partitionBackingStyle: "three-stud",
     plateHeight: 1.5,
     showInModel: false,
     studSpacing: 16,
@@ -409,8 +419,10 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
 }
 
 export function wallFramingSettingsAreValid(settings: WallFramingSettings): boolean {
-  const dimensions = [settings.headerHeight, settings.plateHeight, settings.studSpacing, settings.studWidth];
+  const dimensions = [settings.headerHeight, settings.ladderBlockSpacing, settings.plateHeight, settings.studSpacing, settings.studWidth];
   return typeof settings.enabled === "boolean" && typeof settings.showInModel === "boolean" &&
+    WALL_CORNER_FRAMING_STYLES.includes(settings.cornerStyle) &&
+    WALL_PARTITION_BACKING_STYLES.includes(settings.partitionBackingStyle) &&
     stringsAreValid([{ value: settings.material, limit: MATERIAL_NAME_LIMIT }]) &&
     dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
     settings.studSpacing >= settings.studWidth && settings.headerHeight >= settings.plateHeight &&
