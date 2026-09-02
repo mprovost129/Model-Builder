@@ -1,9 +1,11 @@
 import { wallOpeningRoughBottom, type LineObject } from "./document-model.ts";
 import {
+  assemblyTotalThickness,
   wallLayerCenterOffsets,
   wallLayerGroupThickness,
   wallReferenceDistanceFromExterior,
   type LayeredAssembly,
+  type WallOpeningType,
 } from "./building-stories.ts";
 
 export type WallEndpoint = "start" | "end";
@@ -42,6 +44,15 @@ export type WallEndCapFootprint = WallLayerFootprint & { endpoint: WallEndpoint;
 export type WallLayerSolidSegment = WallLayerFootprint & {
   baseHeight: number;
   height: number;
+};
+
+export type WallOpeningReturnSolid = WallLayerFootprint & {
+  baseHeight: number;
+  component: "head" | "left-jamb" | "right-jamb" | "sill";
+  height: number;
+  layerIndex: number;
+  openingId: string;
+  side: "exterior" | "interior";
 };
 
 type CutLine = {
@@ -585,6 +596,75 @@ export function wallLayerSolidSegments(
     cursor = openingEnd;
   });
   addSegment(cursor, length, 0, wallHeight);
+  return result;
+}
+
+/**
+ * Builds finish-return solids inside a hosted rough opening. The first Wall
+ * layer supplies exterior returns and the last layer supplies interior
+ * returns. Requested depths are proportionally limited to the Wall thickness
+ * so opposite returns meet cleanly without overlapping on thinner Wall types.
+ */
+export function wallOpeningReturnSolids(
+  line: LineObject,
+  wallType: LayeredAssembly,
+  openingTypesById: ReadonlyMap<string, WallOpeningType>,
+): WallOpeningReturnSolid[] {
+  const direction = lineDirection(line);
+  const wallDepth = assemblyTotalThickness(wallType);
+  if (!direction || wallType.layers.length === 0 || wallDepth < ENDPOINT_TOLERANCE) return [];
+  const pointAt = (distance: number) => ({
+    x: line.start.x + direction.x * distance,
+    y: line.start.y + direction.y * distance,
+  });
+  const returnFootprint = (start: number, end: number, firstDepth: number, secondDepth: number): WallLayerFootprint => ({
+    startExterior: offsetPointAt(pointAt(start), direction, offsetFromExteriorDistance(wallType, line, firstDepth)),
+    startInterior: offsetPointAt(pointAt(start), direction, offsetFromExteriorDistance(wallType, line, secondDepth)),
+    endExterior: offsetPointAt(pointAt(end), direction, offsetFromExteriorDistance(wallType, line, firstDepth)),
+    endInterior: offsetPointAt(pointAt(end), direction, offsetFromExteriorDistance(wallType, line, secondDepth)),
+  });
+  const result: WallOpeningReturnSolid[] = [];
+  line.wallOpenings.forEach((opening) => {
+    if (opening.wallOpeningTypeId === null) return;
+    const openingType = openingTypesById.get(opening.wallOpeningTypeId);
+    if (!openingType || openingType.kind !== opening.kind) return;
+    const requestedDepth = openingType.exteriorReturnDepth + openingType.interiorReturnDepth;
+    if (requestedDepth < ENDPOINT_TOLERANCE) return;
+    const depthScale = requestedDepth > wallDepth ? wallDepth / requestedDepth : 1;
+    const openingStart = opening.centerOffset - opening.roughWidth / 2;
+    const openingEnd = opening.centerOffset + opening.roughWidth / 2;
+    const roughBottom = wallOpeningRoughBottom(opening);
+    const addForSide = (side: "exterior" | "interior", requestedSideDepth: number) => {
+      const depth = requestedSideDepth * depthScale;
+      if (depth < ENDPOINT_TOLERANCE) return;
+      const layerIndex = side === "exterior" ? 0 : wallType.layers.length - 1;
+      const layer = wallType.layers[layerIndex];
+      const jambThickness = Math.min(layer.thickness, opening.roughWidth / 2);
+      const horizontalThickness = Math.min(layer.thickness, opening.roughHeight / (opening.kind === "window" ? 2 : 1));
+      const firstDepth = side === "exterior" ? 0 : wallDepth;
+      const secondDepth = side === "exterior" ? depth : wallDepth - depth;
+      const add = (component: WallOpeningReturnSolid["component"], start: number, end: number, baseHeight: number, height: number) => {
+        if (end - start < ENDPOINT_TOLERANCE || height < ENDPOINT_TOLERANCE) return;
+        result.push({
+          ...returnFootprint(start, end, firstDepth, secondDepth),
+          baseHeight,
+          component,
+          height,
+          layerIndex,
+          openingId: opening.id,
+          side,
+        });
+      };
+      add("left-jamb", openingStart, openingStart + jambThickness, roughBottom, opening.roughHeight);
+      add("right-jamb", openingEnd - jambThickness, openingEnd, roughBottom, opening.roughHeight);
+      add("head", openingStart + jambThickness, openingEnd - jambThickness, opening.headerBottomHeight - horizontalThickness, horizontalThickness);
+      if (opening.kind === "window") {
+        add("sill", openingStart + jambThickness, openingEnd - jambThickness, roughBottom, horizontalThickness);
+      }
+    };
+    addForSide("exterior", openingType.exteriorReturnDepth);
+    addForSide("interior", openingType.interiorReturnDepth);
+  });
   return result;
 }
 

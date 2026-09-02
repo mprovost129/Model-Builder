@@ -110,8 +110,8 @@ polylines, rectangles, Circles, and Arcs.
   rough-opening cuts through every Wall layer, and a Window bottom-of-header
   elevation measured above the Story subfloor for future framing
 - Reusable Door and Window component types with independent active defaults,
-  unit and rough-opening sizes, Window header defaults, and stored exterior/interior
-  finish-return depths; placed openings retain a type link and can be reassigned
+  unit and rough-opening sizes, Window header defaults, and exterior/interior
+  finish-return depths that generate jamb, head, and Window sill geometry; placed openings retain a type link and can be reassigned
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling
@@ -310,8 +310,8 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   relationship, with automatic matching for newly aligned Walls. Stairwell, shaft,
   and open-below cuts can now continue as aligned, validated paths through adjacent
   Stories. Door and Window component definitions now provide reusable unit sizes,
-  rough openings, header defaults, and finish-return inputs. The next engineering
-  milestone is generated opening-return geometry followed by framing members.
+  rough openings, header defaults, and generated finish-return geometry. The next
+  engineering milestone is framing members driven by the same structural openings.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.

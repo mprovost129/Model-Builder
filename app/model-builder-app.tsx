@@ -325,6 +325,7 @@ import {
   unresolvedWallJunctionCount,
   wallEndCapFootprints,
   wallLayerSolidSegments,
+  wallOpeningReturnSolids,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
 import {
@@ -1507,6 +1508,7 @@ function updateWallView(
   joinPlan: AutomaticWallJoinPlan,
   linesById: ReadonlyMap<string, LineObject>,
   wallTypesById: ReadonlyMap<string, LayeredAssembly>,
+  openingTypesById: ReadonlyMap<string, WallOpeningType>,
 ) {
   clearWallView(view);
   const dx = line.end.x - line.start.x;
@@ -1547,6 +1549,26 @@ function updateWallView(
     mesh.position.z = vertical.baseElevation;
     mesh.userData.lineId = line.id;
     mesh.userData.wallLayer = `${layer.name} end cap`;
+    view.group.add(mesh);
+    view.meshes.push(mesh);
+    view.materials.push(material);
+  });
+  wallOpeningReturnSolids(line, wallType, openingTypesById).forEach((returnSolid) => {
+    const layer = wallType.layers[returnSolid.layerIndex];
+    const shape = new THREE.Shape();
+    shape.moveTo(returnSolid.startExterior.x, returnSolid.startExterior.y);
+    shape.lineTo(returnSolid.startInterior.x, returnSolid.startInterior.y);
+    shape.lineTo(returnSolid.endInterior.x, returnSolid.endInterior.y);
+    shape.lineTo(returnSolid.endExterior.x, returnSolid.endExterior.y);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: returnSolid.height, steps: 1 });
+    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.96, roughness: 0.82, transparent: true });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.z = vertical.baseElevation + returnSolid.baseHeight;
+    mesh.userData.lineId = line.id;
+    mesh.userData.wallLayer = `${layer.name} ${returnSolid.side} ${returnSolid.component}`;
+    mesh.userData.wallOpeningId = returnSolid.openingId;
+    mesh.userData.wallOpeningReturn = returnSolid.component;
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
@@ -6518,6 +6540,7 @@ function Viewport({
     const wallJoinPlan = buildAutomaticWallJoinPlan(wallLines, document.building.wallTypes);
     const wallLinesById = new Map(wallLines.map((line) => [line.id, line]));
     const wallTypesById = new Map(document.building.wallTypes.map((wallType) => [wallType.id, wallType]));
+    const openingTypesById = new Map(document.building.openingTypes.map((openingType) => [openingType.id, openingType]));
     wallLines.forEach((line) => {
       let view = wallViewsRef.current.get(line.id);
       if (!view) {
@@ -6526,7 +6549,7 @@ function Viewport({
       }
       const vertical = wallVerticalExtent(document, line);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById);
+      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById);
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
@@ -8317,7 +8340,7 @@ function WallOpeningsControl({
           <PropertyGridRow label="Rough sill"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight - opening.roughHeight)}</span></PropertyGridRow>
         </> : <PropertyGridRow label="Bottom of header"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight)}</span></PropertyGridRow>}
         <div className="property-action-row single-action"><button type="button" onClick={() => onDelete(opening.id)}>Delete Opening</button></div>
-        <p className="property-grid-note">The reusable component type controls unit size, rough opening, and future finish returns. Window header height remains an instance placement measured to the bottom of the structural header above the Story subfloor.</p>
+        <p className="property-grid-note">The reusable component type controls unit size, rough opening, and generated finish returns. Window header height remains an instance placement measured to the bottom of the structural header above the Story subfloor.</p>
       </> : null}
     </PropertyGridSection>
   );
@@ -9123,12 +9146,12 @@ function OpeningTypeManagerDialog({
               </div>
             </section>
             <section className="foundation-setting-section">
-              <header><div><strong>Finish Returns</strong><span>Reserved geometry inputs for jamb, head, and sill finish development.</span></div></header>
+              <header><div><strong>Finish Returns</strong><span>Generate jamb, head, and Window sill finish geometry inside the rough opening.</span></div></header>
               <div className="foundation-field-grid">
                 <StoryDimensionInput allowZero key={`${selected.id}:er:${selected.exteriorReturnDepth}`} label="Exterior return depth" value={selected.exteriorReturnDepth} onChange={(exteriorReturnDepth) => replaceSelected({ exteriorReturnDepth })} />
                 <StoryDimensionInput allowZero key={`${selected.id}:ir:${selected.interiorReturnDepth}`} label="Interior return depth" value={selected.interiorReturnDepth} onChange={(interiorReturnDepth) => replaceSelected({ interiorReturnDepth })} />
               </div>
-              <p className="opening-type-note">Return depths are stored now so wall-opening finish geometry and quantities can be added without changing the component model. Structural framing will use the rough opening, not the unit size.</p>
+              <p className="opening-type-note">Each nonzero depth generates returns from that Wall face. If their combined depth exceeds a thinner Wall, the two sides meet without overlapping. Structural framing will use the rough opening, not the unit size.</p>
             </section>
           </main>
         </div>

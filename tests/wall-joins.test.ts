@@ -12,6 +12,7 @@ import {
   wallEndCapFootprints,
   wallLayerFootprint,
   wallLayerSolidSegments,
+  wallOpeningReturnSolids,
 } from "../lib/wall-joins.ts";
 import {
   automaticFoundationWallJoinCount,
@@ -134,6 +135,55 @@ test("cuts Door and Window rough openings through a Wall layer", () => {
   const windowLower = segments[3];
   assert.equal(windowLower.startExterior.x, 137.75);
   assert.equal(windowLower.endExterior.x, 174.25);
+});
+
+test("generates exterior and interior jamb, head, and Window sill finish returns", () => {
+  const source = wall("wall-01", { x: 0, y: 0 }, { x: 240, y: 0 }, {
+    wallOpenings: [
+      { centerOffset: 60, headerBottomHeight: 82.5, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+      { centerOffset: 156, headerBottomHeight: 84, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
+    ],
+  });
+  const building = createDefaultBuildingStructure();
+  building.openingTypes[0].exteriorReturnDepth = 1;
+  building.openingTypes[0].interiorReturnDepth = 2;
+  building.openingTypes[1].interiorReturnDepth = 3;
+  const returns = wallOpeningReturnSolids(source, building.wallTypes[0], new Map(building.openingTypes.map((type) => [type.id, type])));
+  assert.equal(returns.length, 10);
+  assert.deepEqual(returns.map((solid) => [solid.openingId, solid.side, solid.component]), [
+    ["opening-01", "exterior", "left-jamb"],
+    ["opening-01", "exterior", "right-jamb"],
+    ["opening-01", "exterior", "head"],
+    ["opening-01", "interior", "left-jamb"],
+    ["opening-01", "interior", "right-jamb"],
+    ["opening-01", "interior", "head"],
+    ["opening-02", "interior", "left-jamb"],
+    ["opening-02", "interior", "right-jamb"],
+    ["opening-02", "interior", "head"],
+    ["opening-02", "interior", "sill"],
+  ]);
+  const exteriorDoorJamb = returns[0];
+  assert.deepEqual([exteriorDoorJamb.startExterior, exteriorDoorJamb.startInterior], [{ x: 41, y: 0.9375 }, { x: 41, y: -0.0625 }]);
+  assert.deepEqual([exteriorDoorJamb.baseHeight, exteriorDoorJamb.height], [0, 82.5]);
+  const interiorWindowSill = returns.at(-1)!;
+  assert.deepEqual([interiorWindowSill.startExterior.y, interiorWindowSill.startInterior.y], [-4, -1]);
+  assert.deepEqual([interiorWindowSill.baseHeight, interiorWindowSill.height], [35.5, 0.5]);
+});
+
+test("limits opposite finish returns to the Wall depth without overlap", () => {
+  const source = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 }, {
+    wallOpenings: [
+      { centerOffset: 60, headerBottomHeight: 82.5, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+    ],
+  });
+  const building = createDefaultBuildingStructure();
+  building.openingTypes[0].exteriorReturnDepth = 4;
+  building.openingTypes[0].interiorReturnDepth = 4;
+  const returns = wallOpeningReturnSolids(source, building.wallTypes[0], new Map(building.openingTypes.map((type) => [type.id, type])));
+  const exterior = returns.find((solid) => solid.side === "exterior" && solid.component === "left-jamb")!;
+  const interior = returns.find((solid) => solid.side === "interior" && solid.component === "left-jamb")!;
+  assert.equal(exterior.startInterior.y, interior.startInterior.y);
+  assert.equal(returns.length, 6);
 });
 
 function wallTypes() {

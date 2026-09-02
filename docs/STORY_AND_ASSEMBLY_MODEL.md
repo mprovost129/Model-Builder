@@ -223,11 +223,18 @@ invalid overlaps or heights reject the update instead of corrupting geometry.
 Version-29 and earlier files retain their existing dimensions and link matching
 standard openings to the new default component types during upgrade.
 
+Nonzero exterior and interior return depths generate finish solids inside each
+linked rough opening. Each side receives left and right jambs plus a head; Window
+returns also receive a sill. The outermost Wall layer supplies exterior-return
+material and thickness, while the innermost layer supplies interior returns. On
+a Wall thinner than the combined requested depths, both sides are proportionally
+limited so they meet without overlapping. The structural rough opening remains
+the authoritative void for later framing and unit placement.
+
 ## Next Steps
 
-1. Generate opening-specific jamb, head, and sill finish-return geometry from
-   the reusable Door/Window type depths, then add framing members from the same
-   rough-opening and header data.
+1. Add framing members from the reusable Door/Window rough-opening and header
+   data, then develop product-unit and casing geometry independently of framing.
 2. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
 3. Add manual per-edge platform overrides for exceptional support details.
 4. Add split-level, vaulted-ceiling, and manual wall-height exceptions
