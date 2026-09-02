@@ -124,6 +124,7 @@ import {
   WALL_REFERENCE_LINES,
   type BuildingStructure,
   type BuildingStory,
+  type FoundationWallType,
   type LayeredAssembly,
   type WallExteriorSide,
   type WallJoinMode,
@@ -157,7 +158,8 @@ export type WallOpening = {
 };
 
 export type LineObject = LineGeometry & {
-  architecturalRole: "wall" | null;
+  architecturalRole: "foundation-wall" | "wall" | null;
+  foundationWallTypeId: string | null;
   id: string;
   layerId: string;
   locked: boolean;
@@ -259,8 +261,16 @@ export type RoomFloorEdgeCondition = {
   adjacentRoomCount: number;
   /** Signed distance from the Wall reference line along its left-hand normal. */
   offsetFromReference: number;
-  rule: "perimeter-main-exterior" | "room-boundary-fallback" | "shared-wall-reference";
+  rule: "foundation-sill-exterior" | "perimeter-main-exterior" | "room-boundary-fallback" | "shared-wall-reference";
   wallId: string | null;
+};
+
+export type FoundationWallVerticalExtent = {
+  baseElevation: number;
+  footingBottomElevation: number;
+  footingTopElevation: number;
+  sillTopElevation: number;
+  topElevation: number;
 };
 
 export type WallVerticalExtent = {
@@ -401,6 +411,7 @@ export function cloneLineObject(line: LineObject): LineObject {
   return {
     ...cloneLineGeometry(line),
     architecturalRole: line.architecturalRole,
+    foundationWallTypeId: line.foundationWallTypeId,
     id: line.id,
     layerId: line.layerId,
     locked: line.locked,
@@ -657,6 +668,53 @@ function wallForRoomBoundarySegment(
   }) ?? null;
 }
 
+function foundationReferenceDistanceFromExterior(type: FoundationWallType, referenceLine: WallReferenceLine): number {
+  if (referenceLine === "exterior-main") return 0;
+  if (referenceLine === "interior-main") return type.wallWidth;
+  return type.wallWidth / 2;
+}
+
+/** Signed sill exterior-edge offset from the drawn reference line along its left-hand normal. */
+export function foundationSillOffsetFromReference(line: LineObject, type: FoundationWallType): number {
+  const referenceDistance = foundationReferenceDistanceFromExterior(type, line.wallReferenceLine ?? "exterior-main");
+  const inwardDistance = type.sill.exteriorSetback - referenceDistance;
+  return (line.wallExteriorSide ?? "left") === "left" ? -inwardDistance : inwardDistance;
+}
+
+function hostedFoundationWallForSegment(
+  segment: ReturnType<typeof polylineSegments>[number],
+  walls: LineObject[],
+  typesById: ReadonlyMap<string, FoundationWallType>,
+): { line: LineObject; offsetFromReference: number; point: PlanPoint } | null {
+  const segmentDx = segment.end.x - segment.start.x;
+  const segmentDy = segment.end.y - segment.start.y;
+  const segmentLength = Math.hypot(segmentDx, segmentDy);
+  if (segmentLength < 1 / 16) return null;
+  const segmentDirection = { x: segmentDx / segmentLength, y: segmentDy / segmentLength };
+  const midpoint = { x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2 };
+  const candidates = walls.flatMap((line) => {
+    const type = typesById.get(line.foundationWallTypeId ?? "");
+    if (!type) return [];
+    const dx = line.end.x - line.start.x;
+    const dy = line.end.y - line.start.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 1 / 16) return [];
+    const direction = { x: dx / length, y: dy / length };
+    const parallel = Math.abs(segmentDirection.x * direction.y - segmentDirection.y * direction.x);
+    if (parallel > 1e-5) return [];
+    const offsetFromReference = foundationSillOffsetFromReference(line, type);
+    const point = {
+      x: line.start.x - direction.y * offsetFromReference,
+      y: line.start.y + direction.x * offsetFromReference,
+    };
+    const normalDistance = Math.abs((midpoint.x - point.x) * direction.y - (midpoint.y - point.y) * direction.x);
+    const projection = (midpoint.x - line.start.x) * direction.x + (midpoint.y - line.start.y) * direction.y;
+    if (normalDistance > Math.max(type.wallWidth, type.sill.plateWidth, 12) || projection < -1e-5 || projection > length + 1e-5) return [];
+    return [{ line, normalDistance, offsetFromReference, point }];
+  }).sort((first, second) => first.normalDistance - second.normalDistance);
+  return candidates[0] ?? null;
+}
+
 function roomBoundaryContainsPoint(room: RoomObject, point: PlanPoint): boolean {
   const tolerance = 1e-5;
   return polylineSegments(room.boundary).some((segment) => {
@@ -699,7 +757,7 @@ function intersectFloorEdgeLines(first: FloorEdgeLine, second: FloorEdgeLine, fa
  * Resolves the default floor outline edge-by-edge instead of copying the Room
  * center/reference-line loop. Perimeter edges stop at the exterior face of the
  * Wall type's Main structural group; shared Walls keep one common Room boundary.
- * A future hosted Foundation Wall will supersede this fallback with its sill's
+ * A hosted Foundation Wall supersedes the framed-Wall fallback with its sill's
  * exterior support edge. Explicit per-edge offsets remain available for exceptional details.
  */
 export function roomFloorPlatformBoundary(
@@ -709,6 +767,8 @@ export function roomFloorPlatformBoundary(
   const segments = polylineSegments(room.boundary);
   const storyWalls = document.lines.filter((line) =>
     line.architecturalRole === "wall" && line.storyId === room.storyId && room.boundaryWallIds.includes(line.id));
+  const foundationWalls = document.lines.filter((line) => line.architecturalRole === "foundation-wall" && line.storyId === room.storyId);
+  const foundationTypesById = new Map(document.building.foundationWallTypes.map((type) => [type.id, type]));
   const edgeLines = segments.map((segment): FloorEdgeLine => {
     const wall = wallForRoomBoundarySegment(segment, storyWalls);
     const segmentDx = segment.end.x - segment.start.x;
@@ -736,6 +796,17 @@ export function roomFloorPlatformBoundary(
       direction,
       point: { x: wall.start.x, y: wall.start.y },
     };
+    const foundationSupport = hostedFoundationWallForSegment(segment, foundationWalls, foundationTypesById);
+    if (foundationSupport) {
+      const supportDx = foundationSupport.line.end.x - foundationSupport.line.start.x;
+      const supportDy = foundationSupport.line.end.y - foundationSupport.line.start.y;
+      const supportLength = Math.hypot(supportDx, supportDy);
+      return {
+        condition: { adjacentRoomCount, offsetFromReference: foundationSupport.offsetFromReference, rule: "foundation-sill-exterior", wallId: foundationSupport.line.id },
+        direction: { x: supportDx / supportLength, y: supportDy / supportLength },
+        point: foundationSupport.point,
+      };
+    }
     const wallType = document.building.wallTypes.find((candidate) => candidate.id === wall.wallTypeId);
     if (!wallType) return {
       condition: { adjacentRoomCount, offsetFromReference: 0, rule: "room-boundary-fallback", wallId: wall.id },
@@ -857,6 +928,22 @@ export function wallVerticalExtent(document: ModelDocument, line: LineObject): W
     hasDifferentRoomFloors: new Set(roomExtents.map((extent) => extent.baseElevation)).size > 1,
     height: snapToSixteenth(topElevation - baseElevation),
     source: "rooms",
+    topElevation,
+  };
+}
+
+export function foundationWallVerticalExtent(document: ModelDocument, line: LineObject): FoundationWallVerticalExtent | null {
+  if (line.architecturalRole !== "foundation-wall") return null;
+  const type = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
+  const storyElevation = calculateStoryElevations(document.building).find((candidate) => candidate.storyId === line.storyId);
+  if (!type || !storyElevation) return null;
+  const topElevation = snapToSixteenth(storyElevation.roughFloorElevation + type.topOffset);
+  const baseElevation = snapToSixteenth(topElevation - type.wallHeight);
+  return {
+    baseElevation,
+    footingBottomElevation: snapToSixteenth(baseElevation - (type.footing.enabled ? type.footing.height : 0)),
+    footingTopElevation: baseElevation,
+    sillTopElevation: snapToSixteenth(topElevation + type.sill.foundationPlateCount * type.sill.plateHeight),
     topElevation,
   };
 }
@@ -1066,7 +1153,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.lines.every((line, index) => {
       const other = b.lines[index];
       return other !== undefined && line.id === other.id && line.layerId === other.layerId &&
-        line.architecturalRole === other.architecturalRole && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
+        line.architecturalRole === other.architecturalRole && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         line.wallOpenings.length === other.wallOpenings.length && line.wallOpenings.every((opening, openingIndex) => {
           const otherOpening = other.wallOpenings[openingIndex];
           return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth;
@@ -1140,7 +1227,10 @@ export function updateDocumentBuilding(
     const wallTypeId = line.architecturalRole === "wall" && !building.wallTypes.some((wallType) => wallType.id === line.wallTypeId)
       ? building.activeWallTypeId
       : line.wallTypeId;
-    return { ...line, start: { ...line.start, z: snapToSixteenth(line.start.z + change.delta) }, end: { ...line.end, z: snapToSixteenth(line.end.z + change.delta) }, storyId: change.storyId, wallTypeId };
+    const foundationWallTypeId = line.architecturalRole === "foundation-wall" && !building.foundationWallTypes.some((type) => type.id === line.foundationWallTypeId)
+      ? building.activeFoundationWallTypeId
+      : line.foundationWallTypeId;
+    return { ...line, foundationWallTypeId, start: { ...line.start, z: snapToSixteenth(line.start.z + change.delta) }, end: { ...line.end, z: snapToSixteenth(line.end.z + change.delta) }, storyId: change.storyId, wallTypeId };
   });
   next.polylines = next.polylines.map((polyline) => {
     const change = storyChange(polyline.storyId);
@@ -1641,6 +1731,7 @@ export function addLineObject(
   const line: LineObject = {
     ...geometry,
     architecturalRole: null,
+    foundationWallTypeId: null,
     id: `line-${String(number).padStart(2, "0")}`,
     layerId: document.activeLayerId,
     locked: false,
@@ -1666,7 +1757,7 @@ export function updateLineObject(
   const line = findLineObject(document, lineId);
   if (!line || !lineIsEditable(document, line)) return null;
   const normalizedGeometry = cloneLineGeometry(geometry);
-  if (line.architecturalRole === "wall") {
+  if (line.architecturalRole !== null) {
     const roughFloor = calculateStoryElevations(document.building).find((story) => story.storyId === line.storyId)?.roughFloorElevation;
     if (roughFloor === undefined) return null;
     normalizedGeometry.start.z = roughFloor;
@@ -1692,6 +1783,7 @@ export function createWallFromLine(document: ModelDocument, lineId: string): Mod
   return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? {
     ...cloneLineObject(candidate),
     architecturalRole: "wall",
+    foundationWallTypeId: null,
     end: { ...candidate.end, z: roughFloor },
     name: candidate.name.startsWith("Wall ") ? candidate.name : uniqueObjectName(document, wallName),
     start: { ...candidate.start, z: roughFloor },
@@ -1704,10 +1796,34 @@ export function createWallFromLine(document: ModelDocument, lineId: string): Mod
   } : candidate));
 }
 
+export function createFoundationWallFromLine(document: ModelDocument, lineId: string): ModelDocument | null {
+  const line = findLineObject(document, lineId);
+  const foundationType = document.building.foundationWallTypes.find((candidate) => candidate.id === document.building.activeFoundationWallTypeId);
+  const roughFloor = calculateStoryElevations(document.building).find((story) => story.storyId === line?.storyId)?.roughFloorElevation;
+  if (!line || !foundationType || roughFloor === undefined || !lineIsEditable(document, line) || Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y) < 1 / 16) return null;
+  const lineNumber = /^Line\s+(.+)$/i.exec(line.name)?.[1];
+  const foundationName = line.name.startsWith("Foundation Wall ") ? line.name : lineNumber ? `Foundation Wall ${lineNumber}` : `Foundation Wall ${line.name}`;
+  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? {
+    ...cloneLineObject(candidate),
+    architecturalRole: "foundation-wall",
+    end: { ...candidate.end, z: roughFloor },
+    foundationWallTypeId: foundationType.id,
+    name: candidate.name.startsWith("Foundation Wall ") ? candidate.name : uniqueObjectName(document, foundationName),
+    start: { ...candidate.start, z: roughFloor },
+    wallExteriorSide: "left",
+    wallJoinPriority: 0,
+    wallStartJoinMode: "square",
+    wallEndJoinMode: "square",
+    wallReferenceLine: "exterior-main",
+    wallTypeId: null,
+    wallOpenings: [],
+  } : candidate));
+}
+
 export function removeWallRole(document: ModelDocument, lineId: string): ModelDocument | null {
   const line = findLineObject(document, lineId);
-  if (!line || line.architecturalRole !== "wall" || !lineIsEditable(document, line)) return null;
-  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), architecturalRole: null, wallExteriorSide: null, wallJoinPriority: null, wallStartJoinMode: null, wallEndJoinMode: null, wallReferenceLine: null, wallTypeId: null, wallOpenings: [] } : candidate));
+  if (!line || line.architecturalRole === null || !lineIsEditable(document, line)) return null;
+  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), architecturalRole: null, foundationWallTypeId: null, wallExteriorSide: null, wallJoinPriority: null, wallStartJoinMode: null, wallEndJoinMode: null, wallReferenceLine: null, wallTypeId: null, wallOpenings: [] } : candidate));
 }
 
 function nextWallOpeningId(line: LineObject): string {
@@ -1792,6 +1908,12 @@ export function assignWallType(document: ModelDocument, lineId: string, wallType
   return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), wallTypeId } : candidate));
 }
 
+export function assignFoundationWallType(document: ModelDocument, lineId: string, foundationWallTypeId: string): ModelDocument | null {
+  const line = findLineObject(document, lineId);
+  if (!line || line.architecturalRole !== "foundation-wall" || !lineIsEditable(document, line) || !document.building.foundationWallTypes.some((type) => type.id === foundationWallTypeId)) return null;
+  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), foundationWallTypeId } : candidate));
+}
+
 export function updateWallPlacement(
   document: ModelDocument,
   lineId: string,
@@ -1800,7 +1922,7 @@ export function updateWallPlacement(
   const line = findLineObject(document, lineId);
   if (
     !line ||
-    line.architecturalRole !== "wall" ||
+    line.architecturalRole === null ||
     !lineIsEditable(document, line) ||
     (change.exteriorSide !== undefined && !WALL_EXTERIOR_SIDES.includes(change.exteriorSide)) ||
     (change.referenceLine !== undefined && !WALL_REFERENCE_LINES.includes(change.referenceLine)) ||
@@ -2362,8 +2484,8 @@ export function moveModelEntities(document: ModelDocument, refs: ModelEntityRef[
   } : object);
   next.lines = next.lines.map((line) => keys.has(`line:${line.id}`) ? {
     ...line,
-    start: { x: line.start.x + offset.x, y: line.start.y + offset.y, z: line.start.z + (line.architecturalRole === "wall" ? 0 : offset.z) },
-    end: { x: line.end.x + offset.x, y: line.end.y + offset.y, z: line.end.z + (line.architecturalRole === "wall" ? 0 : offset.z) },
+    start: { x: line.start.x + offset.x, y: line.start.y + offset.y, z: line.start.z + (line.architecturalRole !== null ? 0 : offset.z) },
+    end: { x: line.end.x + offset.x, y: line.end.y + offset.y, z: line.end.z + (line.architecturalRole !== null ? 0 : offset.z) },
   } : line);
   next.polylines = next.polylines.map((polyline) => keys.has(`polyline:${polyline.id}`) ? {
     ...polyline,
@@ -2726,7 +2848,7 @@ export function mirrorModelEntities(
     ...line,
     start: mirrorPlanPoint(line.start, axisStart, axisEnd),
     end: mirrorPlanPoint(line.end, axisStart, axisEnd),
-    wallExteriorSide: line.architecturalRole === "wall" ? line.wallExteriorSide === "left" ? "right" : "left" : line.wallExteriorSide,
+    wallExteriorSide: line.architecturalRole !== null ? line.wallExteriorSide === "left" ? "right" : "left" : line.wallExteriorSide,
   } : line);
   working.polylines = working.polylines.map((polyline) => keys.has(`polyline:${polyline.id}`) ? {
     ...polyline,
@@ -3172,6 +3294,7 @@ export function joinModelEntities(
     const line: LineObject = {
       ...joined.geometry,
       architecturalRole: preserve && primary.kind === "line" ? (primaryEntity as LineObject).architecturalRole : null,
+      foundationWallTypeId: preserve && primary.kind === "line" ? (primaryEntity as LineObject).foundationWallTypeId : null,
       id: preserve ? primary.id : `line-${String(number).padStart(2, "0")}`,
       layerId,
       locked,
@@ -3275,6 +3398,7 @@ export function explodeModelEntities(
         const line: LineObject = {
           ...piece.geometry,
           architecturalRole: null,
+          foundationWallTypeId: null,
           id: `line-${String(number).padStart(2, "0")}`,
           layerId: polyline.layerId,
           locked: polyline.locked,
@@ -3477,7 +3601,7 @@ export function chamferLineObjects(
   if ((firstDistance > 0 || secondDistance > 0) && document.lines.length >= MAXIMUM_LINE_COUNT) return null;
   const first = findLineObject(document, firstPick.id);
   const second = findLineObject(document, secondPick.id);
-  if (!first || !second || first.architecturalRole === "wall" || second.architecturalRole === "wall") return null;
+  if (!first || !second || first.architecturalRole !== null || second.architecturalRole !== null) return null;
   const geometry = chamferLineGeometries(
     first,
     second,
@@ -3500,6 +3624,7 @@ export function chamferLineObjects(
     const chamfer: LineObject = {
       ...cloneLineGeometry(geometry.chamfer),
       architecturalRole: null,
+      foundationWallTypeId: null,
       id: `line-${String(number).padStart(2, "0")}`,
       layerId: document.activeLayerId,
       locked: false,
@@ -3534,7 +3659,7 @@ export function filletLineObjects(
   if (radius > 0 && document.arcs.length >= MAXIMUM_ARC_COUNT) return null;
   const first = findLineObject(document, firstPick.id);
   const second = findLineObject(document, secondPick.id);
-  if (!first || !second || first.architecturalRole === "wall" || second.architecturalRole === "wall") return null;
+  if (!first || !second || first.architecturalRole !== null || second.architecturalRole !== null) return null;
   const geometry = filletLineGeometries(first, second, firstPick.point, secondPick.point, radius);
   if (!geometry) return null;
 
@@ -3646,7 +3771,7 @@ export function stretchModelEntities(
       const source = findLineObject(moved, target.id);
       const geometry = source ? stretchLineGeometry(source, target.components, offset) : null;
       if (!source || !geometry) return null;
-      if (source.architecturalRole === "wall") {
+      if (source.architecturalRole !== null) {
         const roughFloor = calculateStoryElevations(moved.building).find((story) => story.storyId === source.storyId)?.roughFloorElevation;
         if (roughFloor === undefined) return null;
         geometry.start.z = roughFloor;
@@ -3699,7 +3824,7 @@ export function copyModelEntities(document: ModelDocument, refs: ModelEntityRef[
       const source = findLineObject(working, ref.id)!;
       const copy = cloneLineObject(source); const number = nextLineNumber(working);
       copy.id = `line-${String(number).padStart(2, "0")}`; copy.name = uniqueObjectName(working, `${source.name.slice(0, 115).trimEnd()} Copy`); copy.locked = false;
-      copy.start = { x: source.start.x + offset.x, y: source.start.y + offset.y, z: source.start.z + (source.architecturalRole === "wall" ? 0 : offset.z) }; copy.end = { x: source.end.x + offset.x, y: source.end.y + offset.y, z: source.end.z + (source.architecturalRole === "wall" ? 0 : offset.z) };
+      copy.start = { x: source.start.x + offset.x, y: source.start.y + offset.y, z: source.start.z + (source.architecturalRole !== null ? 0 : offset.z) }; copy.end = { x: source.end.x + offset.x, y: source.end.y + offset.y, z: source.end.z + (source.architecturalRole !== null ? 0 : offset.z) };
       working.lines.push(copy); copiedRefs.push({ id: copy.id, kind: "line" });
     } else if (ref.kind === "polyline") {
       const source = findPolylineObject(working, ref.id)!;

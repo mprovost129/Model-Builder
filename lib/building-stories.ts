@@ -77,6 +77,8 @@ export type FoundationWallType = {
   };
   /** Signed difference from the Story's normal foundation top plane. */
   topOffset: number;
+  /** Concrete stem height measured down from the foundation top. */
+  wallHeight: number;
   wallWidth: number;
 };
 
@@ -229,6 +231,7 @@ export function createDefaultFoundationWallType(): FoundationWallType {
       plateWidth: 5.5,
     },
     topOffset: 0,
+    wallHeight: 96,
     wallWidth: 8,
   };
 }
@@ -291,7 +294,7 @@ export function foundationSillStackHeight(type: FoundationWallType): number {
 }
 
 export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
-  const dimensions = [type.wallWidth, type.footing.width, type.footing.height, type.sill.plateWidth, type.sill.plateHeight];
+  const dimensions = [type.wallHeight, type.wallWidth, type.footing.width, type.footing.height, type.sill.plateWidth, type.sill.plateHeight];
   const signedDimensions = [type.topOffset, type.footing.centerOffset, type.sill.exteriorSetback];
   return IDENTIFIER_PATTERN.test(type.id) && stringsAreValid([
     { value: type.name, limit: ASSEMBLY_NAME_LIMIT },

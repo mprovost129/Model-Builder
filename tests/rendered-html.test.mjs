@@ -65,7 +65,8 @@ test("server-renders the Model Builder workspace", async () => {
   assert.match(html, /aria-label="Open projects"/);
   assert.match(html, /aria-label="Model and layouts"/);
   assert.match(html, /aria-label="Command input"/);
-  assert.match(html, /Type W, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, BR, BP, J, X, LEN, CHA, F, S, RO, or SC/);
+  assert.match(html, /Type W, FW, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, BR, BP, J, X, LEN, CHA, F, S, RO, or SC/);
+  assert.match(html, /Draw Foundation Walls using/);
   assert.match(html, />\+ Wall</);
   assert.match(html, /Remove the portion between two points on a native curve/);
   assert.match(html, /Split an open native curve at one point/);
@@ -205,6 +206,8 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /Detect \/ Update Rooms/);
   assert.match(component, /refreshRoomsForStory/);
   assert.match(component, /wallVerticalExtent/);
+  assert.match(component, /foundationWallVerticalExtent/);
+  assert.match(component, /createFoundationWallFromLine/);
   assert.match(component, /base and top automatically follow adjacent Room rough conditions/);
   assert.match(component, /roomHorizontalPlatformSolution/);
   assert.match(component, /Generated Room platforms/);

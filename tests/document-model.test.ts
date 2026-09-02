@@ -21,6 +21,7 @@ import {
   copyModelEntities,
   createBoundaryPolylineObject,
   createFloorPlatformFromPolyline,
+  createFoundationWallFromLine,
   createWallFromLine,
   DEFAULT_DOCUMENT,
   NEW_PROJECT_DOCUMENT,
@@ -33,6 +34,7 @@ import {
   documentsEqual,
   discoverDocumentBoundary,
   effectiveRoomSettings,
+  foundationWallVerticalExtent,
   duplicateBoxObject,
   findBoxObject,
   findGroup,
@@ -1241,6 +1243,60 @@ test("converts a Line into a layered Wall controlled by its Story", () => {
   assert.ok(placed);
   assert.equal(placed.lines[0].wallExteriorSide, "right");
   assert.equal(placed.lines[0].wallReferenceLine, "center-main");
+});
+
+test("creates a typed Foundation Wall with concrete, footing, and sill elevations", () => {
+  const added = addLineObject(NEW_PROJECT_DOCUMENT, { x: 0, y: 0, z: 42 }, { x: 144, y: 0, z: 42 });
+  assert.ok(added);
+  const foundation = createFoundationWallFromLine(added.document, added.line.id);
+  assert.ok(foundation);
+  const line = foundation.lines[0];
+  assert.equal(line.architecturalRole, "foundation-wall");
+  assert.equal(line.foundationWallTypeId, foundation.building.activeFoundationWallTypeId);
+  assert.equal(line.wallTypeId, null);
+  assert.equal(line.wallReferenceLine, "exterior-main");
+  assert.equal(line.wallExteriorSide, "left");
+  assert.equal(line.start.z, 0);
+  assert.deepEqual(foundationWallVerticalExtent(foundation, line), {
+    baseElevation: -96,
+    footingBottomElevation: -104,
+    footingTopElevation: -96,
+    sillTopElevation: 3,
+    topElevation: 0,
+  });
+  const moved = moveModelEntities(foundation, [{ id: line.id, kind: "line" }], { x: 12, y: 12, z: 96 });
+  assert.ok(moved);
+  assert.equal(moved.lines[0].start.z, 0);
+});
+
+test("uses an aligned Foundation Wall sill edge as the Room floor perimeter stop", () => {
+  let document = cloneDocument(NEW_PROJECT_DOCUMENT);
+  const addWall = (start: { x: number; y: number; z: number }, end: { x: number; y: number; z: number }) => {
+    const added = addLineObject(document, start, end);
+    assert.ok(added);
+    const wall = createWallFromLine(added.document, added.line.id);
+    assert.ok(wall);
+    document = wall;
+  };
+  addWall({ x: 0, y: 0, z: 0 }, { x: 144, y: 0, z: 0 });
+  addWall({ x: 144, y: 0, z: 0 }, { x: 144, y: 120, z: 0 });
+  addWall({ x: 144, y: 120, z: 0 }, { x: 0, y: 120, z: 0 });
+  addWall({ x: 0, y: 120, z: 0 }, { x: 0, y: 0, z: 0 });
+  const detected = refreshRoomsForStory(document, "story-01");
+  assert.ok(detected);
+  const foundationType = detected.building.foundationWallTypes[0];
+  foundationType.sill.exteriorSetback = 2;
+  const supportLine = addLineObject(detected, { x: 0, y: 0, z: 0 }, { x: 144, y: 0, z: 0 });
+  assert.ok(supportLine);
+  const withFoundation = createFoundationWallFromLine(supportLine.document, supportLine.line.id);
+  assert.ok(withFoundation);
+  const solution = roomHorizontalPlatformSolution(withFoundation, withFoundation.rooms[0]);
+  assert.ok(solution);
+  const supportedEdge = solution.floorEdgeConditions.find((edge) => edge.wallId === supportLine.line.id);
+  assert.ok(supportedEdge);
+  assert.equal(supportedEdge.rule, "foundation-sill-exterior");
+  assert.equal(Math.abs(supportedEdge.offsetFromReference), 2);
+  assert.equal(solution.floorEdgeConditions.filter((edge) => edge.rule === "perimeter-main-exterior").length, 3);
 });
 
 test("hosts framing-ready Door and Window rough openings on a Wall", () => {

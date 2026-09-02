@@ -163,6 +163,7 @@ import {
   assignLineToLayer,
   assignModelEntityToStory,
   assignPolylineToLayer,
+  assignFoundationWallType,
   assignWallType,
   cloneDocument,
   arcIsEditable,
@@ -170,6 +171,7 @@ import {
   copyModelEntities,
   copyBoxObjects,
   createFloorPlatformFromPolyline,
+  createFoundationWallFromLine,
   createWallFromLine,
   createBoundaryPolylineObject,
   DEFAULT_LAYER_ID,
@@ -262,6 +264,8 @@ import {
   PLATFORM_OPENING_KINDS,
   roomHorizontalPlatformSolution,
   updatePlatformOpening,
+  foundationSillOffsetFromReference,
+  foundationWallVerticalExtent,
   wallVerticalExtent,
   type BoxObject,
   type ArcObject,
@@ -277,6 +281,7 @@ import {
   type ModelEntityRef,
   type RoomObject,
   type RoomHorizontalPlatformSolution,
+  type FoundationWallVerticalExtent,
   type WallVerticalExtent,
 } from "@/lib/document-model";
 import {
@@ -1530,6 +1535,81 @@ function updateWallView(
     view.meshes.push(mesh);
     view.materials.push(material);
   });
+}
+
+function foundationBandFootprint(
+  line: LineObject,
+  type: FoundationWallType,
+  width: number,
+  centerDistanceFromExterior: number,
+): [PlanPoint, PlanPoint, PlanPoint, PlanPoint] | null {
+  const dx = line.end.x - line.start.x;
+  const dy = line.end.y - line.start.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1 / 16) return null;
+  const direction = { x: dx / length, y: dy / length };
+  const leftNormal = { x: -direction.y, y: direction.x };
+  const referenceDistance = line.wallReferenceLine === "interior-main"
+    ? type.wallWidth
+    : line.wallReferenceLine === "center-main" || line.wallReferenceLine === "wall-center"
+      ? type.wallWidth / 2
+      : 0;
+  const inwardCenterOffset = centerDistanceFromExterior - referenceDistance;
+  const centerOffset = (line.wallExteriorSide ?? "left") === "left" ? -inwardCenterOffset : inwardCenterOffset;
+  const exteriorToInteriorSign = (line.wallExteriorSide ?? "left") === "left" ? -1 : 1;
+  const firstOffset = centerOffset - exteriorToInteriorSign * width / 2;
+  const secondOffset = centerOffset + exteriorToInteriorSign * width / 2;
+  const point = (base: PlanPoint, offset: number) => ({ x: base.x + leftNormal.x * offset, y: base.y + leftNormal.y * offset });
+  return [point(line.start, firstOffset), point(line.start, secondOffset), point(line.end, secondOffset), point(line.end, firstOffset)];
+}
+
+function addFoundationSolid(
+  view: WallView,
+  footprint: [PlanPoint, PlanPoint, PlanPoint, PlanPoint] | null,
+  height: number,
+  baseElevation: number,
+  color: number,
+  lineId: string,
+  component: string,
+) {
+  if (!footprint || height < 1 / 16) return;
+  const shape = new THREE.Shape();
+  shape.moveTo(footprint[0].x, footprint[0].y);
+  footprint.slice(1).forEach((point) => shape.lineTo(point.x, point.y));
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: height, steps: 1 });
+  const material = new THREE.MeshStandardMaterial({ color, metalness: 0, opacity: 0.94, roughness: 0.9, transparent: true });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.z = baseElevation;
+  mesh.userData.lineId = lineId;
+  mesh.userData.foundationComponent = component;
+  view.group.add(mesh);
+  view.meshes.push(mesh);
+  view.materials.push(material);
+}
+
+function updateFoundationWallView(
+  view: WallView,
+  line: LineObject,
+  vertical: FoundationWallVerticalExtent,
+  type: FoundationWallType,
+) {
+  clearWallView(view);
+  addFoundationSolid(view, foundationBandFootprint(line, type, type.wallWidth, type.wallWidth / 2), type.wallHeight, vertical.baseElevation, 0x9ca5a8, line.id, "Concrete stem");
+  if (type.footing.enabled) {
+    addFoundationSolid(view, foundationBandFootprint(line, type, type.footing.width, type.wallWidth / 2 + type.footing.centerOffset), type.footing.height, vertical.footingBottomElevation, 0x879194, line.id, "Continuous footing");
+  }
+  for (let index = 0; index < type.sill.foundationPlateCount; index += 1) {
+    addFoundationSolid(
+      view,
+      foundationBandFootprint(line, type, type.sill.plateWidth, type.sill.exteriorSetback + type.sill.plateWidth / 2),
+      type.sill.plateHeight,
+      vertical.topElevation + index * type.sill.plateHeight,
+      0xb8905f,
+      line.id,
+      `Foundation sill plate ${index + 1}`,
+    );
+  }
 }
 
 function disposeWallView(scene: THREE.Scene, view: WallView) {
@@ -2898,8 +2978,11 @@ function Viewport({
       const lineYs = lines.flatMap((line) => [line.start.y, line.end.y]);
       const lineZs = lines.flatMap((line) => {
         const vertical = wallVerticalExtent(documentRef.current, line);
+        const foundationVertical = foundationWallVerticalExtent(documentRef.current, line);
         return vertical
           ? [vertical.baseElevation, vertical.baseElevation, vertical.topElevation, vertical.topElevation]
+          : foundationVertical
+            ? [foundationVertical.footingBottomElevation, foundationVertical.sillTopElevation]
           : [line.start.z, line.end.z];
       });
       const polylineXs = polylines.flatMap((polyline) => polyline.vertices.map((point) => point.x));
@@ -6427,7 +6510,7 @@ function Viewport({
       updateViewportLine(view, line);
       view.line.visible = findLayer(document, line.layerId)?.visible ?? true;
     });
-    const currentWallIds = new Set(document.lines.filter((line) => line.architecturalRole === "wall").map((line) => line.id));
+    const currentWallIds = new Set(document.lines.filter((line) => line.architecturalRole !== null).map((line) => line.id));
     wallViewsRef.current.forEach((view, lineId) => {
       if (!currentWallIds.has(lineId)) {
         disposeWallView(scene, view);
@@ -6448,6 +6531,17 @@ function Viewport({
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
       if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById);
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
+    });
+    document.lines.filter((line) => line.architecturalRole === "foundation-wall").forEach((line) => {
+      let view = wallViewsRef.current.get(line.id);
+      if (!view) {
+        view = createWallView(scene);
+        wallViewsRef.current.set(line.id, view);
+      }
+      const vertical = foundationWallVerticalExtent(document, line);
+      const foundationType = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
+      if (vertical && foundationType) updateFoundationWallView(view, line, vertical, foundationType);
+      view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
     polylineViewsRef.current.forEach((view, polylineId) => {
@@ -8126,6 +8220,42 @@ function WallGeometryControl({
   );
 }
 
+function FoundationWallGeometryControl({
+  document,
+  line,
+  onUpdate,
+}: {
+  document: ModelDocument;
+  line: LineObject;
+  onUpdate: (geometry: LineGeometry) => boolean;
+}) {
+  const vertical = foundationWallVerticalExtent(document, line);
+  const type = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
+  const referenceLabel = WALL_REFERENCE_LINE_LABELS[line.wallReferenceLine ?? "exterior-main"];
+  const exteriorSideLabel = line.wallExteriorSide === "right" ? "right" : "left";
+  const updatePoint = (endpoint: "start" | "end", axis: "x" | "y", draft: string) => {
+    const value = parseSignedArchitectural(draft);
+    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
+    const geometry = { start: { ...line.start }, end: { ...line.end } };
+    geometry[endpoint][axis] = snapToSixteenth(value);
+    return onUpdate(geometry);
+  };
+  return (
+    <PropertyGridSection title="Geometry" meta="Story-controlled foundation">
+      <LineCoordinateField label="Start X" value={line.start.x} onCommit={(draft) => updatePoint("start", "x", draft)} />
+      <LineCoordinateField label="Start Y" value={line.start.y} onCommit={(draft) => updatePoint("start", "y", draft)} />
+      <LineCoordinateField label="End X" value={line.end.x} onCommit={(draft) => updatePoint("end", "x", draft)} />
+      <LineCoordinateField label="End Y" value={line.end.y} onCommit={(draft) => updatePoint("end", "y", draft)} />
+      <PropertyGridRow label="Length"><span className="property-readout">{formatArchitectural(Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y))}</span></PropertyGridRow>
+      <PropertyGridRow label="Concrete top"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.topElevation) : "—"}</span></PropertyGridRow>
+      <PropertyGridRow label="Concrete bottom"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.baseElevation) : "—"}</span></PropertyGridRow>
+      <PropertyGridRow label="Footing bottom"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.footingBottomElevation) : "—"}</span></PropertyGridRow>
+      <PropertyGridRow label="Sill top"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.sillTopElevation) : "—"}</span></PropertyGridRow>
+      <p className="property-grid-note">X and Y define the {referenceLabel.toLowerCase()}. Looking from Start to End, the exterior is on the {exteriorSideLabel}. Concrete, footing, and foundation-hosted sill geometry comes from {type?.name ?? "the assigned Foundation Wall type"}.</p>
+    </PropertyGridSection>
+  );
+}
+
 function WallOpeningNameField({ opening, onUpdate }: { opening: WallOpening; onUpdate: (change: Partial<WallOpening>) => boolean }) {
   const [draft, setDraft] = useState(opening.name);
   const [error, setError] = useState(false);
@@ -8656,24 +8786,26 @@ function FoundationDiagramDimension({
 function FoundationSectionDiagram({
   onFootingChange,
   onSillChange,
+  onWallHeightChange,
   onWallWidthChange,
   type,
 }: {
   onFootingChange: (change: Partial<FoundationWallType["footing"]>) => void;
   onSillChange: (change: Partial<FoundationWallType["sill"]>) => void;
+  onWallHeightChange: (wallHeight: number) => void;
   onWallWidthChange: (wallWidth: number) => void;
   type: FoundationWallType;
 }) {
   const maximumWidth = Math.max(type.wallWidth, type.sill.plateWidth, type.footing.enabled ? type.footing.width : 0, 18);
   const horizontalScale = 205 / maximumWidth;
-  const verticalScale = 4;
+  const verticalScale = Math.min(2.4, 240 / type.wallHeight);
   const centerX = 185;
   const wallWidth = Math.max(8, type.wallWidth * horizontalScale);
   const wallTop = 152 - Math.max(-34, Math.min(34, type.topOffset * 1.5));
-  const footingHeight = type.footing.enabled ? Math.max(10, Math.min(90, type.footing.height * verticalScale)) : 0;
-  const footingBottom = 414;
-  const footingTop = footingBottom - footingHeight;
-  const wallBottom = type.footing.enabled ? footingTop : footingBottom;
+  const wallBottom = wallTop + Math.max(24, type.wallHeight * verticalScale);
+  const footingHeight = type.footing.enabled ? Math.max(10, Math.min(60, type.footing.height * verticalScale)) : 0;
+  const footingTop = wallBottom;
+  const footingBottom = footingTop + footingHeight;
   const wallX = centerX - wallWidth / 2;
   const plateHeight = Math.max(6, Math.min(22, type.sill.plateHeight * verticalScale));
   const plateStackHeight = plateHeight * type.sill.foundationPlateCount;
@@ -8743,6 +8875,9 @@ function FoundationSectionDiagram({
 
       <line x1={wallX} y1={wallDimensionY} x2={wallX + wallWidth} y2={wallDimensionY} className="foundation-svg-dimension foundation-svg-dimension-contrast" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
       <foreignObject x="294" y="207" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-ww:${type.wallWidth}`} label="Concrete width" value={type.wallWidth} onChange={onWallWidthChange} /></foreignObject>
+
+      <line x1={Math.max(8, wallX - 17)} y1={wallTop} x2={Math.max(8, wallX - 17)} y2={wallBottom} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
+      <foreignObject x="7" y="270" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-wh:${type.wallHeight}`} label="Concrete height" value={type.wallHeight} onChange={onWallHeightChange} /></foreignObject>
 
       {type.footing.enabled ? <>
         <line x1={footingX} y1={footingBottom + 18} x2={footingX + footingWidth} y2={footingBottom + 18} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
@@ -8838,6 +8973,7 @@ function FoundationWallManagerDialog({
               <header><div><strong>Concrete Wall</strong><span>Structural stem and project top condition</span></div></header>
               <div className="foundation-field-grid">
                 <label className="story-field"><span>Material</span><input value={selected.material} maxLength={120} onChange={(event) => replaceSelected({ material: event.target.value })} /></label>
+                <StoryDimensionInput key={`${selected.id}:wall-height:${selected.wallHeight}`} label="Wall height" value={selected.wallHeight} onChange={(wallHeight) => replaceSelected({ wallHeight })} />
                 <StoryDimensionInput key={`${selected.id}:wall:${selected.wallWidth}`} label="Wall width" value={selected.wallWidth} onChange={(wallWidth) => replaceSelected({ wallWidth })} />
                 <StoryDimensionInput signed key={`${selected.id}:top:${selected.topOffset}`} label="Top offset" value={selected.topOffset} onChange={(topOffset) => replaceSelected({ topOffset })} />
               </div>
@@ -8865,7 +9001,7 @@ function FoundationWallManagerDialog({
           </main>
           <aside className="foundation-section-preview" aria-label="Foundation Wall section preview">
             <header><strong>Editable Support Section</strong><span>Proportional component preview · exterior at left</span></header>
-            <div className="foundation-preview-canvas"><FoundationSectionDiagram type={selected} onWallWidthChange={(wallWidth) => replaceSelected({ wallWidth })} onFootingChange={replaceFooting} onSillChange={replaceSill} /></div>
+            <div className="foundation-preview-canvas"><FoundationSectionDiagram type={selected} onWallHeightChange={(wallHeight) => replaceSelected({ wallHeight })} onWallWidthChange={(wallWidth) => replaceSelected({ wallWidth })} onFootingChange={replaceFooting} onSillChange={replaceSill} /></div>
             <dl><div><dt>Condition</dt><dd>{FOUNDATION_CONDITION_LABELS[selected.condition]}</dd></div><div><dt>Concrete top</dt><dd>{formatSignedArchitectural(selected.topOffset)}</dd></div><div><dt>Sill edge</dt><dd>{selected.sill.exteriorSetback === 0 ? "Flush to Main exterior" : `${formatSignedArchitectural(selected.sill.exteriorSetback)} setback`}</dd></div><div><dt>Plate ownership</dt><dd>{ownershipLabel}</dd></div></dl>
           </aside>
         </div>
@@ -8908,6 +9044,7 @@ function RoomManagerDialog({
   const effective = selected ? effectiveRoomSettings(selected, story, storyElevation) : null;
   const generatedPlatforms = selected ? roomHorizontalPlatformSolution(draft, selected) : null;
   const perimeterFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "perimeter-main-exterior").length ?? 0;
+  const foundationFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "foundation-sill-exterior").length ?? 0;
   const sharedFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "shared-wall-reference").length ?? 0;
   const formatRoomArea = (room: RoomObject) => `${(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft`;
   const selectStory = (storyId: string) => {
@@ -9041,17 +9178,19 @@ function RoomManagerDialog({
                 <div><span>Generated finished ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedCeilingElevation) : "—"}</strong></div>
               </section>
               <section className="room-platform-edges" aria-label="Resolved floor platform edges">
-                <header><div><strong>Floor Platform Edges</strong><span>Automatic Wall-aware edge rules</span></div><output>{perimeterFloorEdgeCount} perimeter · {sharedFloorEdgeCount} shared</output></header>
+                <header><div><strong>Floor Platform Edges</strong><span>Automatic Wall-aware edge rules</span></div><output>{foundationFloorEdgeCount} foundation · {perimeterFloorEdgeCount} framed · {sharedFloorEdgeCount} shared</output></header>
                 {generatedPlatforms?.floorEdgeConditions.map((edge, index) => {
                   const wall = edge.wallId ? draft.lines.find((line) => line.id === edge.wallId) : null;
-                  const ruleLabel = edge.rule === "perimeter-main-exterior"
+                  const ruleLabel = edge.rule === "foundation-sill-exterior"
+                    ? "Foundation sill exterior"
+                    : edge.rule === "perimeter-main-exterior"
                     ? "Exterior face of Main layer"
                     : edge.rule === "shared-wall-reference"
                       ? "Shared Room boundary"
                       : "Room boundary fallback";
                   return <div className="room-platform-edge" key={`${edge.wallId ?? "fallback"}-${index}`}><span>{wall?.name ?? `Boundary edge ${index + 1}`}</span><strong>{ruleLabel}</strong><small>{Math.abs(edge.offsetFromReference) < 1 / 32 ? "On Wall reference" : `${formatArchitectural(Math.abs(edge.offsetFromReference))} from Wall reference`}</small></div>;
                 })}
-                <p>A hosted Foundation Wall will supersede this fallback with its sill exterior edge. Manual edge offsets remain reserved for exceptional details.</p>
+                <p>Where a Foundation Wall aligns with a perimeter edge, its sill exterior edge takes priority. Otherwise the framed Wall Main-layer exterior remains the default. Manual edge offsets remain reserved for exceptional details.</p>
               </section>
               <section className="room-platform-openings" aria-label="Platform Openings">
                 <header><div><strong>Platform Openings</strong><span>Hosted cuts for stairs, shafts, and open-below areas</span></div><button type="button" onClick={addOpening}>+ Add Opening</button></header>
@@ -9144,6 +9283,7 @@ export function ModelBuilderApp() {
   const [stretchTargets, setStretchTargets] = useState<CadStretchTarget[]>([]);
   const [lineMode, setLineMode] = useState(false);
   const [wallMode, setWallMode] = useState(false);
+  const [foundationWallMode, setFoundationWallMode] = useState(false);
   const [lineAnchor, setLineAnchor] = useState<LinePoint | null>(null);
   const [lineCommand, setLineCommand] = useState<LineViewportCommand | null>(null);
   const [arcPoints, setArcPoints] = useState<LinePoint[]>([]);
@@ -9165,7 +9305,7 @@ export function ModelBuilderApp() {
   const [activeElevationDraft, setActiveElevationDraft] = useState(() => formatSignedArchitectural(storedCadDraftingSettings().activeElevation));
   const [activeElevationError, setActiveElevationError] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
-  const [lastCommandName, setLastCommandName] = useState<"arc" | "circle" | "line" | "polyline" | "rectangle" | "wall" | null>(null);
+  const [lastCommandName, setLastCommandName] = useState<"arc" | "circle" | "foundation-wall" | "line" | "polyline" | "rectangle" | "wall" | null>(null);
   const [arcMode, setArcMode] = useState(false);
   const [circleMode, setCircleMode] = useState(false);
   const [polylineMode, setPolylineMode] = useState(false);
@@ -9244,6 +9384,7 @@ export function ModelBuilderApp() {
   const selectedArcIsEditable = Boolean(selectedArc && arcIsEditable(editor.present, selectedArc));
   const activeStory = editor.present.building.stories.find((story) => story.id === editor.present.building.activeStoryId) ?? editor.present.building.stories[0];
   const activeWallType = editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId) ?? editor.present.building.wallTypes[0];
+  const activeFoundationWallType = editor.present.building.foundationWallTypes.find((type) => type.id === editor.present.building.activeFoundationWallTypeId) ?? editor.present.building.foundationWallTypes[0];
   const modelEntityCount = editor.present.objects.length + editor.present.lines.length + editor.present.polylines.length + editor.present.circles.length + editor.present.arcs.length;
   const activeStoryRoomCount = editor.present.rooms.filter((room) => room.storyId === activeStory.id).length;
   const setDrawingPlaneFromBuilding = useCallback((building: BuildingStructure) => {
@@ -9450,6 +9591,7 @@ export function ModelBuilderApp() {
     setCircleMode(false);
     setLineMode(false);
     setWallMode(false);
+    setFoundationWallMode(false);
     setPolylineMode(false);
     setRectangleMode(false);
     setShowStartGuide(true);
@@ -9470,6 +9612,8 @@ export function ModelBuilderApp() {
     setArcMode(false);
     setCircleMode(false);
     setLineMode(false);
+    setWallMode(false);
+    setFoundationWallMode(false);
     setPolylineMode(false);
     setRectangleMode(false);
     setDragStatus(null);
@@ -10540,6 +10684,7 @@ export function ModelBuilderApp() {
     setCircleMode(false);
     setLineMode(true);
     setWallMode(false);
+    setFoundationWallMode(false);
     setPolylineMode(false);
     setRectangleMode(false);
     setSelectedObjectId(null);
@@ -10564,6 +10709,15 @@ export function ModelBuilderApp() {
     setLastCommandName("wall");
     setDrawingPlaneFromBuilding(editor.present.building);
     setFileNotice({ text: "Wall active. Draw the exterior face of the Main layer; the exterior defaults to the left of Start → End.", tone: "info" });
+  }, [activateLineMode, editor.present.building, setDrawingPlaneFromBuilding]);
+
+  const activateFoundationWallMode = useCallback(() => {
+    activateLineMode();
+    setWallMode(false);
+    setFoundationWallMode(true);
+    setLastCommandName("foundation-wall");
+    setDrawingPlaneFromBuilding(editor.present.building);
+    setFileNotice({ text: "Foundation Wall active. Draw the exterior face of the concrete Main layer; the exterior defaults to the left of Start → End.", tone: "info" });
   }, [activateLineMode, editor.present.building, setDrawingPlaneFromBuilding]);
 
   const activateArcMode = useCallback((method: ArcMethod = arcMethod) => {
@@ -10808,12 +10962,13 @@ export function ModelBuilderApp() {
   const finishLineMode = useCallback(() => {
     setLineMode(false);
     setWallMode(false);
+    setFoundationWallMode(false);
     setLineAnchor(null);
     setObjectSnapOverride(null);
     setCommandDraft("");
     setDragStatus(null);
-    setFileNotice({ text: `${wallMode ? "Wall" : "Line"} tool finished.`, tone: "info" });
-  }, [wallMode]);
+    setFileNotice({ text: `${foundationWallMode ? "Foundation Wall" : wallMode ? "Wall" : "Line"} tool finished.`, tone: "info" });
+  }, [foundationWallMode, wallMode]);
 
   const finishArcMode = useCallback(() => {
     setArcMode(false);
@@ -11043,6 +11198,9 @@ export function ModelBuilderApp() {
       } else if (normalized === "w" || normalized === "wall") {
         setCommandDraft("");
         activateWallMode();
+      } else if (["fw", "foundationwall", "foundation-wall"].includes(normalized)) {
+        setCommandDraft("");
+        activateFoundationWallMode();
       } else if (["p", "pl", "pline", "polyline"].includes(normalized)) {
         setCommandDraft("");
         activatePolylineMode();
@@ -11085,6 +11243,8 @@ export function ModelBuilderApp() {
         activateLineMode();
       } else if (!value && lastCommandName === "wall") {
         activateWallMode();
+      } else if (!value && lastCommandName === "foundation-wall") {
+        activateFoundationWallMode();
       } else if (!value && lastCommandName === "circle") {
         activateCircleMode();
       } else if (!value && lastCommandName === "polyline") {
@@ -11092,7 +11252,7 @@ export function ModelBuilderApp() {
       } else if (!value && lastCommandName === "rectangle") {
         activateRectangleMode();
       } else if (value) {
-        setFileNotice({ text: `“${value}” is not available. Try W, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, F, S, RO, or SC.`, tone: "error" });
+        setFileNotice({ text: `“${value}” is not available. Try W, FW, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, F, S, RO, or SC.`, tone: "error" });
       }
       return;
     }
@@ -11326,7 +11486,7 @@ export function ModelBuilderApp() {
     lineCommandIdRef.current += 1;
     setLineCommand({ distance: snapToSixteenth(distance), id: lineCommandIdRef.current, kind: "distance" });
     setCommandDraft("");
-  }, [activateArcMode, activateBoundaryMode, activateBreakMode, activateChamferMode, activateCircleMode, activateExtendMode, activateFilletMode, activateLengthenMode, activateLineMode, activateMirrorMode, activateMoveMode, activateOffsetMode, activatePolylineMode, activateRectangleMode, activateRotateMode, activateScaleMode, activateStretchMode, activateTrimMode, activateWallMode, applyPolylineChamfer, applyPolylineFillet, arcMode, arcPoints, boundaryMode, breakMode, cadDraftingSettings.activeElevation, chamferDistancePrompt, chamferFirstDistance, chamferMode, chamferStage, circleMethod, circleMode, circlePoints, commandDraft, explodeSelection, extendMode, filletMode, filletStage, finishArcMode, finishCircleMode, finishLineMode, finishRectangleMode, joinSelection, lastCommandName, lengthenMethod, lengthenMode, lineAnchor, lineMode, objectSnapOverride, offsetMode, polylineAnchor, polylineMode, rectangleAnchor, rectangleMode, startCopyMode, stretchMode, trimMode]);
+  }, [activateArcMode, activateBoundaryMode, activateBreakMode, activateChamferMode, activateCircleMode, activateExtendMode, activateFilletMode, activateFoundationWallMode, activateLengthenMode, activateLineMode, activateMirrorMode, activateMoveMode, activateOffsetMode, activatePolylineMode, activateRectangleMode, activateRotateMode, activateScaleMode, activateStretchMode, activateTrimMode, activateWallMode, applyPolylineChamfer, applyPolylineFillet, arcMode, arcPoints, boundaryMode, breakMode, cadDraftingSettings.activeElevation, chamferDistancePrompt, chamferFirstDistance, chamferMode, chamferStage, circleMethod, circleMode, circlePoints, commandDraft, explodeSelection, extendMode, filletMode, filletStage, finishArcMode, finishCircleMode, finishLineMode, finishRectangleMode, joinSelection, lastCommandName, lengthenMethod, lengthenMode, lineAnchor, lineMode, objectSnapOverride, offsetMode, polylineAnchor, polylineMode, rectangleAnchor, rectangleMode, startCopyMode, stretchMode, trimMode]);
 
   useEffect(() => {
     const handleLineKeyboard = (event: KeyboardEvent) => {
@@ -11425,6 +11585,7 @@ export function ModelBuilderApp() {
         else if (lastCommandName === "circle") activateCircleMode();
         else if (lastCommandName === "line") activateLineMode();
         else if (lastCommandName === "wall") activateWallMode();
+        else if (lastCommandName === "foundation-wall") activateFoundationWallMode();
         else if (lastCommandName === "polyline") activatePolylineMode();
         else activateRectangleMode();
         return;
@@ -11485,7 +11646,7 @@ export function ModelBuilderApp() {
     };
     window.addEventListener("keydown", handleLineKeyboard);
     return () => window.removeEventListener("keydown", handleLineKeyboard);
-  }, [activateArcMode, activateBoundaryMode, activateCircleMode, activateFilletMode, activateLineMode, activateMoveMode, activateOffsetMode, activatePolylineMode, activateRectangleMode, activateStretchMode, activateWallMode, arcMode, boundaryMode, breakMode, chamferMode, circleMode, copyMode, explodeSelection, extendMode, filletMode, joinSelection, lastCommandName, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, scaleMode, stretchMode, trimMode]);
+  }, [activateArcMode, activateBoundaryMode, activateCircleMode, activateFilletMode, activateFoundationWallMode, activateLineMode, activateMoveMode, activateOffsetMode, activatePolylineMode, activateRectangleMode, activateStretchMode, activateWallMode, arcMode, boundaryMode, breakMode, chamferMode, circleMode, copyMode, explodeSelection, extendMode, filletMode, joinSelection, lastCommandName, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, scaleMode, stretchMode, trimMode]);
 
   const finishRotateMode = useCallback(() => {
     setRotateMode(false);
@@ -11682,10 +11843,14 @@ export function ModelBuilderApp() {
       setFileNotice({ text: "The line must have a measurable length and stay within the drawing area.", tone: "error" });
       return false;
     }
-    const next = wallMode ? createWallFromLine(result.document, result.line.id) : result.document;
+    const next = foundationWallMode
+      ? createFoundationWallFromLine(result.document, result.line.id)
+      : wallMode
+        ? createWallFromLine(result.document, result.line.id)
+        : result.document;
     const createdLine = next ? findLineObject(next, result.line.id) : null;
     if (!next || !createdLine) {
-      setFileNotice({ text: "The wall could not be created with the active Story and wall type.", tone: "error" });
+      setFileNotice({ text: `The ${foundationWallMode ? "Foundation Wall" : wallMode ? "Wall" : "Line"} could not be created with the active Story and type.`, tone: "error" });
       return false;
     }
     dispatch({ type: "commit", next });
@@ -11693,7 +11858,7 @@ export function ModelBuilderApp() {
     if (!lineMode) setSelectedLineId(result.line.id);
     setFileNotice({ text: `Added ${createdLine.name}. Continue from its endpoint or press Escape to finish.`, tone: "success" });
     return true;
-  }, [editor.present, lineMode, wallMode]);
+  }, [editor.present, foundationWallMode, lineMode, wallMode]);
 
   const updateSelectedLine = useCallback((geometry: LineGeometry) => {
     if (!selectedLineId) return false;
@@ -11722,7 +11887,7 @@ export function ModelBuilderApp() {
 
   const toggleSelectedWallRole = useCallback(() => {
     if (!selectedLine || !selectedLineIsEditable) return;
-    const next = selectedLine.architecturalRole === "wall"
+    const next = selectedLine.architecturalRole !== null
       ? removeWallRole(editor.present, selectedLine.id)
       : createWallFromLine(editor.present, selectedLine.id);
     if (!next) {
@@ -11730,12 +11895,30 @@ export function ModelBuilderApp() {
       return;
     }
     dispatch({ type: "commit", next });
-    setFileNotice({ text: selectedLine.architecturalRole === "wall" ? `${selectedLine.name} is now a drafting Line.` : `${selectedLine.name} is now a Story-controlled Wall.`, tone: "success" });
+    setFileNotice({ text: selectedLine.architecturalRole !== null ? `${selectedLine.name} is now a drafting Line.` : `${selectedLine.name} is now a Story-controlled Wall.`, tone: "success" });
+  }, [editor.present, selectedLine, selectedLineIsEditable]);
+
+  const makeSelectedFoundationWall = useCallback(() => {
+    if (!selectedLine || !selectedLineIsEditable || selectedLine.architecturalRole !== null) return;
+    const next = createFoundationWallFromLine(editor.present, selectedLine.id);
+    if (!next) {
+      setFileNotice({ text: "A Foundation Wall needs a measurable plan length, an assigned Story, and a valid active Foundation Wall type.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${selectedLine.name} is now a Story-controlled Foundation Wall.`, tone: "success" });
   }, [editor.present, selectedLine, selectedLineIsEditable]);
 
   const assignSelectedWallType = useCallback((wallTypeId: string) => {
     if (!selectedLine) return;
     const next = assignWallType(editor.present, selectedLine.id, wallTypeId);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+  }, [editor.present, selectedLine]);
+
+  const assignSelectedFoundationWallType = useCallback((foundationWallTypeId: string) => {
+    if (!selectedLine) return;
+    const next = assignFoundationWallType(editor.present, selectedLine.id, foundationWallTypeId);
     if (!next) return;
     dispatch({ type: "commit", next });
   }, [editor.present, selectedLine]);
@@ -12203,6 +12386,8 @@ export function ModelBuilderApp() {
     setArcMode(false);
     setCircleMode(false);
     setLineMode(false);
+    setWallMode(false);
+    setFoundationWallMode(false);
     setPolylineMode(false);
     setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
@@ -12300,6 +12485,8 @@ export function ModelBuilderApp() {
       setArcMode(false);
       setCircleMode(false);
       setLineMode(false);
+      setWallMode(false);
+      setFoundationWallMode(false);
       setPolylineMode(false);
       setRectangleMode(false);
       continuableEntityHistoryRef.current = [];
@@ -12344,6 +12531,8 @@ export function ModelBuilderApp() {
     setArcMode(false);
     setCircleMode(false);
     setLineMode(false);
+    setWallMode(false);
+    setFoundationWallMode(false);
     setPolylineMode(false);
     setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
@@ -12385,6 +12574,8 @@ export function ModelBuilderApp() {
             setArcMode(false);
             setCircleMode(false);
             setLineMode(false);
+            setWallMode(false);
+            setFoundationWallMode(false);
             setPolylineMode(false);
             setRectangleMode(false);
             continuableEntityHistoryRef.current = [];
@@ -12572,7 +12763,7 @@ export function ModelBuilderApp() {
         : dragStatus.kind === "scale"
           ? `Scale ${dragStatus.factor ?? 1}× — 0.1 snap; hold Shift for 0.01 precision.`
         : dragStatus.kind === "line" || dragStatus.kind === "line-grip"
-          ? `${dragStatus.kind === "line" ? wallMode ? "Draw wall reference line" : "Draw line" : "Edit line"} — ${formatArchitectural(dragStatus.distance)} at ${dragStatus.angle ?? 0}°${dragStatus.snapped ? " — object snap" : dragStatus.polarAngle !== null && dragStatus.polarAngle !== undefined ? ` — polar ${dragStatus.polarAngle}°` : " — 1/16 inch grid"}.`
+          ? `${dragStatus.kind === "line" ? foundationWallMode ? "Draw Foundation Wall reference line" : wallMode ? "Draw wall reference line" : "Draw line" : "Edit line"} — ${formatArchitectural(dragStatus.distance)} at ${dragStatus.angle ?? 0}°${dragStatus.snapped ? " — object snap" : dragStatus.polarAngle !== null && dragStatus.polarAngle !== undefined ? ` — polar ${dragStatus.polarAngle}°` : " — 1/16 inch grid"}.`
         : dragStatus.kind === "polyline" || dragStatus.kind === "polyline-grip" || dragStatus.kind === "rectangle"
           ? `${dragStatus.kind === "rectangle" ? "Draw rectangle" : dragStatus.kind === "polyline-grip" ? "Edit polyline vertex" : "Draw polyline"} — ${formatArchitectural(dragStatus.distance)}${dragStatus.angle !== undefined ? ` at ${dragStatus.angle}°` : ""}${dragStatus.snapped ? " — object snap" : dragStatus.polarAngle !== null && dragStatus.polarAngle !== undefined ? ` — polar ${dragStatus.polarAngle}°` : " — 1/16 inch grid"}.`
         : dragStatus.kind === "circle" || dragStatus.kind === "circle-grip"
@@ -12614,8 +12805,8 @@ export function ModelBuilderApp() {
       ? `CIRCLE · ${circleMethodDefinition(circleMethod).label.toUpperCase()} — specify the ${circlePointStage(circleMethod, circlePoints.length)}.`
     : lineMode
       ? lineAnchor
-        ? `${wallMode ? "WALL" : "LINE"} — next point or distance · U undoes · C closes · Escape exits.`
-        : wallMode ? `WALL — specify the first Main-layer reference point on ${activeStory.name}.` : "LINE — specify first point by click, X,Y, or X,Y,Z. Z defaults to 0."
+        ? `${foundationWallMode ? "FOUNDATION WALL" : wallMode ? "WALL" : "LINE"} — next point or distance · U undoes · C closes · Escape exits.`
+        : foundationWallMode ? `FOUNDATION WALL — specify the first concrete Main-layer reference point on ${activeStory.name}.` : wallMode ? `WALL — specify the first Main-layer reference point on ${activeStory.name}.` : "LINE — specify first point by click, X,Y, or X,Y,Z. Z defaults to 0."
     : polylineMode
       ? polylineAnchor
         ? `POLYLINE · ${polylineSegmentMode.toUpperCase()} · W ${formatArchitectural(polylineWidth)} — ${polylineSegmentMode === "arc" ? "through-point, then endpoint" : "next vertex or distance"} · A/L switches · U undoes · C closes.`
@@ -12652,7 +12843,7 @@ export function ModelBuilderApp() {
           : `${selectedBox.name} selected — center grip moves on X/Y; face, edge, and corner grips resize.`
         : "Ready — select an object; Shift-click builds a selection set, or start Line from Home.";
   const activeDrawingAnchor = arcMode ? arcPoints.at(-1) ?? null : circleMode ? circlePoints.at(-1) ?? null : lineMode ? lineAnchor : polylineMode ? polylineAnchor : rectangleAnchor;
-  const activeDrawingTitle = arcMode ? `Arc · ${arcMethodDefinition(arcMethod).label}` : circleMode ? `Circle · ${circleMethodDefinition(circleMethod).label}` : lineMode ? wallMode ? "Wall" : "Line" : polylineMode ? `Polyline · ${polylineSegmentMode === "arc" ? "Arc" : "Line"}` : "Rectangle";
+  const activeDrawingTitle = arcMode ? `Arc · ${arcMethodDefinition(arcMethod).label}` : circleMode ? `Circle · ${circleMethodDefinition(circleMethod).label}` : lineMode ? foundationWallMode ? "Foundation Wall" : wallMode ? "Wall" : "Line" : polylineMode ? `Polyline · ${polylineSegmentMode === "arc" ? "Arc" : "Line"}` : "Rectangle";
   const activeDrawingMeta = activeDrawingAnchor
     ? arcMode ? arcPointStage(arcMethod, arcPoints.length) : circleMode ? circlePointStage(circleMethod, circlePoints.length) : lineMode ? "Next point" : polylineMode ? polylineSegmentMode === "arc" ? "Through-point, then endpoint" : "Next vertex" : "Opposite corner"
     : arcMode ? arcPointStage(arcMethod, arcPoints.length) : circleMode ? circlePointStage(circleMethod, circlePoints.length) : lineMode ? "First point" : polylineMode ? "First vertex" : "First corner";
@@ -12661,7 +12852,7 @@ export function ModelBuilderApp() {
     : circleMode
     ? `${circleMethodDefinition(circleMethod).description}. Exact and @relative coordinates are accepted. Plain dimensions follow the pointer for point-defined methods. All construction points stay on one elevation plane.`
     : lineMode
-    ? wallMode ? `Draw the exterior face of the Main layer with Line-grade snaps and exact input. The exterior defaults left of Start → End. New walls use ${editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId)?.name ?? "the active wall type"} and follow ${activeStory.name} rough floor and ceiling.` : "Use the command input below. A plain distance follows the cursor. Exact and @relative points are accepted. U undoes the previous segment; C closes the chain."
+    ? foundationWallMode ? `Draw the exterior face of the concrete Main layer. New Foundation Walls use ${activeFoundationWallType.name}; concrete height, footing, and sill plates follow that saved type.` : wallMode ? `Draw the exterior face of the Main layer with Line-grade snaps and exact input. The exterior defaults left of Start → End. New walls use ${editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId)?.name ?? "the active wall type"} and follow ${activeStory.name} rough floor and ceiling.` : "Use the command input below. A plain distance follows the cursor. Exact and @relative points are accepted. U undoes the previous segment; C closes the chain."
     : polylineMode
       ? "Line mode adds straight segments. Arc mode uses a through-point and endpoint to store a true curved segment. A/L switches modes; WIDTH plus a dimension sets constant width. U undoes, C closes, and Enter finishes open."
       : `Specify two corners by click or exact coordinates. After the first corner, use @X,Y or enter dimensions such as 12' x 8'; the cursor chooses the quadrant.`;
@@ -12788,13 +12979,14 @@ export function ModelBuilderApp() {
               <div className="ribbon-tools compact-tools home-tool-grid">
                 <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor depth, finishes, and ceiling height"><b>≋</b><span>Plan Setup</span></button>
                 <button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title={`Draw Walls using ${activeWallType.name}`}><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Walls"}</span></button>
+                <button className={lineMode && foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && foundationWallMode ? finishLineMode : activateFoundationWallMode} title={`Draw Foundation Walls using ${activeFoundationWallType.name}`}><b>▰</b><span>{lineMode && foundationWallMode ? "Finish Foundation" : "Foundation Walls"}</span></button>
                 <button type="button" onClick={() => setRoomManagerOpen(true)} title="Detect enclosed Rooms and manage overrides"><b>▦</b><span>Rooms</span></button>
               </div>
               <small>Building workflow</small>
             </div>
             <div className="ribbon-group home-create-group">
               <div className="ribbon-tools compact-tools home-tool-grid">
-                <button className={lineMode && !wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && !wallMode ? finishLineMode : activateLineMode} title="Draw exact 2D or 3D line segments"><b>╱</b><span>{lineMode && !wallMode ? "Finish Line" : "Line"}</span></button>
+                <button className={lineMode && !wallMode && !foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && !wallMode && !foundationWallMode ? finishLineMode : activateLineMode} title="Draw exact 2D or 3D line segments"><b>╱</b><span>{lineMode && !wallMode && !foundationWallMode ? "Finish Line" : "Line"}</span></button>
                 <button className={polylineMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={polylineMode ? finishPolylineMode : activatePolylineMode} title="Draw one connected polyline entity"><b>⌁</b><span>Polyline</span></button>
                 <button className={rectangleMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={rectangleMode ? finishRectangleMode : activateRectangleMode} title="Draw a closed rectangular polyline"><b>▭</b><span>Rectangle</span></button>
                 <button className={circleMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={() => circleMode ? finishCircleMode() : activateCircleMode()} title={`Draw Circle: ${circleMethodDefinition(circleMethod).label}`}><b>○</b><span>Circle</span></button>
@@ -12846,7 +13038,7 @@ export function ModelBuilderApp() {
         {activeRibbonTab === "Draw" ? (
           <>
             <div className="ribbon-group">
-              <div className="ribbon-tools"><button className={lineMode && !wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && !wallMode ? finishLineMode : activateLineMode} title="Draw connected line segments"><b>╱</b><span>Line</span></button><button className={polylineMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={polylineMode ? finishPolylineMode : activatePolylineMode} title="Draw one connected polyline"><b>⌁</b><span>Polyline</span></button><button className={rectangleMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={rectangleMode ? finishRectangleMode : activateRectangleMode} title="Draw a closed rectangular polyline"><b>▭</b><span>Rectangle</span></button><button className={circleMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={() => circleMode ? finishCircleMode() : activateCircleMode()} title={`Draw Circle: ${circleMethodDefinition(circleMethod).label}`}><b>○</b><span>Circle</span></button><button className={arcMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={() => arcMode ? finishArcMode() : activateArcMode()} title={`Draw Arc: ${arcMethodDefinition(arcMethod).label}`}><b>⌒</b><span>Arc</span></button><button className={boundaryMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={boundaryMode ? () => finishBoundaryMode(true) : activateBoundaryMode} title="Create a closed Polyline from a visible enclosed area"><b>◇</b><span>Boundary</span></button></div>
+              <div className="ribbon-tools"><button className={lineMode && !wallMode && !foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && !wallMode && !foundationWallMode ? finishLineMode : activateLineMode} title="Draw connected line segments"><b>╱</b><span>Line</span></button><button className={polylineMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={polylineMode ? finishPolylineMode : activatePolylineMode} title="Draw one connected polyline"><b>⌁</b><span>Polyline</span></button><button className={rectangleMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={rectangleMode ? finishRectangleMode : activateRectangleMode} title="Draw a closed rectangular polyline"><b>▭</b><span>Rectangle</span></button><button className={circleMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={() => circleMode ? finishCircleMode() : activateCircleMode()} title={`Draw Circle: ${circleMethodDefinition(circleMethod).label}`}><b>○</b><span>Circle</span></button><button className={arcMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={() => arcMode ? finishArcMode() : activateArcMode()} title={`Draw Arc: ${arcMethodDefinition(arcMethod).label}`}><b>⌒</b><span>Arc</span></button><button className={boundaryMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={boundaryMode ? () => finishBoundaryMode(true) : activateBoundaryMode} title="Create a closed Polyline from a visible enclosed area"><b>◇</b><span>Boundary</span></button></div>
               <small>Geometry</small>
             </div>
             <div className="ribbon-group arc-method-group rectangle-method-group">
@@ -12886,7 +13078,7 @@ export function ModelBuilderApp() {
         {activeRibbonTab === "Model" ? (
           <>
             <div className="ribbon-group">
-              <div className="ribbon-tools"><button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title="Draw layered walls on the active Story"><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Wall"}</span></button><button className="primary-tool" type="button" onClick={addBox} title="Add a parametric box"><b>▰</b><span>Box</span></button></div>
+              <div className="ribbon-tools"><button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title="Draw layered walls on the active Story"><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Wall"}</span></button><button className={lineMode && foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && foundationWallMode ? finishLineMode : activateFoundationWallMode} title={`Draw concrete Foundation Walls using ${activeFoundationWallType.name}`}><b>▰</b><span>{lineMode && foundationWallMode ? "Finish Foundation" : "Foundation Wall"}</span></button><button className="primary-tool" type="button" onClick={addBox} title="Add a parametric box"><b>▰</b><span>Box</span></button></div>
               <small>Primitives</small>
             </div>
             <div className="ribbon-group">
@@ -13034,7 +13226,7 @@ export function ModelBuilderApp() {
                 <EditableObjectName key={`${selectedBox.id}:${selectedBox.name}`} name={selectedBox.name} onRename={renameSelectedObject} />
               ) : selectedBox ? (
                 <strong>{selectedBox.name}</strong>
-              ) : boundaryMode ? <strong>Boundary Command</strong> : arcMode ? <strong>Arc · {arcMethodDefinition(arcMethod).label}</strong> : circleMode ? <strong>Circle Command</strong> : lineMode ? <strong>{wallMode ? "Wall" : "Line"} Command</strong> : polylineMode ? <strong>Polyline Command</strong> : rectangleMode ? <strong>Rectangle Command</strong> : <strong>No selection</strong>}
+              ) : boundaryMode ? <strong>Boundary Command</strong> : arcMode ? <strong>Arc · {arcMethodDefinition(arcMethod).label}</strong> : circleMode ? <strong>Circle Command</strong> : lineMode ? <strong>{foundationWallMode ? "Foundation Wall" : wallMode ? "Wall" : "Line"} Command</strong> : polylineMode ? <strong>Polyline Command</strong> : rectangleMode ? <strong>Rectangle Command</strong> : <strong>No selection</strong>}
               <span>{selectedArc
                 ? `${findLayer(editor.present, selectedArc.layerId)?.name ?? "Default"} layer${selectedArc.locked ? " · locked" : " · click name to edit"}`
                 : selectedCircle
@@ -13082,8 +13274,8 @@ export function ModelBuilderApp() {
               {selectedPolyline.closed ? <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedFloorPlatform} disabled={!selectedPolylineIsEditable}>{selectedPolyline.architecturalRole === "floor-platform" ? "Convert to Boundary" : "Create Floor Platform"}</button></div> : null}
             </PropertyGridSection>
           ) : selectedLine ? (
-            <PropertyGridSection ariaLabel="Line properties" title="General" meta={selectedLine.architecturalRole === "wall" ? "Architectural" : "3D entity"}>
-              <PropertyGridRow label="Type"><span className="property-readout">{selectedLine.architecturalRole === "wall" ? "Wall reference line" : "Line"}</span></PropertyGridRow>
+            <PropertyGridSection ariaLabel="Line properties" title="General" meta={selectedLine.architecturalRole !== null ? "Architectural" : "3D entity"}>
+              <PropertyGridRow label="Type"><span className="property-readout">{selectedLine.architecturalRole === "wall" ? "Wall reference line" : selectedLine.architecturalRole === "foundation-wall" ? "Foundation Wall reference line" : "Line"}</span></PropertyGridRow>
               <PropertyGridRow label="Story"><select className="property-cell-select" value={selectedLine.storyId} onChange={(event) => assignSelectedEntityStory({ id: selectedLine.id, kind: "line" }, event.target.value)} aria-label="Line Story" disabled={!selectedLineIsEditable}>{editor.present.building.stories.map((story) => <option key={story.id} value={story.id}>{story.name}</option>)}</select></PropertyGridRow>
               <PropertyGridRow label="Layer"><select className="property-cell-select" value={selectedLine.layerId} onChange={(event) => assignSelectedLineLayer(event.target.value)} aria-label="Line layer" disabled={!selectedLineIsEditable}>{editor.present.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}{layer.locked ? " (locked)" : ""}{!layer.visible ? " (hidden)" : ""}</option>)}</select></PropertyGridRow>
               {selectedLine.architecturalRole === "wall" ? <>
@@ -13096,8 +13288,20 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="End cleanup"><select className="property-cell-select" value={selectedLine.wallEndJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ endJoinMode: event.target.value as WallJoinMode })} aria-label="Wall end junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
                 <PropertyGridRow label="Junctions"><span className="property-readout">{selectedWallJunctionLabel}</span></PropertyGridRow>
               </> : null}
+              {selectedLine.architecturalRole === "foundation-wall" ? (() => {
+                const foundationType = editor.present.building.foundationWallTypes.find((type) => type.id === selectedLine.foundationWallTypeId) ?? activeFoundationWallType;
+                return <>
+                  <PropertyGridRow label="Foundation type"><select className="property-cell-select" value={foundationType.id} onChange={(event) => assignSelectedFoundationWallType(event.target.value)} aria-label="Foundation Wall type" disabled={!selectedLineIsEditable}>{editor.present.building.foundationWallTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
+                  <PropertyGridRow label="Concrete"><span className="property-readout">{formatArchitectural(foundationType.wallHeight)} high × {formatArchitectural(foundationType.wallWidth)} wide</span></PropertyGridRow>
+                  <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "exterior-main"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Foundation Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
+                  <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Foundation Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
+                  <PropertyGridRow label="Floor stop"><span className="property-readout">Sill exterior · {formatSignedArchitectural(foundationSillOffsetFromReference(selectedLine, foundationType))} from reference</span></PropertyGridRow>
+                </>;
+              })() : null}
               <PropertyGridRow label="Locked"><button className={selectedLine.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedLineLock}>{selectedLine.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>
-              <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>{selectedLine.architecturalRole === "wall" ? "Convert to Line" : "Create Wall"}</button></div>
+              {selectedLine.architecturalRole !== null
+                ? <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>Convert to Line</button></div>
+                : <div className="property-action-row"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>Create Wall</button><button type="button" onClick={makeSelectedFoundationWall} disabled={!selectedLineIsEditable}>Create Foundation Wall</button></div>}
             </PropertyGridSection>
           ) : selectedBox ? (
             <PropertyGridSection ariaLabel="Selection organization" title="General" meta={selectedGroup ? "Group" : selectedObjectIds.length > 1 ? "Selection" : "Object"}>
@@ -13181,6 +13385,8 @@ export function ModelBuilderApp() {
                 <WallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
                 <WallOpeningsControl line={selectedLine} onAdd={addSelectedWallOpening} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
               </>
+              : selectedLine.architecturalRole === "foundation-wall"
+                ? <FoundationWallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}:${selectedLine.foundationWallTypeId}`} line={selectedLine} onUpdate={updateSelectedLine} />
               : <LineGeometryControl key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.start.z}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.end.z}`} line={selectedLine} onUpdate={updateSelectedLine} />
           ) : selectedBox && !selectionIsEditable ? (
             <PropertyGridSection className="locked-selection-notice" title="Editing" meta="Read only">
@@ -13221,11 +13427,11 @@ export function ModelBuilderApp() {
               <PropertyGridSection className="drawing-properties" title={activeDrawingTitle} meta={activeDrawingMeta}>
                 {arcMode ? <PropertyGridRow label="Method"><select className="property-cell-select" value={arcMethod} onChange={(event) => activateArcMode(event.target.value as ArcMethod)} aria-label="Active Arc method">{ARC_METHODS.map((definition) => <option key={definition.method} value={definition.method}>{definition.label}</option>)}</select></PropertyGridRow> : null}
                 <PropertyGridRow label="Current layer"><span className="property-readout">{activeLayer?.name ?? "Default"}</span></PropertyGridRow>
-                {wallMode ? <PropertyGridRow label="Elevation"><span className="property-readout">{formatSignedArchitectural(cadDraftingSettings.activeElevation)} · Story controlled</span></PropertyGridRow> : <label className="property-table-row property-input-row"><span className="property-table-label">Elevation</span><div className={activeElevationError ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={activeElevationDraft} onChange={(event) => { setActiveElevationDraft(event.target.value); setActiveElevationError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyActiveElevation(); }} onBlur={applyActiveElevation} aria-label="Active drawing elevation" spellCheck={false} /><span>ft-in</span></div></label>}
+                {wallMode || foundationWallMode ? <PropertyGridRow label="Elevation"><span className="property-readout">{formatSignedArchitectural(cadDraftingSettings.activeElevation)} · Story controlled</span></PropertyGridRow> : <label className="property-table-row property-input-row"><span className="property-table-label">Elevation</span><div className={activeElevationError ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={activeElevationDraft} onChange={(event) => { setActiveElevationDraft(event.target.value); setActiveElevationError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyActiveElevation(); }} onBlur={applyActiveElevation} aria-label="Active drawing elevation" spellCheck={false} /><span>ft-in</span></div></label>}
                 {!wallMode && activeElevationError ? <p className="property-grid-note property-row-error" role="alert">{activeElevationError}</p> : null}
                 <PropertyGridRow label="Start X"><span className="property-readout">{activeDrawingAnchor ? formatSignedArchitectural(activeDrawingAnchor.x) : "Click or type X,Y"}</span></PropertyGridRow>
                 <PropertyGridRow label="Start Y"><span className="property-readout">{activeDrawingAnchor ? formatSignedArchitectural(activeDrawingAnchor.y) : `Default Z = ${formatSignedArchitectural(cadDraftingSettings.activeElevation)}`}</span></PropertyGridRow>
-                <PropertyGridRow label="Start Z"><span className="property-readout">{activeDrawingAnchor ? formatSignedArchitectural(activeDrawingAnchor.z) : wallMode ? "Active Story rough floor" : "Type X,Y,Z to override"}</span></PropertyGridRow>
+                <PropertyGridRow label="Start Z"><span className="property-readout">{activeDrawingAnchor ? formatSignedArchitectural(activeDrawingAnchor.z) : wallMode || foundationWallMode ? "Active Story rough floor" : "Type X,Y,Z to override"}</span></PropertyGridRow>
                 <p className="property-grid-note">{activeDrawingNote}</p>
               </PropertyGridSection>
               <PropertyGridSection title="Grid & Snap" meta="Independent controls">
@@ -13468,7 +13674,7 @@ export function ModelBuilderApp() {
                   return (
                     <button key={line.id} type="button" className={`${selected ? "is-selected" : ""}${line.locked ? " is-object-locked" : ""}${selectable ? "" : " is-unavailable"}`} onClick={(event) => { if (selectable) selectLine(line.id, event.shiftKey); }} aria-pressed={selected} aria-disabled={!selectable} title={!layer?.visible ? "Line layer is hidden" : layer?.locked ? "Line layer is locked — selection is available, editing is not" : line.locked ? "Line is locked — select it to unlock" : undefined}>
                       <span className="object-state-markers"><span className="object-layer-swatch" style={{ backgroundColor: layer?.color }} />{line.locked ? <i title="Locked">◆</i> : null}</span>
-                      <span><strong>{line.name}</strong><small>{layer?.name ?? "Default"} · {line.architecturalRole === "wall" ? "Wall" : "Line"} · {formatArchitectural(lineLength(line))} · {lineAngle(line)}°</small></span>
+                      <span><strong>{line.name}</strong><small>{layer?.name ?? "Default"} · {line.architecturalRole === "wall" ? "Wall" : line.architecturalRole === "foundation-wall" ? "Foundation Wall" : "Line"} · {formatArchitectural(lineLength(line))} · {lineAngle(line)}°</small></span>
                     </button>
                   );
                 })}
@@ -13581,7 +13787,7 @@ export function ModelBuilderApp() {
             }
           }}
           aria-label="Command input"
-              placeholder={boundaryMode ? "Click inside a closed area · Escape cancels" : arcMode ? arcCommandPlaceholder(arcMethod, arcPoints.length) : circleMode ? circleMethod === "tangent-tangent-radius" ? circlePoints.length < 2 ? `Select ${circlePointStage(circleMethod, circlePoints.length)}` : "Enter radius or click to set radius" : circleMethod === "tangent-tangent-tangent" ? `Select ${circlePointStage(circleMethod, circlePoints.length)}` : `${circlePointStage(circleMethod, circlePoints.length)}${circlePoints.length ? ", distance, or @X,Y" : " X,Y or X,Y,Z"}` : lineMode ? lineAnchor ? "Distance, next point, U, or C" : "First point X,Y or X,Y,Z" : offsetMode ? `Offset distance ${formatArchitectural(offsetDistance)} · type a new distance or click a side` : lengthenMode ? lengthenMethod === "dynamic" ? "Pick endpoint, then click its new position · D/T/P changes method" : `Lengthen ${lengthenMethod} ${lengthenMethod === "percent" ? `${lengthenValue}%` : formatSignedArchitectural(lengthenValue)} · enter value or pick endpoint` : breakMode ? breakStage === 0 ? "Select a curve · Escape cancels" : breakStage === 1 ? "Select the break point · Escape cancels" : "Select the second break point · Escape cancels" : chamferMode ? chamferDistancePrompt === 1 ? "Enter first Chamfer distance" : chamferDistancePrompt === 2 ? "Enter second Chamfer distance" : `Chamfer ${formatArchitectural(chamferFirstDistance)} × ${formatArchitectural(chamferSecondDistance)} · D changes distances · select ${chamferStage === 0 ? "first" : "second"} Line` : filletMode ? `Fillet radius ${formatArchitectural(filletRadius)} · R 6" changes it · select ${filletStage === 0 ? "first" : "second"} Line` : trimMode ? "Click the portion to trim · Escape cancels" : extendMode ? "Click near the endpoint to extend · Escape cancels" : stretchMode ? stretchTargets.length ? "Pick base point, then target · Escape cancels" : "Draw crossing window · Escape cancels" : polylineMode ? polylineAnchor ? polylineSegmentMode === "arc" ? "Arc through/end point · L line · W width · U/C" : "Distance/vertex · A arc · W width · U/C" : "First vertex X,Y or X,Y,Z" : rectangleMode ? rectangleAnchor ? rectangleMethod === "corners" ? `Opposite corner, @X,Y, or 12' x 8'` : "Click or enter a point to choose the quadrant" : "First corner X,Y or X,Y,Z" : lastCommandName ? `Enter repeats ${lastCommandName === "arc" ? "Arc" : lastCommandName === "circle" ? "Circle" : lastCommandName === "line" ? "Line" : lastCommandName === "wall" ? "Wall" : lastCommandName === "polyline" ? "Polyline" : "Rectangle"} · W, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, BR, BP, J, X, LEN, CHA, F, S, RO, or SC starts a command` : "Type W, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, BR, BP, J, X, LEN, CHA, F, S, RO, or SC to start a command"}
+              placeholder={boundaryMode ? "Click inside a closed area · Escape cancels" : arcMode ? arcCommandPlaceholder(arcMethod, arcPoints.length) : circleMode ? circleMethod === "tangent-tangent-radius" ? circlePoints.length < 2 ? `Select ${circlePointStage(circleMethod, circlePoints.length)}` : "Enter radius or click to set radius" : circleMethod === "tangent-tangent-tangent" ? `Select ${circlePointStage(circleMethod, circlePoints.length)}` : `${circlePointStage(circleMethod, circlePoints.length)}${circlePoints.length ? ", distance, or @X,Y" : " X,Y or X,Y,Z"}` : lineMode ? lineAnchor ? "Distance, next point, U, or C" : "First point X,Y or X,Y,Z" : offsetMode ? `Offset distance ${formatArchitectural(offsetDistance)} · type a new distance or click a side` : lengthenMode ? lengthenMethod === "dynamic" ? "Pick endpoint, then click its new position · D/T/P changes method" : `Lengthen ${lengthenMethod} ${lengthenMethod === "percent" ? `${lengthenValue}%` : formatSignedArchitectural(lengthenValue)} · enter value or pick endpoint` : breakMode ? breakStage === 0 ? "Select a curve · Escape cancels" : breakStage === 1 ? "Select the break point · Escape cancels" : "Select the second break point · Escape cancels" : chamferMode ? chamferDistancePrompt === 1 ? "Enter first Chamfer distance" : chamferDistancePrompt === 2 ? "Enter second Chamfer distance" : `Chamfer ${formatArchitectural(chamferFirstDistance)} × ${formatArchitectural(chamferSecondDistance)} · D changes distances · select ${chamferStage === 0 ? "first" : "second"} Line` : filletMode ? `Fillet radius ${formatArchitectural(filletRadius)} · R 6" changes it · select ${filletStage === 0 ? "first" : "second"} Line` : trimMode ? "Click the portion to trim · Escape cancels" : extendMode ? "Click near the endpoint to extend · Escape cancels" : stretchMode ? stretchTargets.length ? "Pick base point, then target · Escape cancels" : "Draw crossing window · Escape cancels" : polylineMode ? polylineAnchor ? polylineSegmentMode === "arc" ? "Arc through/end point · L line · W width · U/C" : "Distance/vertex · A arc · W width · U/C" : "First vertex X,Y or X,Y,Z" : rectangleMode ? rectangleAnchor ? rectangleMethod === "corners" ? `Opposite corner, @X,Y, or 12' x 8'` : "Click or enter a point to choose the quadrant" : "First corner X,Y or X,Y,Z" : lastCommandName ? `Enter repeats ${lastCommandName === "arc" ? "Arc" : lastCommandName === "circle" ? "Circle" : lastCommandName === "line" ? "Line" : lastCommandName === "wall" ? "Wall" : lastCommandName === "foundation-wall" ? "Foundation Wall" : lastCommandName === "polyline" ? "Polyline" : "Rectangle"} · W, FW, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, BR, BP, J, X, LEN, CHA, F, S, RO, or SC starts a command` : "Type W, FW, L, PL, REC, C, A, BOUNDARY, M, CO, MI, O, TR, EX, BR, BP, J, X, LEN, CHA, F, S, RO, or SC to start a command"}
           spellCheck={false}
         />
       </div>

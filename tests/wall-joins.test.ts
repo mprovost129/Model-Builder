@@ -23,6 +23,7 @@ function wall(
   return {
     architecturalRole: "wall",
     end: { ...end, z: end.z ?? 0 },
+    foundationWallTypeId: null,
     id,
     layerId: "layer-01",
     locked: false,

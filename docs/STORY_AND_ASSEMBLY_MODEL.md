@@ -109,7 +109,7 @@ nodes remain unwrapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-26 project files store the Building Datum, ordered Stories, active and
+- Version-27 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -126,10 +126,10 @@ nodes remain unwrapped so their junction logic stays authoritative.
 ## Foundation Wall Types
 
 Foundation Wall Types are separate from ordinary layered Wall Types. Each reusable
-type defines its concrete Main width and material, continuous footing geometry,
+type defines its concrete Main height, width, and material, continuous footing geometry,
 signed top offset, and a hosted sill stack. The sill's exterior setback is measured
-inward from the concrete Main exterior face and establishes the future authoritative
-floor-perimeter bearing edge.
+inward from the concrete Main exterior face and establishes the authoritative
+floor-perimeter bearing edge when an aligned Foundation Wall supports a Room perimeter.
 
 Standard Bearing and Interior Mudsill conditions begin with two foundation-hosted
 sill plates. Dropped Foundation, Garage Foundation, and Complete Slab Walk-out
@@ -137,6 +137,11 @@ conditions begin with one foundation-hosted sill plate and one bottom plate owne
 the framed Wall above. Keeping plate ownership explicit prevents duplicate modeled
 members and future schedule quantities. These are editable project defaults rather
 than hard-coded geometry.
+- `FW` or Model > Foundation Wall draws a straight Foundation Wall from the active
+  Foundation Wall Type. Its plan reference and exterior side remain editable; its
+  concrete stem, footing, and foundation-hosted sill plates render from the saved type.
+- A Room perimeter prefers the aligned Foundation Wall sill exterior edge and falls
+  back to the framed Wall Main-layer exterior when no Foundation Wall is present.
 - Each Wall stores a junction priority plus independent Start and End cleanup
   modes. Automatic is the default. Square / disconnected explicitly removes an
   endpoint from automatic cleanup without moving its reference path. A uniquely
