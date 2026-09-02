@@ -285,7 +285,11 @@ import {
   buildingStructureIsValid,
   calculateStoryElevations,
   cloneBuildingStructure,
+  cloneFoundationWallType,
   cloneLayeredAssembly,
+  foundationConditionPlateDefaults,
+  foundationSillStackHeight,
+  FOUNDATION_WALL_CONDITIONS,
   removeBuildingStory,
   wallLayerGroupThickness,
   WALL_LAYER_GROUPS,
@@ -293,6 +297,8 @@ import {
   type AssemblyLayer,
   type AssemblyLayerRole,
   type BuildingStructure,
+  type FoundationWallCondition,
+  type FoundationWallType,
   type LayeredAssembly,
   type WallExteriorSide,
   type WallJoinMode,
@@ -8594,6 +8600,146 @@ function WallTypeManagerDialog({
   );
 }
 
+const FOUNDATION_CONDITION_LABELS: Record<FoundationWallCondition, string> = {
+  "dropped-wall": "Dropped Foundation Wall",
+  "garage-wall": "Garage Foundation Wall",
+  "interior-mudsill": "Interior Mudsill",
+  "slab-walkout": "Complete Slab Walk-out",
+  "standard-bearing": "Standard Bearing Wall",
+};
+
+function nextFoundationWallTypeId(building: BuildingStructure): string {
+  let number = 1;
+  const ids = new Set(building.foundationWallTypes.map((type) => type.id));
+  while (ids.has(`foundation-wall-type-${String(number).padStart(2, "0")}`)) number += 1;
+  return `foundation-wall-type-${String(number).padStart(2, "0")}`;
+}
+
+function FoundationWallManagerDialog({
+  building,
+  onCancel,
+  onSave,
+}: {
+  building: BuildingStructure;
+  onCancel: () => void;
+  onSave: (building: BuildingStructure) => void;
+}) {
+  const [draft, setDraft] = useState(() => cloneBuildingStructure(building));
+  const [selectedId, setSelectedId] = useState(building.activeFoundationWallTypeId);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+  const selected = draft.foundationWallTypes.find((type) => type.id === selectedId) ?? draft.foundationWallTypes[0];
+  const replaceSelected = (change: Partial<FoundationWallType>) => {
+    setDraft((current) => ({
+      ...cloneBuildingStructure(current),
+      foundationWallTypes: current.foundationWallTypes.map((type) => type.id === selected.id ? { ...cloneFoundationWallType(type), ...change } : cloneFoundationWallType(type)),
+    }));
+    setError("");
+  };
+  const replaceFooting = (change: Partial<FoundationWallType["footing"]>) => replaceSelected({ footing: { ...selected.footing, ...change } });
+  const replaceSill = (change: Partial<FoundationWallType["sill"]>) => replaceSelected({ sill: { ...selected.sill, ...change } });
+  const changeCondition = (condition: FoundationWallCondition) => replaceSelected({
+    condition,
+    sill: { ...selected.sill, ...foundationConditionPlateDefaults(condition) },
+  });
+  const duplicateType = () => {
+    if (draft.foundationWallTypes.length >= 32) return;
+    const id = nextFoundationWallTypeId(draft);
+    const copy = { ...cloneFoundationWallType(selected), id, name: `${selected.name} Copy` };
+    setDraft((current) => ({ ...cloneBuildingStructure(current), activeFoundationWallTypeId: id, foundationWallTypes: [...current.foundationWallTypes.map(cloneFoundationWallType), copy] }));
+    setSelectedId(id);
+  };
+  const deleteType = () => {
+    if (draft.foundationWallTypes.length <= 1) return;
+    const remaining = draft.foundationWallTypes.filter((type) => type.id !== selected.id).map(cloneFoundationWallType);
+    const nextActive = draft.activeFoundationWallTypeId === selected.id ? remaining[0].id : draft.activeFoundationWallTypeId;
+    setDraft((current) => ({ ...cloneBuildingStructure(current), activeFoundationWallTypeId: nextActive, foundationWallTypes: remaining }));
+    setSelectedId(nextActive);
+  };
+  const save = () => {
+    const next = cloneBuildingStructure(draft);
+    if (!buildingStructureIsValid(next)) {
+      setError("Check the type names and dimensions. Footings cannot be narrower than their concrete Wall, and plate counts must remain within the supported range.");
+      return;
+    }
+    onSave(next);
+  };
+  const plateStackHeight = foundationSillStackHeight(selected);
+  const ownershipLabel = selected.sill.upperWallBottomPlateCount
+    ? `${selected.sill.foundationPlateCount} foundation sill + ${selected.sill.upperWallBottomPlateCount} framed-Wall bottom plate`
+    : `${selected.sill.foundationPlateCount} foundation-hosted sill plates`;
+  return (
+    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="story-manager foundation-manager" role="dialog" aria-modal="true" aria-labelledby="foundation-manager-title">
+        <header className="story-manager-header"><div><strong id="foundation-manager-title">Foundation Wall Type Manager</strong><span>Define concrete support, footing geometry, and the sill edge that controls the floor perimeter.</span></div><button type="button" onClick={onCancel} aria-label="Close Foundation Wall Type Manager">×</button></header>
+        <div className="story-manager-body">
+          <aside className="story-list">
+            <header><strong>Foundation Wall Types</strong><span>{draft.foundationWallTypes.length} defined</span></header>
+            {draft.foundationWallTypes.map((type) => <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => setSelectedId(type.id)}><strong>{type.name}</strong><span>{formatArchitectural(type.wallWidth)} concrete · {type.sill.foundationPlateCount} sill plate{type.sill.foundationPlateCount === 1 ? "" : "s"}</span>{type.id === draft.activeFoundationWallTypeId ? <small>ACTIVE TYPE</small> : null}</button>)}
+            <div className="story-list-actions"><button type="button" onClick={duplicateType} disabled={draft.foundationWallTypes.length >= 32}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={draft.foundationWallTypes.length <= 1}>Delete</button></div>
+          </aside>
+          <main className="story-editor foundation-editor">
+            <section className="story-editor-summary foundation-editor-summary">
+              <label><span>Type name</span><input value={selected.name} maxLength={100} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
+              <label><span>Foundation condition</span><select value={selected.condition} onChange={(event) => changeCondition(event.target.value as FoundationWallCondition)}>{FOUNDATION_WALL_CONDITIONS.map((condition) => <option value={condition} key={condition}>{FOUNDATION_CONDITION_LABELS[condition]}</option>)}</select></label>
+              <button type="button" className={selected.id === draft.activeFoundationWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeFoundationWallTypeId: selected.id }))}>{selected.id === draft.activeFoundationWallTypeId ? "Active foundation type" : "Make active"}</button>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Concrete Wall</strong><span>Structural stem and project top condition</span></div></header>
+              <div className="foundation-field-grid">
+                <label className="story-field"><span>Material</span><input value={selected.material} maxLength={120} onChange={(event) => replaceSelected({ material: event.target.value })} /></label>
+                <StoryDimensionInput key={`${selected.id}:wall:${selected.wallWidth}`} label="Wall width" value={selected.wallWidth} onChange={(wallWidth) => replaceSelected({ wallWidth })} />
+                <StoryDimensionInput signed key={`${selected.id}:top:${selected.topOffset}`} label="Top offset" value={selected.topOffset} onChange={(topOffset) => replaceSelected({ topOffset })} />
+              </div>
+            </section>
+            <section className="foundation-setting-section">
+              <header><label><input type="checkbox" checked={selected.footing.enabled} onChange={(event) => replaceFooting({ enabled: event.target.checked })} /><strong>Continuous Footing</strong></label><span>Centered under the concrete Main layer unless offset</span></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`${selected.id}:fw:${selected.footing.width}`} label="Footing width" value={selected.footing.width} onChange={(width) => replaceFooting({ width })} />
+                <StoryDimensionInput key={`${selected.id}:fh:${selected.footing.height}`} label="Footing height" value={selected.footing.height} onChange={(height) => replaceFooting({ height })} />
+                <StoryDimensionInput signed key={`${selected.id}:fo:${selected.footing.centerOffset}`} label="Center offset" value={selected.footing.centerOffset} onChange={(centerOffset) => replaceFooting({ centerOffset })} />
+              </div>
+            </section>
+            <section className="foundation-setting-section foundation-sill-settings">
+              <header><div><strong>Sill Support</strong><span>The exterior sill edge becomes the authoritative floor-perimeter stop.</span></div><output>{ownershipLabel}</output></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`${selected.id}:sw:${selected.sill.plateWidth}`} label="Plate width" value={selected.sill.plateWidth} onChange={(plateWidth) => replaceSill({ plateWidth })} />
+                <StoryDimensionInput key={`${selected.id}:sh:${selected.sill.plateHeight}`} label="Plate height" value={selected.sill.plateHeight} onChange={(plateHeight) => replaceSill({ plateHeight })} />
+                <StoryDimensionInput signed key={`${selected.id}:ss:${selected.sill.exteriorSetback}`} label="Exterior setback" value={selected.sill.exteriorSetback} onChange={(exteriorSetback) => replaceSill({ exteriorSetback })} />
+                <label className="story-field"><span>Foundation sill plates</span><input type="number" min={1} max={4} step={1} value={selected.sill.foundationPlateCount} onChange={(event) => replaceSill({ foundationPlateCount: Number(event.target.value) })} /></label>
+                <label className="story-field"><span>Framed-Wall bottom plates</span><input type="number" min={0} max={2} step={1} value={selected.sill.upperWallBottomPlateCount} onChange={(event) => replaceSill({ upperWallBottomPlateCount: Number(event.target.value) })} /></label>
+                <label className="story-field"><span>Foundation plate stack</span><output className="room-output">{formatArchitectural(plateStackHeight)}</output></label>
+              </div>
+              <p>Changing the condition applies the reviewed residential plate ownership: Standard and Interior Mudsill use two foundation-hosted plates; Dropped, Garage, and Slab Walk-out use one foundation sill plus the framed Wall bottom plate.</p>
+            </section>
+          </main>
+          <aside className="foundation-section-preview" aria-label="Foundation Wall section preview">
+            <header><strong>Support Section</strong><span>Not to scale · exterior at left</span></header>
+            <div className="foundation-preview-canvas">
+              <div className="foundation-preview-floor"><span>Floor perimeter stops here</span></div>
+              <div className="foundation-preview-plates" style={{ width: `${Math.max(34, Math.min(78, selected.sill.plateWidth / Math.max(selected.wallWidth, 1) * 58))}%` }}>{Array.from({ length: selected.sill.foundationPlateCount }, (_, index) => <i key={index} />)}<b>FOUNDATION SILL</b></div>
+              <div className="foundation-preview-wall" style={{ width: `${Math.max(38, Math.min(78, selected.wallWidth / 12 * 62))}%` }}><span>{selected.material}</span><small>{formatArchitectural(selected.wallWidth)} Main</small></div>
+              {selected.footing.enabled ? <div className="foundation-preview-footing" style={{ width: `${Math.max(62, Math.min(96, selected.footing.width / 20 * 90))}%` }}><span>CONTINUOUS FOOTING</span></div> : null}
+            </div>
+            <dl><div><dt>Condition</dt><dd>{FOUNDATION_CONDITION_LABELS[selected.condition]}</dd></div><div><dt>Concrete top</dt><dd>{formatSignedArchitectural(selected.topOffset)}</dd></div><div><dt>Sill edge</dt><dd>{selected.sill.exteriorSetback === 0 ? "Flush to Main exterior" : `${formatSignedArchitectural(selected.sill.exteriorSetback)} setback`}</dd></div><div><dt>Plate ownership</dt><dd>{ownershipLabel}</dd></div></dl>
+          </aside>
+        </div>
+        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
+        <footer className="story-manager-footer"><span>{draft.foundationWallTypes.length} reusable Foundation Wall type{draft.foundationWallTypes.length === 1 ? "" : "s"} · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Foundation Types</button></div></footer>
+      </section>
+    </div>
+  );
+}
+
 type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" | "ceilingStructureOverride" | "ceilingFinishOverride";
 
 function RoomManagerDialog({
@@ -8769,7 +8915,7 @@ function RoomManagerDialog({
                       : "Room boundary fallback";
                   return <div className="room-platform-edge" key={`${edge.wallId ?? "fallback"}-${index}`}><span>{wall?.name ?? `Boundary edge ${index + 1}`}</span><strong>{ruleLabel}</strong><small>{Math.abs(edge.offsetFromReference) < 1 / 32 ? "On Wall reference" : `${formatArchitectural(Math.abs(edge.offsetFromReference))} from Wall reference`}</small></div>;
                 })}
-                <p>Mudsills, garage separation Walls, and other special conditions will use explicit per-edge overrides; the automatic rule remains unchanged.</p>
+                <p>A hosted Foundation Wall will supersede this fallback with its sill exterior edge. Manual edge offsets remain reserved for exceptional details.</p>
               </section>
               <section className="room-platform-openings" aria-label="Platform Openings">
                 <header><div><strong>Platform Openings</strong><span>Hosted cuts for stairs, shafts, and open-below areas</span></div><button type="button" onClick={addOpening}>+ Add Opening</button></header>
@@ -8823,6 +8969,7 @@ export function ModelBuilderApp() {
   const [dragStatus, setDragStatus] = useState<DragStatus | null>(null);
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
+  const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
@@ -11737,6 +11884,18 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${activeType?.name ?? "Wall type"} is active for new walls.`, tone: "success" });
   }, [editor.present]);
 
+  const applyFoundationWallTypes = useCallback((building: BuildingStructure) => {
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "Foundation Wall types contain an invalid name, dimension, footing, or sill configuration.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFoundationManagerOpen(false);
+    const activeType = building.foundationWallTypes.find((type) => type.id === building.activeFoundationWallTypeId);
+    setFileNotice({ text: `${activeType?.name ?? "Foundation Wall type"} is active for future Foundation Walls.`, tone: "success" });
+  }, [editor.present]);
+
   const applyRoomSettings = useCallback((next: ModelDocument) => {
     dispatch({ type: "commit", next });
     setRoomManagerOpen(false);
@@ -12655,7 +12814,7 @@ export function ModelBuilderApp() {
             <div className="ribbon-group manage-setting-group">
               <div className="ribbon-tools compact-tools manage-tools">
                 <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor and ceiling assemblies, and vertical building defaults"><b>≋</b><span>Floors &amp;<br />Ceilings</span></button>
-                <button type="button" className="is-planned" disabled title="Foundation settings will be added with foundation modeling"><b>▰</b><span>Foundation</span><small>Planned</small></button>
+                <button type="button" onClick={() => setFoundationManagerOpen(true)} title="Define concrete Foundation Wall, footing, and sill support types"><b>▰</b><span>Foundation</span></button>
                 <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
                 <button type="button" className="is-planned" disabled title="Roof standards will be added with roof modeling"><b>⌂</b><span>Roof</span><small>Planned</small></button>
                 <button type="button" className="is-planned" disabled title="Framing defaults will be added with framing generation"><b>╫</b><span>Framing</span><small>Planned</small></button>
@@ -13295,6 +13454,7 @@ export function ModelBuilderApp() {
         <div className="status-items"><span>{editor.present.objects.length} BOX{editor.present.objects.length === 1 ? "" : "ES"} · {editor.present.lines.length} LINE{editor.present.lines.length === 1 ? "" : "S"} · {editor.present.polylines.length} POLYLINE{editor.present.polylines.length === 1 ? "" : "S"} · {editor.present.circles.length} CIRCLE{editor.present.circles.length === 1 ? "" : "S"} · {editor.present.arcs.length} ARC{editor.present.arcs.length === 1 ? "" : "S"}</span><span>Story: {activeStory.name}</span><span>Layer: {activeLayer?.name ?? "Default"}</span><span>FT-IN</span><button type="button" className={cadDraftingSettings.gridVisible ? "status-toggle grid-toggle is-on" : "status-toggle grid-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))} title="Grid Display (F7)" aria-label="Toggle model space grid" aria-pressed={cadDraftingSettings.gridVisible}>GRID <small>{formatDraftingSpacing(cadDraftingSettings.gridSpacing)}</small></button><span>Snap {formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</span><button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)">OSNAP</button><button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)">ORTHO</button><button type="button" className={cadDraftingSettings.polarEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, polarEnabled: !current.polarEnabled }))} title="Polar Tracking (F10)">POLAR</button><span>ELEV {formatSignedArchitectural(cadDraftingSettings.activeElevation)}</span><span>{viewTarget.label}</span><span title="Work is automatically recoverable on this device">RECOVERY ON</span></div>
       </footer>
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
+      {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
     </main>

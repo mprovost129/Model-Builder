@@ -50,6 +50,7 @@ import {
   cloneBuildingStructure,
   createDefaultCeilingStructure,
   createDefaultBuildingStructure,
+  FOUNDATION_WALL_CONDITIONS,
   MAXIMUM_WALL_JOIN_PRIORITY,
   MINIMUM_WALL_JOIN_PRIORITY,
   WALL_EXTERIOR_SIDES,
@@ -61,6 +62,8 @@ import {
   type AssemblyLayerRole,
   type BuildingStory,
   type BuildingStructure,
+  type FoundationWallCondition,
+  type FoundationWallType,
   type LayeredAssembly,
   type WallExteriorSide,
   type WallJoinMode,
@@ -69,7 +72,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 25;
+export const PROJECT_FILE_VERSION = 26;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -203,6 +206,37 @@ function readLayeredAssembly(value: unknown, kind: AssemblyKind, supportsWallGro
   return assembly;
 }
 
+function readFoundationWallType(value: unknown): FoundationWallType | null {
+  if (!isRecord(value) || !isRecord(value.footing) || !isRecord(value.sill) ||
+    typeof value.id !== "string" || typeof value.name !== "string" || typeof value.material !== "string" ||
+    typeof value.condition !== "string" || !FOUNDATION_WALL_CONDITIONS.includes(value.condition as FoundationWallCondition) ||
+    typeof value.footing.enabled !== "boolean" || !isFiniteNumber(value.footing.width) || !isFiniteNumber(value.footing.height) || !isFiniteNumber(value.footing.centerOffset) ||
+    !isFiniteNumber(value.sill.plateWidth) || !isFiniteNumber(value.sill.plateHeight) || !isFiniteNumber(value.sill.exteriorSetback) ||
+    !Number.isInteger(value.sill.foundationPlateCount) || !Number.isInteger(value.sill.upperWallBottomPlateCount) ||
+    !isFiniteNumber(value.topOffset) || !isFiniteNumber(value.wallWidth)) return null;
+  return {
+    condition: value.condition as FoundationWallCondition,
+    footing: {
+      centerOffset: value.footing.centerOffset,
+      enabled: value.footing.enabled,
+      height: value.footing.height,
+      width: value.footing.width,
+    },
+    id: value.id,
+    material: value.material.trim(),
+    name: value.name.trim(),
+    sill: {
+      exteriorSetback: value.sill.exteriorSetback,
+      foundationPlateCount: value.sill.foundationPlateCount,
+      plateHeight: value.sill.plateHeight,
+      plateWidth: value.sill.plateWidth,
+      upperWallBottomPlateCount: value.sill.upperWallBottomPlateCount,
+    },
+    topOffset: value.topOffset,
+    wallWidth: value.wallWidth,
+  };
+}
+
 function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): BuildingStory | null {
   if (
     !isRecord(value) ||
@@ -228,7 +262,7 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -243,13 +277,22 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     ? value.wallTypes.map((wallType) => readLayeredAssembly(wallType, "wall-structure", supportsWallGroups, supportsWallJoinMetadata, wallEndCapVersion))
     : defaults.wallTypes;
   if (wallTypes.some((wallType) => wallType === null)) return null;
+  if (supportsFoundationWallTypes && !Array.isArray(value.foundationWallTypes)) return null;
+  const foundationWallTypes = supportsFoundationWallTypes
+    ? (value.foundationWallTypes as unknown[]).map(readFoundationWallType)
+    : defaults.foundationWallTypes;
+  if (foundationWallTypes.some((foundationType) => foundationType === null)) return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : defaults.activeWallTypeId;
   if (typeof activeWallTypeId !== "string") return null;
+  const activeFoundationWallTypeId = supportsFoundationWallTypes ? value.activeFoundationWallTypeId : defaults.activeFoundationWallTypeId;
+  if (typeof activeFoundationWallTypeId !== "string") return null;
   const building: BuildingStructure = {
+    activeFoundationWallTypeId,
     activeWallTypeId,
     activeStoryId: value.activeStoryId,
     anchorStoryId: value.anchorStoryId,
     datumElevation: value.datumElevation,
+    foundationWallTypes: foundationWallTypes as FoundationWallType[],
     stories: stories as BuildingStory[],
     wallTypes: wallTypes as LayeredAssembly[],
   };
@@ -669,7 +712,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

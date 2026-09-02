@@ -18,6 +18,8 @@ export const WALL_EXTERIOR_SIDES = ["left", "right"] as const;
 export type WallExteriorSide = (typeof WALL_EXTERIOR_SIDES)[number];
 export const WALL_JOIN_MODES = ["auto", "square"] as const;
 export type WallJoinMode = (typeof WALL_JOIN_MODES)[number];
+export const FOUNDATION_WALL_CONDITIONS = ["standard-bearing", "interior-mudsill", "dropped-wall", "garage-wall", "slab-walkout"] as const;
+export type FoundationWallCondition = (typeof FOUNDATION_WALL_CONDITIONS)[number];
 export const MINIMUM_WALL_JOIN_PRIORITY = -100;
 export const MAXIMUM_WALL_JOIN_PRIORITY = 100;
 
@@ -52,11 +54,39 @@ export type BuildingStory = {
   roughCeilingHeight: number;
 };
 
+export type FoundationWallType = {
+  condition: FoundationWallCondition;
+  footing: {
+    centerOffset: number;
+    enabled: boolean;
+    height: number;
+    width: number;
+  };
+  id: string;
+  material: string;
+  name: string;
+  sill: {
+    /** Number of plates hosted by the concrete foundation Wall. */
+    foundationPlateCount: number;
+    /** Positive values move the sill's exterior edge toward the interior. */
+    exteriorSetback: number;
+    plateHeight: number;
+    plateWidth: number;
+    /** Bottom plates owned by the framed Wall above, not by the foundation. */
+    upperWallBottomPlateCount: number;
+  };
+  /** Signed difference from the Story's normal foundation top plane. */
+  topOffset: number;
+  wallWidth: number;
+};
+
 export type BuildingStructure = {
+  activeFoundationWallTypeId: string;
   activeWallTypeId: string;
   activeStoryId: string;
   anchorStoryId: string;
   datumElevation: number;
+  foundationWallTypes: FoundationWallType[];
   stories: BuildingStory[];
   wallTypes: LayeredAssembly[];
 };
@@ -78,6 +108,7 @@ export type CalculatedStoryElevations = {
 
 export const MAXIMUM_STORY_COUNT = 12;
 export const MAXIMUM_WALL_TYPE_COUNT = 32;
+export const MAXIMUM_FOUNDATION_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_THICKNESS = 240;
 export const MINIMUM_ROUGH_CEILING_HEIGHT = 12;
@@ -176,6 +207,32 @@ export function createDefaultWallType(): LayeredAssembly {
   };
 }
 
+export function foundationConditionPlateDefaults(condition: FoundationWallCondition) {
+  const foundationPlateCount = condition === "standard-bearing" || condition === "interior-mudsill" ? 2 : 1;
+  return {
+    foundationPlateCount,
+    upperWallBottomPlateCount: foundationPlateCount === 2 ? 0 : 1,
+  };
+}
+
+export function createDefaultFoundationWallType(): FoundationWallType {
+  return {
+    condition: "standard-bearing",
+    footing: { centerOffset: 0, enabled: true, height: 8, width: 16 },
+    id: "foundation-wall-type-01",
+    material: "Concrete",
+    name: "8 in. Concrete · Standard Bearing",
+    sill: {
+      ...foundationConditionPlateDefaults("standard-bearing"),
+      exteriorSetback: 0,
+      plateHeight: 1.5,
+      plateWidth: 5.5,
+    },
+    topOffset: 0,
+    wallWidth: 8,
+  };
+}
+
 export function createBuildingStory(id: string, name: string): BuildingStory {
   return {
     ceilingFinish: defaultCeilingFinish(id),
@@ -190,13 +247,19 @@ export function createBuildingStory(id: string, name: string): BuildingStory {
 
 export function createDefaultBuildingStructure(): BuildingStructure {
   return {
+    activeFoundationWallTypeId: "foundation-wall-type-01",
     activeWallTypeId: "wall-type-01",
     activeStoryId: "story-01",
     anchorStoryId: "story-01",
     datumElevation: 0,
+    foundationWallTypes: [createDefaultFoundationWallType()],
     stories: [createBuildingStory("story-01", "First Floor")],
     wallTypes: [createDefaultWallType()],
   };
+}
+
+export function cloneFoundationWallType(type: FoundationWallType): FoundationWallType {
+  return { ...type, footing: { ...type.footing }, sill: { ...type.sill } };
 }
 
 export function cloneAssemblyLayer(layer: AssemblyLayer): AssemblyLayer {
@@ -220,7 +283,25 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, stories: building.stories.map(cloneBuildingStory), wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), stories: building.stories.map(cloneBuildingStory), wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+}
+
+export function foundationSillStackHeight(type: FoundationWallType): number {
+  return snapToSixteenth(type.sill.foundationPlateCount * type.sill.plateHeight);
+}
+
+export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
+  const dimensions = [type.wallWidth, type.footing.width, type.footing.height, type.sill.plateWidth, type.sill.plateHeight];
+  const signedDimensions = [type.topOffset, type.footing.centerOffset, type.sill.exteriorSetback];
+  return IDENTIFIER_PATTERN.test(type.id) && stringsAreValid([
+    { value: type.name, limit: ASSEMBLY_NAME_LIMIT },
+    { value: type.material, limit: MATERIAL_NAME_LIMIT },
+  ]) && FOUNDATION_WALL_CONDITIONS.includes(type.condition) &&
+    dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    signedDimensions.every((value) => Number.isFinite(value) && Math.abs(value) <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    (!type.footing.enabled || type.footing.width >= type.wallWidth) &&
+    Number.isInteger(type.sill.foundationPlateCount) && type.sill.foundationPlateCount >= 1 && type.sill.foundationPlateCount <= 4 &&
+    Number.isInteger(type.sill.upperWallBottomPlateCount) && type.sill.upperWallBottomPlateCount >= 0 && type.sill.upperWallBottomPlateCount <= 2;
 }
 
 export function assemblyTotalThickness(assembly: LayeredAssembly): number {
@@ -319,7 +400,9 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.stories.length < 1 ||
     building.stories.length > MAXIMUM_STORY_COUNT ||
     building.wallTypes.length < 1 ||
-    building.wallTypes.length > MAXIMUM_WALL_TYPE_COUNT
+    building.wallTypes.length > MAXIMUM_WALL_TYPE_COUNT ||
+    building.foundationWallTypes.length < 1 ||
+    building.foundationWallTypes.length > MAXIMUM_FOUNDATION_WALL_TYPE_COUNT
   ) {
     return false;
   }
@@ -335,6 +418,14 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     ) return false;
     wallTypeIds.add(wallType.id);
     wallTypeNames.add(normalizedName);
+  }
+  const foundationTypeIds = new Set<string>();
+  const foundationTypeNames = new Set<string>();
+  for (const foundationType of building.foundationWallTypes) {
+    const normalizedName = foundationType.name.trim().toLowerCase();
+    if (foundationTypeIds.has(foundationType.id) || foundationTypeNames.has(normalizedName) || !foundationWallTypeIsValid(foundationType)) return false;
+    foundationTypeIds.add(foundationType.id);
+    foundationTypeNames.add(normalizedName);
   }
   const storyIds = new Set<string>();
   const storyNames = new Set<string>();
@@ -360,7 +451,7 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     storyIds.add(story.id);
     storyNames.add(normalizedName);
   }
-  return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) && wallTypeIds.has(building.activeWallTypeId);
+  return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) && wallTypeIds.has(building.activeWallTypeId) && foundationTypeIds.has(building.activeFoundationWallTypeId);
 }
 
 export function buildingStructuresEqual(first: BuildingStructure, second: BuildingStructure): boolean {

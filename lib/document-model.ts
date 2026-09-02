@@ -699,8 +699,8 @@ function intersectFloorEdgeLines(first: FloorEdgeLine, second: FloorEdgeLine, fa
  * Resolves the default floor outline edge-by-edge instead of copying the Room
  * center/reference-line loop. Perimeter edges stop at the exterior face of the
  * Wall type's Main structural group; shared Walls keep one common Room boundary.
- * The returned conditions intentionally leave room for explicit per-edge rules
- * such as mudsills and garage separation conditions without special-case geometry.
+ * A future hosted Foundation Wall will supersede this fallback with its sill's
+ * exterior support edge. Explicit per-edge offsets remain available for exceptional details.
  */
 export function roomFloorPlatformBoundary(
   document: ModelDocument,

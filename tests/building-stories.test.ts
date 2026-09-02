@@ -7,6 +7,8 @@ import {
   calculateStoryElevations,
   cloneBuildingStructure,
   createDefaultBuildingStructure,
+  foundationConditionPlateDefaults,
+  foundationSillStackHeight,
   removeBuildingStory,
   wallLayerCenterOffsets,
   wallReferenceDistanceFromExterior,
@@ -67,6 +69,44 @@ test("defines reusable exterior-to-interior layered wall types", () => {
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.wallGroup), ["exterior", "exterior", "main", "interior"]);
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.participatesInJoin), [true, true, true, true]);
   assert.deepEqual(building.wallTypes[0].wallEndCapLayerIds, []);
+});
+
+test("defines reusable Foundation Wall types with condition-based sill ownership", () => {
+  const building = createDefaultBuildingStructure();
+  const foundationType = building.foundationWallTypes[0];
+
+  assert.equal(building.activeFoundationWallTypeId, foundationType.id);
+  assert.equal(foundationType.condition, "standard-bearing");
+  assert.equal(foundationType.wallWidth, 8);
+  assert.equal(foundationType.footing.enabled, true);
+  assert.deepEqual(foundationConditionPlateDefaults("standard-bearing"), { foundationPlateCount: 2, upperWallBottomPlateCount: 0 });
+  assert.deepEqual(foundationConditionPlateDefaults("interior-mudsill"), { foundationPlateCount: 2, upperWallBottomPlateCount: 0 });
+  for (const condition of ["dropped-wall", "garage-wall", "slab-walkout"] as const) {
+    assert.deepEqual(foundationConditionPlateDefaults(condition), { foundationPlateCount: 1, upperWallBottomPlateCount: 1 });
+  }
+  assert.equal(foundationSillStackHeight(foundationType), 3);
+
+  const cloned = cloneBuildingStructure(building);
+  cloned.foundationWallTypes[0].footing.width = 20;
+  cloned.foundationWallTypes[0].sill.exteriorSetback = 1.5;
+  assert.equal(building.foundationWallTypes[0].footing.width, 16);
+  assert.equal(building.foundationWallTypes[0].sill.exteriorSetback, 0);
+  assert.equal(buildingStructureIsValid(cloned), true);
+});
+
+test("rejects invalid Foundation Wall support geometry and duplicate type names", () => {
+  const narrowFooting = createDefaultBuildingStructure();
+  narrowFooting.foundationWallTypes[0].footing.width = 6;
+  assert.equal(buildingStructureIsValid(narrowFooting), false);
+
+  const duplicateName = createDefaultBuildingStructure();
+  duplicateName.foundationWallTypes.push({
+    ...duplicateName.foundationWallTypes[0],
+    id: "foundation-wall-type-02",
+    footing: { ...duplicateName.foundationWallTypes[0].footing },
+    sill: { ...duplicateName.foundationWallTypes[0].sill },
+  });
+  assert.equal(buildingStructureIsValid(duplicateName), false);
 });
 
 test("allows unique positive finish layers to wrap open wall ends", () => {

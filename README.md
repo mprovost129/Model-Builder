@@ -95,6 +95,9 @@ polylines, rectangles, Circles, and Arcs.
   rough structure controls dependent Story elevations
 - Reusable wall types with explicitly ordered Exterior, Main, and Interior layer
   groups, per-group thickness totals, and a required structural Main core
+- Reusable Foundation Wall Types with concrete width/material, continuous footing
+  geometry, top offsets, hosted sill dimensions, exterior-edge setback, and explicit
+  plate ownership for standard, interior mudsill, dropped, garage, and walk-out conditions
 - Directed Walls with left/right exterior orientation and selectable Wall center,
   exterior-Main, center-Main, or interior-Main reference lines
 - Main-core-aware corner and T-junction cleanup across compatible mixed Wall
@@ -197,7 +200,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-24 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-25 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -287,9 +290,11 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   open-below conditions while retaining a visible plan outline. Floor platforms now
   resolve each perimeter edge to the exterior face of the Wall type's Main structural
   layer while shared Walls retain a common Room boundary; Room Manager reports every
-  resolved edge condition. The next engineering milestone is explicit per-edge
-  overrides for mudsills, garage separation Walls, and other special platform
-  conditions, followed by vertical opening continuity across adjacent Stories.
+  resolved edge condition. Foundation Wall Types now establish reusable concrete,
+  footing, top-offset, and hosted sill definitions with the reviewed plate ownership
+  for standard and special residential conditions. The next engineering milestone
+  is drawing/hosting Foundation Walls and connecting their sill edges to the floor
+  solver, followed by vertical opening continuity across adjacent Stories.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -299,7 +304,7 @@ residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
 Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
-the project name, unit settings, Story, Room, Platform Opening, and assembly definitions, and format metadata. Version-1 through version-24 files open and upgrade
+the project name, unit settings, Story, Room, Platform Opening, Foundation Wall Type, and assembly definitions, and format metadata. Version-1 through version-25 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.
