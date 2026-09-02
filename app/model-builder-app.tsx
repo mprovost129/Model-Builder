@@ -302,6 +302,11 @@ import {
   cloneWallHeaderType,
   cloneLayeredAssembly,
   cloneWallOpeningType,
+  configureDoorPanelLayout,
+  configureWindowLitePattern,
+  configureWindowSashArrangement,
+  doorPanelLayoutForType,
+  DOOR_PANEL_LAYOUTS,
   MAXIMUM_OPENING_COMPONENT_COUNT,
   OPENING_COMPONENT_DEPTH_ANCHORS,
   OPENING_COMPONENT_GEOMETRIES,
@@ -319,14 +324,21 @@ import {
   wallFramingSettingsAreValid,
   wallHeaderTypeRequiredMainThickness,
   WALL_LAYER_GROUPS,
+  windowLitePatternForType,
+  WINDOW_LITE_PATTERNS,
+  windowSashArrangementForType,
+  WINDOW_SASH_ARRANGEMENTS,
   type AssemblyKind,
   type AssemblyLayer,
   type AssemblyLayerRole,
   type BuildingStructure,
+  type DoorPanelLayout,
   type FoundationWallCondition,
   type FoundationWallType,
   type LayeredAssembly,
   type OpeningAssemblyComponent,
+  type WindowLitePattern,
+  type WindowSashArrangement,
   type WallExteriorSide,
   type WallJoinMode,
   type WallCornerFramingStyle,
@@ -8470,11 +8482,11 @@ function WallOpeningsControl({
           <WallOpeningComponentMaterialField key={`${opening.id}:${baseComponent.id}:${resolvedComponent.material}`} material={resolvedComponent.material} onUpdate={(material) => updateComponentOverride({ material })} />
           <PropertyGridRow label="Part display"><label className="property-checkbox"><input type="checkbox" checked={resolvedComponent.visible} onChange={(event) => updateComponentOverride({ visible: event.target.checked })} /><span>Visible</span></label></PropertyGridRow>
           <LineCoordinateField label="Part inset" value={resolvedComponent.inset} onCommit={(draft) => updateComponentDimension("inset", draft, true)} />
-          <LineCoordinateField label={resolvedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} unsigned value={resolvedComponent.profileWidth} onCommit={(draft) => updateComponentDimension("profileWidth", draft)} />
+          <LineCoordinateField label={resolvedComponent.geometry === "panel-grid" ? "Panel gap" : resolvedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} unsigned value={resolvedComponent.profileWidth} onCommit={(draft) => updateComponentDimension("profileWidth", draft)} />
           <LineCoordinateField label="Part depth" unsigned value={resolvedComponent.depth} onCommit={(draft) => updateComponentDimension("depth", draft)} />
           <PropertyGridRow label="Depth anchor"><select className="property-cell-select" value={resolvedComponent.depthAnchor} onChange={(event) => updateComponentOverride({ depthAnchor: event.target.value as OpeningAssemblyComponent["depthAnchor"] })} aria-label="Placed opening component depth anchor">{OPENING_COMPONENT_DEPTH_ANCHORS.map((anchor) => <option key={anchor} value={anchor}>{titleCase(anchor)} face</option>)}</select></PropertyGridRow>
           <LineCoordinateField label="Depth offset" unsigned value={resolvedComponent.depthOffset} onCommit={(draft) => updateComponentDimension("depthOffset", draft, false, true)} />
-          {resolvedComponent.geometry.includes("divider") ? <PropertyGridRow label="Divider count"><select className="property-cell-select" value={resolvedComponent.divisionCount} onChange={(event) => updateComponentOverride({ divisionCount: Number(event.target.value) })} aria-label="Placed opening component divider count">{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></PropertyGridRow> : null}
+          {resolvedComponent.geometry.includes("divider") || resolvedComponent.geometry === "panel-grid" ? <PropertyGridRow label={resolvedComponent.geometry === "panel-grid" ? "Panel count" : "Divider count"}><select className="property-cell-select" value={resolvedComponent.divisionCount} onChange={(event) => updateComponentOverride({ divisionCount: Number(event.target.value) })} aria-label="Placed opening component division count">{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></PropertyGridRow> : null}
           {componentOverride ? <div className="property-action-row single-action"><button type="button" onClick={resetComponentOverride}>Reset Part to Type</button></div> : null}
         </> : null}
         <LineCoordinateField label="Center from start" unsigned value={opening.centerOffset} onCommit={(draft) => updateDimension("centerOffset", draft)} />
@@ -9383,6 +9395,9 @@ function OpeningTypeManagerDialog({
   };
   const makeActive = () => setDraft((current) => ({ ...cloneBuildingStructure(current), [selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId"]: selected.id }));
   const activeId = selected.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId;
+  const doorPanelLayout = doorPanelLayoutForType(selected);
+  const windowSashArrangement = windowSashArrangementForType(selected);
+  const windowLitePattern = windowLitePatternForType(selected);
   const save = () => {
     const next = cloneBuildingStructure(draft);
     if (!buildingStructureIsValid(next)) {
@@ -9424,6 +9439,16 @@ function OpeningTypeManagerDialog({
                 {selected.kind === "window" ? <StoryDimensionInput key={`${selected.id}:hh:${selected.defaultHeaderBottomHeight}`} label="Default header bottom" value={selected.defaultHeaderBottomHeight} onChange={(defaultHeaderBottomHeight) => replaceSelected({ defaultHeaderBottomHeight })} /> : <label className="story-field"><span>Header bottom</span><output className="room-output">Matches rough height</output></label>}
               </div>
             </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Product Layout Generator</strong><span>Build familiar residential product geometry from editable components.</span></div><output>Parametric</output></header>
+              <div className="foundation-field-grid">
+                {selected.kind === "door" ? <label className="story-field"><span>Door panel layout</span><select value={doorPanelLayout ?? "custom"} onChange={(event) => { const configured = configureDoorPanelLayout(selected, event.target.value as DoorPanelLayout); if (configured) replaceSelected(configured); }}><option value="custom" disabled>Custom component layout</option>{DOOR_PANEL_LAYOUTS.map((layout) => <option key={layout} value={layout}>{layout === "flush" ? "Flush slab" : titleCase(layout)}</option>)}</select></label> : <>
+                  <label className="story-field"><span>Sash arrangement</span><select value={windowSashArrangement ?? "custom"} onChange={(event) => { const configured = configureWindowSashArrangement(selected, event.target.value as WindowSashArrangement); if (configured) replaceSelected(configured); }}><option value="custom" disabled>Custom component layout</option>{WINDOW_SASH_ARRANGEMENTS.map((arrangement) => <option key={arrangement} value={arrangement}>{titleCase(arrangement)}</option>)}</select></label>
+                  <label className="story-field"><span>Divided-lite pattern</span><select value={windowLitePattern ?? "custom"} onChange={(event) => { const configured = configureWindowLitePattern(selected, event.target.value as WindowLitePattern); if (configured) replaceSelected(configured); }}><option value="custom" disabled>Custom component layout</option>{WINDOW_LITE_PATTERNS.map((pattern) => <option key={pattern} value={pattern}>{pattern === "none" ? "None" : titleCase(pattern)}</option>)}</select></label>
+                </>}
+              </div>
+              <p className="opening-type-note">Generators create ordinary, editable assembly components: raised Door panel fields, fixed or operable Window sash sets, and equal, colonial, or prairie grille patterns. Product identity and manufacturer-specific profile libraries remain separate so generic geometry is never presented as a certified manufacturer model.</p>
+            </section>
             <section className="foundation-setting-section opening-component-section">
               <header><div><strong>3D Assembly Components</strong><span>Joined parametric parts generated inside the independent rough opening.</span></div><output>{selected.components.length} parts</output></header>
               <div className="opening-component-toolbar">
@@ -9440,11 +9465,11 @@ function OpeningTypeManagerDialog({
                 <label className="story-field"><span>Material</span><input value={selectedComponent.material} maxLength={120} onChange={(event) => replaceSelectedComponent({ material: event.target.value })} /></label>
                 <label className="story-field"><span>Display</span><span className="room-checkbox-field"><input type="checkbox" checked={selectedComponent.visible} onChange={(event) => replaceSelectedComponent({ visible: event.target.checked })} /> Visible in model</span></label>
                 <StoryDimensionInput signed key={`${selected.id}:${selectedComponent.id}:inset:${selectedComponent.inset}`} label="Inset from parent" value={selectedComponent.inset} onChange={(inset) => replaceSelectedComponent({ inset })} />
-                <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:profile:${selectedComponent.profileWidth}`} label={selectedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} value={selectedComponent.profileWidth} onChange={(profileWidth) => replaceSelectedComponent({ profileWidth })} />
+                <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:profile:${selectedComponent.profileWidth}`} label={selectedComponent.geometry === "panel-grid" ? "Panel gap" : selectedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} value={selectedComponent.profileWidth} onChange={(profileWidth) => replaceSelectedComponent({ profileWidth })} />
                 <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:depth:${selectedComponent.depth}`} label="Component depth" value={selectedComponent.depth} onChange={(depth) => replaceSelectedComponent({ depth })} />
                 <label className="story-field"><span>Depth anchor</span><select value={selectedComponent.depthAnchor} onChange={(event) => replaceSelectedComponent({ depthAnchor: event.target.value as OpeningAssemblyComponent["depthAnchor"] })}>{OPENING_COMPONENT_DEPTH_ANCHORS.map((anchor) => <option key={anchor} value={anchor}>{titleCase(anchor)} face</option>)}</select></label>
                 <StoryDimensionInput allowZero key={`${selected.id}:${selectedComponent.id}:do:${selectedComponent.depthOffset}`} label="Depth offset" value={selectedComponent.depthOffset} onChange={(depthOffset) => replaceSelectedComponent({ depthOffset })} />
-                {selectedComponent.geometry.includes("divider") ? <label className="story-field"><span>Divider count</span><select value={selectedComponent.divisionCount} onChange={(event) => replaceSelectedComponent({ divisionCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
+                {selectedComponent.geometry.includes("divider") || selectedComponent.geometry === "panel-grid" ? <label className="story-field"><span>{selectedComponent.geometry === "panel-grid" ? "Panel count" : "Divider count"}</span><select value={selectedComponent.divisionCount} onChange={(event) => replaceSelectedComponent({ divisionCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
               </div>
               <p className="opening-type-note">Each part keeps a stable identity for future schedules and placed-object overrides. A child uses its parent&apos;s clear opening, so changing the frame, sash, glass, panel, mullion, jamb, or trim dimensions rebuilds the joined 3D object without changing the structural rough opening.</p>
             </section>

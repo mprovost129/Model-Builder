@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  configureDoorPanelLayout,
+  configureWindowLitePattern,
+  configureWindowSashArrangement,
   createDefaultBuildingStructure,
   type LayeredAssembly,
 } from "../lib/building-stories.ts";
@@ -197,16 +200,16 @@ test("builds joined Door and Window component trees as host-aware 3D solids", ()
   const building = createDefaultBuildingStructure();
   const typeMap = new Map(building.openingTypes.map((type) => [type.id, type]));
   const solids = wallOpeningComponentSolids(source, building.wallTypes[0], typeMap);
-  assert.equal(solids.length, 31);
+  assert.equal(solids.length, 36);
   assert.equal(solids.filter((solid) => solid.openingId === "opening-01" && solid.componentId === "component-jamb").length, 4);
   assert.equal(solids.filter((solid) => solid.openingId === "opening-02" && solid.componentId === "component-frame").length, 4);
   const glass = solids.find((solid) => solid.openingId === "opening-02" && solid.role === "glazing")!;
-  assert.deepEqual([glass.baseHeight, glass.height, glass.material], [39.75, 40, "Insulated Glass"]);
+  assert.deepEqual([glass.baseHeight, glass.height, glass.material], [39.75, 18.25, "Insulated Glass"]);
 
   const windowType = building.openingTypes.find((type) => type.kind === "window")!;
   windowType.components.find((component) => component.id === "component-frame")!.profileWidth = 3;
   const resizedGlass = wallOpeningComponentSolids(source, building.wallTypes[0], typeMap).find((solid) => solid.openingId === "opening-02" && solid.role === "glazing")!;
-  assert.deepEqual([resizedGlass.baseHeight, resizedGlass.height], [40.75, 38]);
+  assert.deepEqual([resizedGlass.baseHeight, resizedGlass.height], [40.75, 17.25]);
 
   const overrideBuilding = createDefaultBuildingStructure();
   const overriddenSource = structuredClone(source);
@@ -217,6 +220,18 @@ test("builds joined Door and Window component trees as host-aware 3D solids", ()
   const overriddenSolids = wallOpeningComponentSolids(overriddenSource, overrideBuilding.wallTypes[0], new Map(overrideBuilding.openingTypes.map((type) => [type.id, type])));
   assert.equal(overriddenSolids.some((solid) => solid.openingId === "opening-02" && solid.role === "glazing"), false);
   assert.equal(overriddenSolids.filter((solid) => solid.openingId === "opening-02" && solid.componentId === "component-frame").every((solid) => solid.material === "Composite"), true);
+
+  const productBuilding = createDefaultBuildingStructure();
+  const doorTypeIndex = productBuilding.openingTypes.findIndex((type) => type.kind === "door");
+  const windowTypeIndex = productBuilding.openingTypes.findIndex((type) => type.kind === "window");
+  productBuilding.openingTypes[doorTypeIndex] = configureDoorPanelLayout(productBuilding.openingTypes[doorTypeIndex], "six-panel")!;
+  const casement = configureWindowSashArrangement(productBuilding.openingTypes[windowTypeIndex], "casement-pair")!;
+  productBuilding.openingTypes[windowTypeIndex] = configureWindowLitePattern(casement, "prairie")!;
+  const productSolids = wallOpeningComponentSolids(source, productBuilding.wallTypes[0], new Map(productBuilding.openingTypes.map((type) => [type.id, type])));
+  assert.equal(productSolids.filter((solid) => solid.componentId === "product-door-panel-detail").length, 6);
+  assert.equal(productSolids.filter((solid) => solid.componentId === "component-sash" && solid.openingId === "opening-02").length, 8);
+  assert.equal(productSolids.filter((solid) => solid.componentId === "product-window-lite-vertical").length, 4);
+  assert.equal(productSolids.filter((solid) => solid.componentId === "product-window-lite-horizontal").length, 4);
 });
 
 function wallTypes() {

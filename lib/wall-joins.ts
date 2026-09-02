@@ -1,6 +1,8 @@
 import { resolveOpeningComponents, wallOpeningRoughBottom, type LineObject } from "./document-model.ts";
 import {
   assemblyTotalThickness,
+  openingPanelGridShape,
+  openingSashGridShape,
   wallLayerCenterOffsets,
   wallLayerGroupThickness,
   wallReferenceDistanceFromExterior,
@@ -714,32 +716,45 @@ export function wallOpeningComponentSolids(
       top: wallOpeningRoughBottom(opening) + openingType.unitOffsetZ + openingType.unitHeight,
     };
     const componentsById = new Map(resolvedComponents.map((component) => [component.id, component]));
-    const clearBounds = new Map<string, Bounds>();
-    const resolveBounds = (component: OpeningAssemblyComponent): { bounds: Bounds; clear: Bounds } | null => {
-      const cached = clearBounds.get(component.id);
-      if (cached) {
-        const bounds = component.geometry === "perimeter" ? {
-          bottom: cached.bottom - component.profileWidth,
-          left: cached.left - component.profileWidth,
-          right: cached.right + component.profileWidth,
-          top: cached.top + component.profileWidth,
-        } : cached;
-        return { bounds, clear: cached };
+    const componentBounds = new Map<string, { bounds: Bounds[]; clear: Bounds[] }>();
+    const splitBounds = (bounds: Bounds, columns: number, rows: number, horizontalGap = 0, verticalGap = 0): Bounds[] => {
+      const width = (bounds.right - bounds.left - horizontalGap * (columns - 1)) / columns;
+      const height = (bounds.top - bounds.bottom - verticalGap * (rows - 1)) / rows;
+      if (width < ENDPOINT_TOLERANCE || height < ENDPOINT_TOLERANCE) return [];
+      const regions: Bounds[] = [];
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const left = bounds.left + column * (width + horizontalGap);
+          const bottom = bounds.bottom + row * (height + verticalGap);
+          regions.push({ bottom, left, right: left + width, top: bottom + height });
+        }
       }
+      return regions;
+    };
+    const resolveBounds = (component: OpeningAssemblyComponent): { bounds: Bounds[]; clear: Bounds[] } | null => {
+      const cached = componentBounds.get(component.id);
+      if (cached) return cached;
       const parent = component.parentComponentId === null ? null : componentsById.get(component.parentComponentId);
-      const source = parent ? resolveBounds(parent)?.clear : rootBounds;
+      const source = parent ? resolveBounds(parent)?.clear : [rootBounds];
       if (!source) return null;
-      const bounds = { bottom: source.bottom + component.inset, left: source.left + component.inset, right: source.right - component.inset, top: source.top - component.inset };
-      if (bounds.right - bounds.left < ENDPOINT_TOLERANCE || bounds.top - bounds.bottom < ENDPOINT_TOLERANCE) return null;
-      const clear = component.geometry === "perimeter" ? {
-        bottom: bounds.bottom + component.profileWidth,
-        left: bounds.left + component.profileWidth,
-        right: bounds.right - component.profileWidth,
-        top: bounds.top - component.profileWidth,
-      } : bounds;
-      if (clear.right - clear.left < ENDPOINT_TOLERANCE || clear.top - clear.bottom < ENDPOINT_TOLERANCE) return null;
-      clearBounds.set(component.id, clear);
-      return { bounds, clear };
+      const insetBounds = source.map((region) => ({ bottom: region.bottom + component.inset, left: region.left + component.inset, right: region.right - component.inset, top: region.top - component.inset }));
+      if (insetBounds.some((region) => region.right - region.left < ENDPOINT_TOLERANCE || region.top - region.bottom < ENDPOINT_TOLERANCE)) return null;
+      const panelGrid = component.geometry === "panel-grid" ? openingPanelGridShape(component.divisionCount) : null;
+      const sashGrid = openingSashGridShape(component.geometry);
+      const bounds = panelGrid
+        ? insetBounds.flatMap((region) => splitBounds(region, panelGrid.columns, panelGrid.rows, component.profileWidth, component.profileWidth))
+        : sashGrid ? insetBounds.flatMap((region) => splitBounds(region, sashGrid.columns, sashGrid.rows)) : insetBounds;
+      const perimeterGeometry = component.geometry === "perimeter" || sashGrid !== null;
+      const clear = perimeterGeometry ? bounds.map((region) => ({
+        bottom: region.bottom + component.profileWidth,
+        left: region.left + component.profileWidth,
+        right: region.right - component.profileWidth,
+        top: region.top - component.profileWidth,
+      })) : bounds.map((region) => ({ ...region }));
+      if (bounds.length === 0 || clear.some((region) => region.right - region.left < ENDPOINT_TOLERANCE || region.top - region.bottom < ENDPOINT_TOLERANCE)) return null;
+      const result = { bounds, clear };
+      componentBounds.set(component.id, result);
+      return result;
     };
     resolvedComponents.forEach((component) => {
       if (!component.visible) return;
@@ -773,26 +788,30 @@ export function wallOpeningComponentSolids(
           role: component.role,
         });
       };
-      const { bounds } = resolved;
-      if (component.geometry === "perimeter") {
-        const width = Math.min(component.profileWidth, (bounds.right - bounds.left) / 2, (bounds.top - bounds.bottom) / 2);
-        add(bounds.left, bounds.left + width, bounds.bottom, bounds.top);
-        add(bounds.right - width, bounds.right, bounds.bottom, bounds.top);
-        add(bounds.left + width, bounds.right - width, bounds.bottom, bounds.bottom + width);
-        add(bounds.left + width, bounds.right - width, bounds.top - width, bounds.top);
-      } else if (component.geometry === "panel") {
-        add(bounds.left, bounds.right, bounds.bottom, bounds.top);
-      } else if (component.geometry === "vertical-divider") {
-        for (let index = 1; index <= component.divisionCount; index += 1) {
-          const center = bounds.left + (bounds.right - bounds.left) * index / (component.divisionCount + 1);
-          add(center - component.profileWidth / 2, center + component.profileWidth / 2, bounds.bottom, bounds.top);
+      const perimeterGeometry = component.geometry === "perimeter" || openingSashGridShape(component.geometry) !== null;
+      resolved.bounds.forEach((bounds) => {
+        if (perimeterGeometry) {
+          const width = Math.min(component.profileWidth, (bounds.right - bounds.left) / 2, (bounds.top - bounds.bottom) / 2);
+          add(bounds.left, bounds.left + width, bounds.bottom, bounds.top);
+          add(bounds.right - width, bounds.right, bounds.bottom, bounds.top);
+          add(bounds.left + width, bounds.right - width, bounds.bottom, bounds.bottom + width);
+          add(bounds.left + width, bounds.right - width, bounds.top - width, bounds.top);
+        } else if (component.geometry === "panel" || component.geometry === "panel-grid") {
+          add(bounds.left, bounds.right, bounds.bottom, bounds.top);
+        } else if (component.geometry === "vertical-divider" || component.geometry === "vertical-prairie-divider") {
+          const positions = component.geometry === "vertical-prairie-divider" ? [0.2, 0.8] : Array.from({ length: component.divisionCount }, (_, index) => (index + 1) / (component.divisionCount + 1));
+          for (const position of positions) {
+            const center = bounds.left + (bounds.right - bounds.left) * position;
+            add(center - component.profileWidth / 2, center + component.profileWidth / 2, bounds.bottom, bounds.top);
+          }
+        } else {
+          const positions = component.geometry === "horizontal-prairie-divider" ? [0.2, 0.8] : Array.from({ length: component.divisionCount }, (_, index) => (index + 1) / (component.divisionCount + 1));
+          for (const position of positions) {
+            const center = bounds.bottom + (bounds.top - bounds.bottom) * position;
+            add(bounds.left, bounds.right, center - component.profileWidth / 2, center + component.profileWidth / 2);
+          }
         }
-      } else {
-        for (let index = 1; index <= component.divisionCount; index += 1) {
-          const center = bounds.bottom + (bounds.top - bounds.bottom) * index / (component.divisionCount + 1);
-          add(bounds.left, bounds.right, center - component.profileWidth / 2, center + component.profileWidth / 2);
-        }
-      }
+      });
     });
   });
   return result;

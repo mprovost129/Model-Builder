@@ -225,8 +225,8 @@ standard openings to the new default component types during upgrade.
 
 Each Door or Window Type also owns a parametric 3D component tree. The unit
 rectangle is the root coordinate system; a component may instead join inside a
-parent component's clear rectangle. Perimeter, panel/glazing, vertical-divider,
-and horizontal-divider generators currently support frames, jambs, sashes,
+parent component's clear rectangle. Perimeter, panel/glazing, panel-grid, sash-grid,
+vertical-divider, horizontal-divider, and Prairie-divider generators currently support frames, jambs, sashes,
 panels, glass, mullions, interior/exterior trim, thresholds, and hardware roles.
 Every component has a stable ID, material, visibility, inset, profile width,
 across-wall depth, face anchor, and depth offset. Changing a parent profile
@@ -243,6 +243,17 @@ and component identity remain Type-level topology: users duplicate or edit the T
 when that structure must change. Assigning another Type clears instance component
 overrides rather than applying stale component IDs to a different assembly. Version-37
 files store these overrides; version-36 and earlier files upgrade with none.
+
+The Product Layout Generator composes those same editable components into common
+residential configurations. Doors support flush, one-, two-, four-, and six-panel
+layouts. Windows support fixed, single-hung, double-hung, casement-pair, awning,
+and sliding sash arrangements plus none, equal 2x2, Colonial 3x2, and Prairie
+divided-lite patterns. Glass and lite components are nested beneath the sash so
+they repeat within every generated operable region. These are generic geometric
+layouts, not certified manufacturer models; a future profile library will attach
+manufacturer identity and validated product-specific dimensions explicitly.
+Version-38 files store the expanded component generators; version-37 and earlier
+files continue to open with their saved component topology.
 
 Nonzero exterior and interior return depths generate finish solids inside each
 linked rough opening. Each side receives left and right jambs plus a head; Window
@@ -295,8 +306,8 @@ junction framing.
 
 ## Next Steps
 
-1. Add specialized product generators for door panels, divided-lite patterns,
-   operable sash arrangements, and manufacturer-specific profiles.
+1. Add explicit manufacturer product identity and importable, validated profile
+   libraries on top of the generic Door and Window product generators.
 2. Add manual per-junction framing overrides without making unsafe engineering assumptions.
 3. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
 4. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.

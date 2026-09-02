@@ -34,10 +34,28 @@ export const WALL_STRUCTURAL_ROLES = ["bearing", "non-bearing"] as const;
 export type WallStructuralRole = (typeof WALL_STRUCTURAL_ROLES)[number];
 export const OPENING_COMPONENT_ROLES = ["frame", "jamb", "sash", "panel", "glazing", "mullion", "trim", "threshold", "hardware"] as const;
 export type OpeningComponentRole = (typeof OPENING_COMPONENT_ROLES)[number];
-export const OPENING_COMPONENT_GEOMETRIES = ["perimeter", "panel", "vertical-divider", "horizontal-divider"] as const;
+export const OPENING_COMPONENT_GEOMETRIES = ["perimeter", "panel", "panel-grid", "fixed-sash", "single-hung-sashes", "double-hung-sashes", "casement-sashes", "awning-sash", "sliding-sashes", "vertical-divider", "horizontal-divider", "vertical-prairie-divider", "horizontal-prairie-divider"] as const;
 export type OpeningComponentGeometry = (typeof OPENING_COMPONENT_GEOMETRIES)[number];
 export const OPENING_COMPONENT_DEPTH_ANCHORS = ["exterior", "center", "interior"] as const;
 export type OpeningComponentDepthAnchor = (typeof OPENING_COMPONENT_DEPTH_ANCHORS)[number];
+export const DOOR_PANEL_LAYOUTS = ["flush", "one-panel", "two-panel", "four-panel", "six-panel"] as const;
+export type DoorPanelLayout = (typeof DOOR_PANEL_LAYOUTS)[number];
+export const WINDOW_SASH_ARRANGEMENTS = ["fixed", "single-hung", "double-hung", "casement-pair", "awning", "sliding"] as const;
+export type WindowSashArrangement = (typeof WINDOW_SASH_ARRANGEMENTS)[number];
+export const WINDOW_LITE_PATTERNS = ["none", "equal-2x2", "colonial-3x2", "prairie"] as const;
+export type WindowLitePattern = (typeof WINDOW_LITE_PATTERNS)[number];
+
+export function openingPanelGridShape(panelCount: number): { columns: number; rows: number } {
+  if (panelCount >= 4 && panelCount % 2 === 0) return { columns: 2, rows: panelCount / 2 };
+  return { columns: 1, rows: panelCount };
+}
+
+export function openingSashGridShape(geometry: OpeningComponentGeometry): { columns: number; rows: number } | null {
+  if (geometry === "single-hung-sashes" || geometry === "double-hung-sashes") return { columns: 1, rows: 2 };
+  if (geometry === "casement-sashes" || geometry === "sliding-sashes") return { columns: 2, rows: 1 };
+  if (geometry === "fixed-sash" || geometry === "awning-sash") return { columns: 1, rows: 1 };
+  return null;
+}
 export const WALL_CORNER_FRAMING_STYLES = ["two-stud", "three-stud"] as const;
 export type WallCornerFramingStyle = (typeof WALL_CORNER_FRAMING_STYLES)[number];
 export const WALL_PARTITION_BACKING_STYLES = ["none", "three-stud", "ladder"] as const;
@@ -493,12 +511,108 @@ export function createDefaultOpeningComponents(kind: WallOpeningKind): OpeningAs
   }
   return [
     perimeter("component-frame", "Frame", "frame", null, 0, 2, 3.25, "center"),
-    perimeter("component-sash", "Sash", "sash", "component-frame", 0.25, 1.5, 1.75, "center"),
+    { ...perimeter("component-sash", "Double-Hung Sashes", "sash", "component-frame", 0.25, 1.5, 1.75, "center"), geometry: "double-hung-sashes", divisionCount: 2 },
     { ...perimeter("component-glass", "Insulated Glass", "glazing", "component-sash", 0.25, 0.25, 0.25, "center"), geometry: "panel", material: "Insulated Glass" },
-    { ...perimeter("component-meeting-rail", "Meeting Rail", "mullion", "component-sash", 0.25, 0.75, 0.75, "center"), geometry: "horizontal-divider" },
+    { ...perimeter("component-meeting-rail", "Meeting Rail", "mullion", "component-frame", 0.25, 0.75, 0.75, "center"), geometry: "horizontal-divider" },
     perimeter("component-exterior-trim", "Exterior Trim", "trim", null, -3.5, 3.5, 0.75, "exterior"),
     perimeter("component-interior-trim", "Interior Trim", "trim", null, -3.5, 3.5, 0.75, "interior"),
   ];
+}
+
+const DOOR_PANEL_DETAIL_ID = "product-door-panel-detail";
+const WINDOW_VERTICAL_LITE_ID = "product-window-lite-vertical";
+const WINDOW_HORIZONTAL_LITE_ID = "product-window-lite-horizontal";
+
+function openingProductComponent(id: string, name: string, geometry: OpeningComponentGeometry, parentComponentId: string, divisionCount: number): OpeningAssemblyComponent {
+  return {
+    depth: 0.375,
+    depthAnchor: "interior",
+    depthOffset: 0.125,
+    divisionCount,
+    geometry,
+    id,
+    inset: 3,
+    material: "Painted Wood",
+    name,
+    parentComponentId,
+    profileWidth: 2,
+    role: geometry === "panel-grid" ? "panel" : "mullion",
+    visible: true,
+  };
+}
+
+export function doorPanelLayoutForType(type: WallOpeningType): DoorPanelLayout | null {
+  if (type.kind !== "door") return null;
+  const detail = type.components.find((component) => component.id === DOOR_PANEL_DETAIL_ID);
+  if (!detail) return "flush";
+  if (detail.geometry !== "panel-grid") return null;
+  return ({ 1: "one-panel", 2: "two-panel", 4: "four-panel", 6: "six-panel" } as const)[detail.divisionCount as 1 | 2 | 4 | 6] ?? null;
+}
+
+export function configureDoorPanelLayout(type: WallOpeningType, layout: DoorPanelLayout): WallOpeningType | null {
+  if (type.kind !== "door") return null;
+  const leaf = type.components.find((component) => component.role === "panel" && component.id !== DOOR_PANEL_DETAIL_ID);
+  if (!leaf) return null;
+  const components = type.components.filter((component) => component.id !== DOOR_PANEL_DETAIL_ID).map((component) => ({ ...component }));
+  if (layout !== "flush") {
+    const divisionCount = { "one-panel": 1, "two-panel": 2, "four-panel": 4, "six-panel": 6 }[layout];
+    components.push(openingProductComponent(DOOR_PANEL_DETAIL_ID, `${divisionCount}-Panel Face`, "panel-grid", leaf.id, divisionCount));
+  }
+  return { ...cloneWallOpeningType(type), components };
+}
+
+const SASH_GEOMETRY_BY_ARRANGEMENT: Record<WindowSashArrangement, OpeningComponentGeometry> = {
+  fixed: "fixed-sash",
+  "single-hung": "single-hung-sashes",
+  "double-hung": "double-hung-sashes",
+  "casement-pair": "casement-sashes",
+  awning: "awning-sash",
+  sliding: "sliding-sashes",
+};
+
+export function windowSashArrangementForType(type: WallOpeningType): WindowSashArrangement | null {
+  if (type.kind !== "window") return null;
+  const geometry = type.components.find((component) => component.role === "sash")?.geometry;
+  return (Object.entries(SASH_GEOMETRY_BY_ARRANGEMENT).find(([, candidate]) => candidate === geometry)?.[0] as WindowSashArrangement | undefined) ?? null;
+}
+
+export function configureWindowSashArrangement(type: WallOpeningType, arrangement: WindowSashArrangement): WallOpeningType | null {
+  if (type.kind !== "window") return null;
+  const sash = type.components.find((component) => component.role === "sash");
+  if (!sash) return null;
+  const paired = ["single-hung", "double-hung", "casement-pair", "sliding"].includes(arrangement);
+  const components = type.components.map((component) => component.id === sash.id
+    ? { ...component, divisionCount: paired ? 2 : 1, geometry: SASH_GEOMETRY_BY_ARRANGEMENT[arrangement], name: `${arrangement.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ")} ${paired ? "Sashes" : "Sash"}` }
+    : component.id === "component-meeting-rail" ? { ...component, visible: arrangement === "single-hung" || arrangement === "double-hung" } : { ...component });
+  return { ...cloneWallOpeningType(type), components };
+}
+
+export function windowLitePatternForType(type: WallOpeningType): WindowLitePattern | null {
+  if (type.kind !== "window") return null;
+  const vertical = type.components.find((component) => component.id === WINDOW_VERTICAL_LITE_ID);
+  const horizontal = type.components.find((component) => component.id === WINDOW_HORIZONTAL_LITE_ID);
+  if (!vertical && !horizontal) return "none";
+  if (!vertical || !horizontal) return null;
+  if (vertical.geometry === "vertical-prairie-divider" && horizontal.geometry === "horizontal-prairie-divider") return "prairie";
+  if (vertical.geometry !== "vertical-divider" || horizontal.geometry !== "horizontal-divider") return null;
+  if (vertical.divisionCount === 1 && horizontal.divisionCount === 1) return "equal-2x2";
+  if (vertical.divisionCount === 2 && horizontal.divisionCount === 1) return "colonial-3x2";
+  return null;
+}
+
+export function configureWindowLitePattern(type: WallOpeningType, pattern: WindowLitePattern): WallOpeningType | null {
+  if (type.kind !== "window") return null;
+  const glazing = type.components.find((component) => component.role === "glazing");
+  if (!glazing) return null;
+  const components = type.components.filter((component) => component.id !== WINDOW_VERTICAL_LITE_ID && component.id !== WINDOW_HORIZONTAL_LITE_ID).map((component) => ({ ...component }));
+  if (pattern !== "none") {
+    const prairie = pattern === "prairie";
+    const verticalCount = pattern === "colonial-3x2" ? 2 : 1;
+    const vertical = openingProductComponent(WINDOW_VERTICAL_LITE_ID, prairie ? "Prairie Vertical Grilles" : "Vertical Grilles", prairie ? "vertical-prairie-divider" : "vertical-divider", glazing.id, verticalCount);
+    const horizontal = openingProductComponent(WINDOW_HORIZONTAL_LITE_ID, prairie ? "Prairie Horizontal Grilles" : "Horizontal Grilles", prairie ? "horizontal-prairie-divider" : "horizontal-divider", glazing.id, 1);
+    components.push({ ...vertical, depthAnchor: "exterior", inset: 0, material: "Applied Grille", profileWidth: 0.75 }, { ...horizontal, depthAnchor: "exterior", inset: 0, material: "Applied Grille", profileWidth: 0.75 });
+  }
+  return { ...cloneWallOpeningType(type), components };
 }
 
 export function createDefaultWallFramingSettings(): WallFramingSettings {
@@ -642,11 +756,19 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     const height = source.contentHeight - component.inset * 2;
     const width = source.contentWidth - component.inset * 2;
     if (height < 1 / 16 || width < 1 / 16) return null;
-    const contentHeight = component.geometry === "perimeter" ? height - component.profileWidth * 2 : height;
-    const contentWidth = component.geometry === "perimeter" ? width - component.profileWidth * 2 : width;
+    const panelGrid = component.geometry === "panel-grid" ? openingPanelGridShape(component.divisionCount) : null;
+    const sashGrid = openingSashGridShape(component.geometry);
+    const grid = panelGrid ?? sashGrid ?? { columns: 1, rows: 1 };
+    const horizontalGaps = panelGrid ? (grid.columns - 1) * component.profileWidth : 0;
+    const verticalGaps = panelGrid ? (grid.rows - 1) * component.profileWidth : 0;
+    const cellHeight = (height - verticalGaps) / grid.rows;
+    const cellWidth = (width - horizontalGaps) / grid.columns;
+    const perimeterGeometry = component.geometry === "perimeter" || sashGrid !== null;
+    const contentHeight = perimeterGeometry ? cellHeight - component.profileWidth * 2 : cellHeight;
+    const contentWidth = perimeterGeometry ? cellWidth - component.profileWidth * 2 : cellWidth;
     if (contentHeight < 1 / 16 || contentWidth < 1 / 16 ||
-      (component.geometry === "vertical-divider" && component.profileWidth >= width) ||
-      (component.geometry === "horizontal-divider" && component.profileWidth >= height)) return null;
+      ((component.geometry === "vertical-divider" || component.geometry === "vertical-prairie-divider") && component.profileWidth >= width) ||
+      ((component.geometry === "horizontal-divider" || component.geometry === "horizontal-prairie-divider") && component.profileWidth >= height)) return null;
     const result = { contentHeight, contentWidth };
     resolvedBounds.set(component.id, result);
     return result;

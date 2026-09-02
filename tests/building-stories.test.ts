@@ -6,7 +6,11 @@ import {
   buildingStructureIsValid,
   calculateStoryElevations,
   cloneBuildingStructure,
+  configureDoorPanelLayout,
+  configureWindowLitePattern,
+  configureWindowSashArrangement,
   createDefaultBuildingStructure,
+  doorPanelLayoutForType,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
   resolveWallHeaderType,
@@ -15,6 +19,8 @@ import {
   wallHeaderTypeIsValid,
   wallHeaderTypeRequiredMainThickness,
   wallLayerGroupThickness,
+  windowLitePatternForType,
+  windowSashArrangementForType,
   removeBuildingStory,
   wallLayerCenterOffsets,
   wallReferenceDistanceFromExterior,
@@ -143,6 +149,34 @@ test("defines reusable Door and Window component types for rough openings and fi
   cloned.openingTypes[0].components[0].material = "Aluminum";
   assert.equal(building.openingTypes[0].roughWidth, 38);
   assert.equal(building.openingTypes[0].components[0].material, "Wood");
+});
+
+test("generates editable Door panels, Window sash arrangements, and divided-lite patterns", () => {
+  const building = createDefaultBuildingStructure();
+  const door = building.openingTypes.find((type) => type.kind === "door")!;
+  const window = building.openingTypes.find((type) => type.kind === "window")!;
+  assert.equal(windowSashArrangementForType(window), "double-hung");
+  assert.equal(windowLitePatternForType(window), "none");
+  assert.equal(doorPanelLayoutForType(door), "flush");
+
+  const sixPanel = configureDoorPanelLayout(door, "six-panel");
+  assert.ok(sixPanel);
+  assert.equal(doorPanelLayoutForType(sixPanel), "six-panel");
+  assert.equal(sixPanel.components.find((component) => component.id === "product-door-panel-detail")?.divisionCount, 6);
+  assert.equal(wallOpeningTypeIsValid(sixPanel), true);
+  const restoredFlush = configureDoorPanelLayout(sixPanel, "flush");
+  assert.ok(restoredFlush);
+  assert.equal(restoredFlush.components.some((component) => component.id === "product-door-panel-detail"), false);
+
+  const casement = configureWindowSashArrangement(window, "casement-pair");
+  assert.ok(casement);
+  assert.equal(windowSashArrangementForType(casement), "casement-pair");
+  assert.equal(casement.components.find((component) => component.role === "sash")?.geometry, "casement-sashes");
+  const prairie = configureWindowLitePattern(casement, "prairie");
+  assert.ok(prairie);
+  assert.equal(windowLitePatternForType(prairie), "prairie");
+  assert.equal(prairie.components.filter((component) => component.id.startsWith("product-window-lite-")).length, 2);
+  assert.equal(wallOpeningTypeIsValid(prairie), true);
 });
 
 test("defines reusable lumber, LVL, steel, insulated, flat, and spaced header assemblies", () => {

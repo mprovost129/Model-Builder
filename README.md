@@ -118,6 +118,9 @@ polylines, rectangles, Circles, and Arcs.
   mullions, trim, thresholds, and hardware. Components retain stable identities,
   parent relationships, materials, profiles, inset rules, depth, and face anchoring;
   editing a parent rebuilds its nested parts while the rough opening remains separate.
+  Product layout generators build editable flush, one-, two-, four-, and six-panel
+  Doors plus fixed, hung, casement, awning, and sliding Window sash arrangements.
+  Equal, Colonial, and Prairie divided-lite patterns repeat inside each generated sash.
   A placed Door or Window can override an individual part's material, visibility,
   profile or divider width, inset, depth, face anchor, offset, and divider count while
   continuing to inherit the Type's component topology and all untouched values.
@@ -338,6 +341,10 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   structural rough opening. Each placed opening can override practical component
   parameters without severing its Type relationship; changing Types intentionally
   clears those instance overrides so stale component identities cannot survive. Those
+  types now include product layout generators for common residential Door panel
+  patterns, operable Window sash arrangements, and divided-lite grids. The generator
+  output remains editable component geometry; manufacturer identity and certified
+  product profiles are intentionally not inferred from these generic layouts. Those
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing
   visibility. Wall Types now classify exterior/interior and bearing/non-bearing use
@@ -367,7 +374,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-36 files open and upgrade
+Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-37 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.
