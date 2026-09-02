@@ -231,6 +231,7 @@ import {
   removeFloorPlatformRole,
   removeWallRole,
   refreshRoomsForStory,
+  resolveOpeningComponents,
   roomObjectIsValid,
   rotateModelEntities,
   scaleModelEntities,
@@ -285,6 +286,7 @@ import {
   type AlignmentMode,
   type ModelDocument,
   type ModelEntityRef,
+  type OpeningComponentOverride,
   type RoomObject,
   type RoomHorizontalPlatformSolution,
   type FoundationWallVerticalExtent,
@@ -8387,6 +8389,21 @@ function WallOpeningNameField({ opening, onUpdate }: { opening: WallOpening; onU
   );
 }
 
+function WallOpeningComponentMaterialField({ material, onUpdate }: { material: string; onUpdate: (material: string) => boolean }) {
+  const [draft, setDraft] = useState(material);
+  const [error, setError] = useState(false);
+  const commit = () => {
+    const next = draft.trim();
+    if (!next || !onUpdate(next)) {
+      setDraft(material);
+      setError(true);
+      return;
+    }
+    setError(false);
+  };
+  return <label className="property-table-row property-input-row"><span className="property-table-label">Part material</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(material); setError(false); event.currentTarget.blur(); } }} aria-label="Opening component material" spellCheck={false} /></div></label>;
+}
+
 function WallOpeningsControl({
   building,
   line,
@@ -8403,6 +8420,8 @@ function WallOpeningsControl({
   onUpdate: (openingId: string, change: Partial<WallOpening>) => boolean;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(line.wallOpenings[0]?.id ?? null);
+  const initialOpeningType = building.openingTypes.find((type) => type.id === line.wallOpenings[0]?.wallOpeningTypeId) ?? null;
+  const [selectedComponentId, setSelectedComponentId] = useState(initialOpeningType?.components[0]?.id ?? "");
   const opening = line.wallOpenings.find((candidate) => candidate.id === selectedId) ?? line.wallOpenings.at(-1) ?? null;
   const add = (kind: WallOpeningKind) => {
     const id = onAdd(kind);
@@ -8414,6 +8433,22 @@ function WallOpeningsControl({
     return opening ? onUpdate(opening.id, { [field]: snapToSixteenth(value) }) : false;
   };
   const componentType = building.openingTypes.find((type) => type.id === opening?.wallOpeningTypeId) ?? null;
+  const resolvedComponents = componentType && opening ? resolveOpeningComponents(componentType, opening.componentOverrides) : null;
+  const baseComponent = componentType?.components.find((component) => component.id === selectedComponentId) ?? componentType?.components[0] ?? null;
+  const resolvedComponent = baseComponent ? resolvedComponents?.find((component) => component.id === baseComponent.id) ?? null : null;
+  const componentOverride = opening && baseComponent ? opening.componentOverrides.find((override) => override.componentId === baseComponent.id) ?? null : null;
+  const updateComponentOverride = (change: Partial<Omit<OpeningComponentOverride, "componentId">>) => {
+    if (!opening || !baseComponent) return false;
+    const nextOverride = { ...(componentOverride ?? { componentId: baseComponent.id }), ...change, componentId: baseComponent.id };
+    const componentOverrides = [...opening.componentOverrides.filter((override) => override.componentId !== baseComponent.id), nextOverride].sort((first, second) => first.componentId.localeCompare(second.componentId));
+    return onUpdate(opening.id, { componentOverrides });
+  };
+  const resetComponentOverride = () => opening && baseComponent ? onUpdate(opening.id, { componentOverrides: opening.componentOverrides.filter((override) => override.componentId !== baseComponent.id) }) : false;
+  const updateComponentDimension = (field: "depth" | "depthOffset" | "inset" | "profileWidth", draft: string, signed = false, allowZero = false) => {
+    const value = (signed ? parseSignedArchitectural : parseArchitectural)(draft);
+    if (value === null || (!signed && (allowZero ? value < 0 : value <= 0))) return false;
+    return updateComponentOverride({ [field]: snapToSixteenth(value) });
+  };
   const wallType = building.wallTypes.find((type) => type.id === line.wallTypeId) ?? null;
   const resolvedHeader = opening ? resolveWallHeaderType(building, line.wallTypeId, opening.wallOpeningTypeId, opening.headerTypeIdOverride) : null;
   const compatibleHeaders = building.headerTypes.filter((headerType) => {
@@ -8424,11 +8459,24 @@ function WallOpeningsControl({
   return (
     <PropertyGridSection title="Openings" meta={`${line.wallOpenings.length} hosted`}>
       <div className="property-action-row"><button type="button" onClick={() => add("door")}>+ Door</button><button type="button" onClick={() => add("window")}>+ Window</button></div>
-      {line.wallOpenings.length > 0 ? <PropertyGridRow label="Opening"><select className="property-cell-select" value={opening?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)} aria-label="Hosted wall opening">{line.wallOpenings.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.kind === "door" ? "Door" : "Window"}</option>)}</select></PropertyGridRow> : <p className="property-grid-note">Add a Door or Window to cut its rough opening through every Wall layer.</p>}
+      {line.wallOpenings.length > 0 ? <PropertyGridRow label="Opening"><select className="property-cell-select" value={opening?.id ?? ""} onChange={(event) => { const nextOpening = line.wallOpenings.find((candidate) => candidate.id === event.target.value); const nextType = building.openingTypes.find((type) => type.id === nextOpening?.wallOpeningTypeId); setSelectedId(event.target.value); setSelectedComponentId(nextType?.components[0]?.id ?? ""); }} aria-label="Hosted wall opening">{line.wallOpenings.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.kind === "door" ? "Door" : "Window"}</option>)}</select></PropertyGridRow> : <p className="property-grid-note">Add a Door or Window to cut its rough opening through every Wall layer.</p>}
       {opening ? <>
         <WallOpeningNameField key={`${opening.id}:${opening.name}`} opening={opening} onUpdate={(change) => onUpdate(opening.id, change)} />
         <PropertyGridRow label="Component type"><select className="property-cell-select" value={opening.wallOpeningTypeId ?? ""} onChange={(event) => onAssignType(opening.id, event.target.value)} aria-label="Door or Window component type">{opening.wallOpeningTypeId === null ? <option value="" disabled>Legacy custom opening</option> : null}{compatibleTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
         {componentType ? <PropertyGridRow label="3D assembly"><span className="property-readout">{componentType.components.length} joined components</span></PropertyGridRow> : null}
+        {componentType && baseComponent && resolvedComponent ? <>
+          <PropertyGridRow label="Assembly part"><select className="property-cell-select" value={baseComponent.id} onChange={(event) => setSelectedComponentId(event.target.value)} aria-label="Placed opening assembly component">{componentType.components.map((component) => <option key={component.id} value={component.id}>{component.name} · {component.role}</option>)}</select></PropertyGridRow>
+          <PropertyGridRow label="Part source"><span className="property-readout">{componentOverride ? "Opening override" : "Type default"}</span></PropertyGridRow>
+          <WallOpeningComponentMaterialField key={`${opening.id}:${baseComponent.id}:${resolvedComponent.material}`} material={resolvedComponent.material} onUpdate={(material) => updateComponentOverride({ material })} />
+          <PropertyGridRow label="Part display"><label className="property-checkbox"><input type="checkbox" checked={resolvedComponent.visible} onChange={(event) => updateComponentOverride({ visible: event.target.checked })} /><span>Visible</span></label></PropertyGridRow>
+          <LineCoordinateField label="Part inset" value={resolvedComponent.inset} onCommit={(draft) => updateComponentDimension("inset", draft, true)} />
+          <LineCoordinateField label={resolvedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} unsigned value={resolvedComponent.profileWidth} onCommit={(draft) => updateComponentDimension("profileWidth", draft)} />
+          <LineCoordinateField label="Part depth" unsigned value={resolvedComponent.depth} onCommit={(draft) => updateComponentDimension("depth", draft)} />
+          <PropertyGridRow label="Depth anchor"><select className="property-cell-select" value={resolvedComponent.depthAnchor} onChange={(event) => updateComponentOverride({ depthAnchor: event.target.value as OpeningAssemblyComponent["depthAnchor"] })} aria-label="Placed opening component depth anchor">{OPENING_COMPONENT_DEPTH_ANCHORS.map((anchor) => <option key={anchor} value={anchor}>{titleCase(anchor)} face</option>)}</select></PropertyGridRow>
+          <LineCoordinateField label="Depth offset" unsigned value={resolvedComponent.depthOffset} onCommit={(draft) => updateComponentDimension("depthOffset", draft, false, true)} />
+          {resolvedComponent.geometry.includes("divider") ? <PropertyGridRow label="Divider count"><select className="property-cell-select" value={resolvedComponent.divisionCount} onChange={(event) => updateComponentOverride({ divisionCount: Number(event.target.value) })} aria-label="Placed opening component divider count">{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></PropertyGridRow> : null}
+          {componentOverride ? <div className="property-action-row single-action"><button type="button" onClick={resetComponentOverride}>Reset Part to Type</button></div> : null}
+        </> : null}
         <LineCoordinateField label="Center from start" unsigned value={opening.centerOffset} onCommit={(draft) => updateDimension("centerOffset", draft)} />
         <PropertyGridRow label="Unit size"><span className="property-readout">{formatArchitectural(opening.unitWidth)} × {formatArchitectural(opening.unitHeight)}</span></PropertyGridRow>
         <PropertyGridRow label="Rough opening"><span className="property-readout">{formatArchitectural(opening.roughWidth)} × {formatArchitectural(opening.roughHeight)}</span></PropertyGridRow>
@@ -8440,7 +8488,7 @@ function WallOpeningsControl({
           <PropertyGridRow label="Rough sill"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight - opening.roughHeight)}</span></PropertyGridRow>
         </> : <PropertyGridRow label="Bottom of header"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight)}</span></PropertyGridRow>}
         <div className="property-action-row single-action"><button type="button" onClick={() => onDelete(opening.id)}>Delete Opening</button></div>
-        <p className="property-grid-note">The reusable component type controls unit size, rough opening, and generated finish returns. Header priority is placed-opening override, component override, then host Wall default. Window header height remains measured to the bottom of the structural header above the Story subfloor.</p>
+        <p className="property-grid-note">The reusable Type controls assembly topology, unit size, rough opening, and generated finish returns. Part controls above override only this placed opening; Reset Part to Type restores inheritance. Header priority is placed-opening override, component override, then host Wall default. Window header height remains measured to the bottom of the structural header above the Story subfloor.</p>
       </> : null}
     </PropertyGridSection>
   );

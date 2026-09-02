@@ -69,6 +69,7 @@ import {
   renameBoxObject,
   removeWallRole,
   refreshRoomsForStory,
+  resolveOpeningComponents,
   platformOpeningContinuity,
   platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
@@ -1363,6 +1364,22 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   assert.equal(windowOpening.headerBottomHeight, 80);
   assert.equal(wallOpeningRoughBottom(windowOpening), 31.5);
 
+  const componentOverridden = updateWallOpening(windowResult.document, added.line.id, windowOpening.id, {
+    componentOverrides: [
+      { componentId: "component-frame", material: "Composite", profileWidth: 3 },
+      { componentId: "component-glass", material: "Low-E Tinted Glass", visible: false },
+    ],
+  });
+  assert.ok(componentOverridden);
+  const overriddenWindow = componentOverridden.lines[0].wallOpenings[0];
+  const overriddenWindowType = componentOverridden.building.openingTypes.find((type) => type.id === overriddenWindow.wallOpeningTypeId);
+  assert.ok(overriddenWindowType);
+  const resolvedComponents = resolveOpeningComponents(overriddenWindowType, overriddenWindow.componentOverrides);
+  assert.ok(resolvedComponents);
+  assert.deepEqual(resolvedComponents.find((component) => component.id === "component-frame")?.profileWidth, 3);
+  assert.deepEqual(resolvedComponents.find((component) => component.id === "component-glass")?.visible, false);
+  assert.equal(updateWallOpening(windowResult.document, added.line.id, windowOpening.id, { componentOverrides: [{ componentId: "missing-component", visible: false }] }), null);
+
   const raised = updateWallOpening(windowResult.document, added.line.id, windowOpening.id, { headerBottomHeight: 84 });
   assert.ok(raised);
   assert.equal(wallOpeningRoughBottom(raised.lines[0].wallOpenings[0]), 35.5);
@@ -1371,7 +1388,7 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   assert.equal(doorResult.opening.headerBottomHeight, doorResult.opening.roughHeight);
   assert.equal(wallOpeningRoughBottom(doorResult.opening), 0);
 
-  const customTypes = structuredClone(doorResult.document);
+  const customTypes = structuredClone(componentOverridden);
   customTypes.building.openingTypes.push({
     ...customTypes.building.openingTypes.find((type) => type.kind === "window")!,
     id: "window-type-02",
@@ -1384,6 +1401,7 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   const reassignedWindow = reassigned.lines[0].wallOpenings.find((opening) => opening.id === windowOpening.id);
   assert.equal(reassignedWindow?.wallOpeningTypeId, "window-type-02");
   assert.equal(reassignedWindow?.roughWidth, 48.5);
+  assert.deepEqual(reassignedWindow?.componentOverrides, []);
 
   const headerOverridden = updateWallOpening(windowResult.document, added.line.id, windowOpening.id, { headerTypeIdOverride: "header-type-03" });
   assert.ok(headerOverridden);

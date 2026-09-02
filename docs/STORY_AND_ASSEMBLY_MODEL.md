@@ -235,6 +235,15 @@ inside the separately controlled rough opening. Version-36 files store the
 component graph; version-35 and earlier files upgrade with editable Door and
 Window starter assemblies.
 
+A placed Door or Window can override the material, visibility, inset, profile or
+divider width, depth, depth anchor, depth offset, and divider count of any component
+in its assigned Type. Unchanged fields continue to inherit from the Type, so later
+Type edits still propagate. Component role, geometry generator, parent relationship,
+and component identity remain Type-level topology: users duplicate or edit the Type
+when that structure must change. Assigning another Type clears instance component
+overrides rather than applying stale component IDs to a different assembly. Version-37
+files store these overrides; version-36 and earlier files upgrade with none.
+
 Nonzero exterior and interior return depths generate finish solids inside each
 linked rough opening. Each side receives left and right jambs plus a head; Window
 returns also receive a sill. The outermost Wall layer supplies exterior-return
@@ -286,12 +295,11 @@ junction framing.
 
 ## Next Steps
 
-1. Add placed-opening component overrides while retaining the reusable Type defaults.
-2. Add specialized product generators for door panels, divided-lite patterns,
+1. Add specialized product generators for door panels, divided-lite patterns,
    operable sash arrangements, and manufacturer-specific profiles.
-3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
-4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
-5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-6. Add manual per-edge platform overrides for exceptional support details.
-7. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+2. Add manual per-junction framing overrides without making unsafe engineering assumptions.
+3. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
+4. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+5. Add manual per-edge platform overrides for exceptional support details.
+6. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

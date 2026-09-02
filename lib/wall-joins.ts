@@ -1,4 +1,4 @@
-import { wallOpeningRoughBottom, type LineObject } from "./document-model.ts";
+import { resolveOpeningComponents, wallOpeningRoughBottom, type LineObject } from "./document-model.ts";
 import {
   assemblyTotalThickness,
   wallLayerCenterOffsets,
@@ -705,13 +705,15 @@ export function wallOpeningComponentSolids(
   line.wallOpenings.forEach((opening) => {
     const openingType = opening.wallOpeningTypeId === null ? null : openingTypesById.get(opening.wallOpeningTypeId);
     if (!openingType || openingType.kind !== opening.kind) return;
+    const resolvedComponents = resolveOpeningComponents(openingType, opening.componentOverrides);
+    if (!resolvedComponents) return;
     const rootBounds: Bounds = {
       bottom: wallOpeningRoughBottom(opening) + openingType.unitOffsetZ,
       left: opening.centerOffset + openingType.unitOffsetX - openingType.unitWidth / 2,
       right: opening.centerOffset + openingType.unitOffsetX + openingType.unitWidth / 2,
       top: wallOpeningRoughBottom(opening) + openingType.unitOffsetZ + openingType.unitHeight,
     };
-    const componentsById = new Map(openingType.components.map((component) => [component.id, component]));
+    const componentsById = new Map(resolvedComponents.map((component) => [component.id, component]));
     const clearBounds = new Map<string, Bounds>();
     const resolveBounds = (component: OpeningAssemblyComponent): { bounds: Bounds; clear: Bounds } | null => {
       const cached = clearBounds.get(component.id);
@@ -739,7 +741,7 @@ export function wallOpeningComponentSolids(
       clearBounds.set(component.id, clear);
       return { bounds, clear };
     };
-    openingType.components.forEach((component) => {
+    resolvedComponents.forEach((component) => {
       if (!component.visible) return;
       const resolved = resolveBounds(component);
       if (!resolved) return;

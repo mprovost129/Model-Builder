@@ -35,7 +35,9 @@ import {
   cloneRoomObject,
   platformOpeningContinuityIsValid,
   roomObjectIsValid,
+  resolveOpeningComponents,
   wallOpeningsAreValid,
+  type OpeningComponentOverride,
 } from "./document-model.ts";
 import { arcGeometryIsValid } from "./cad-arc.ts";
 import { circleGeometryIsValid } from "./cad-circle.ts";
@@ -102,7 +104,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 36;
+export const PROJECT_FILE_VERSION = 37;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -587,7 +589,30 @@ function readLayer(value: unknown): ModelLayer | null {
   };
 }
 
-function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, defaults: BuildingStructure): WallOpening | null {
+function readOpeningComponentOverride(value: unknown): OpeningComponentOverride | null {
+  if (!isRecord(value) || typeof value.componentId !== "string" ||
+    (value.depth !== undefined && !isFiniteNumber(value.depth)) ||
+    (value.depthAnchor !== undefined && (typeof value.depthAnchor !== "string" || !OPENING_COMPONENT_DEPTH_ANCHORS.includes(value.depthAnchor as OpeningComponentDepthAnchor))) ||
+    (value.depthOffset !== undefined && !isFiniteNumber(value.depthOffset)) ||
+    (value.divisionCount !== undefined && !Number.isInteger(value.divisionCount)) ||
+    (value.inset !== undefined && !isFiniteNumber(value.inset)) ||
+    (value.material !== undefined && typeof value.material !== "string") ||
+    (value.profileWidth !== undefined && !isFiniteNumber(value.profileWidth)) ||
+    (value.visible !== undefined && typeof value.visible !== "boolean")) return null;
+  return {
+    componentId: value.componentId,
+    ...(value.depth === undefined ? {} : { depth: value.depth }),
+    ...(value.depthAnchor === undefined ? {} : { depthAnchor: value.depthAnchor as OpeningComponentDepthAnchor }),
+    ...(value.depthOffset === undefined ? {} : { depthOffset: value.depthOffset }),
+    ...(value.divisionCount === undefined ? {} : { divisionCount: value.divisionCount as number }),
+    ...(value.inset === undefined ? {} : { inset: value.inset }),
+    ...(value.material === undefined ? {} : { material: value.material.trim() }),
+    ...(value.profileWidth === undefined ? {} : { profileWidth: value.profileWidth }),
+    ...(value.visible === undefined ? {} : { visible: value.visible }),
+  };
+}
+
+function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, defaults: BuildingStructure): WallOpening | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -596,11 +621,15 @@ function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supports
     !isFiniteNumber(value.centerOffset) || !isFiniteNumber(value.headerBottomHeight) ||
     !isFiniteNumber(value.roughHeight) || !isFiniteNumber(value.roughWidth) ||
     !isFiniteNumber(value.unitHeight) || !isFiniteNumber(value.unitWidth) ||
+    (supportsComponentOverrides && !Array.isArray(value.componentOverrides)) ||
     (supportsOpeningTypes && value.wallOpeningTypeId !== null && typeof value.wallOpeningTypeId !== "string") ||
     (supportsHostAwareHeaders && value.headerTypeIdOverride !== null && typeof value.headerTypeIdOverride !== "string")
   ) return null;
+  const componentOverrides = supportsComponentOverrides ? (value.componentOverrides as unknown[]).map(readOpeningComponentOverride) : [];
+  if (componentOverrides.some((override) => override === null)) return null;
   return {
     centerOffset: value.centerOffset,
+    componentOverrides: componentOverrides as OpeningComponentOverride[],
     headerBottomHeight: value.headerBottomHeight,
     headerTypeIdOverride: supportsHostAwareHeaders ? value.headerTypeIdOverride as string | null : null,
     id: value.id,
@@ -616,7 +645,7 @@ function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supports
   };
 }
 
-function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean, supportsWallOpenings: boolean, supportsFoundationWalls: boolean, supportsFoundationSupportLinks: boolean, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, building: BuildingStructure): LineObject | null {
+function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean, supportsWallOpenings: boolean, supportsFoundationWalls: boolean, supportsFoundationSupportLinks: boolean, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, building: BuildingStructure): LineObject | null {
   if (!isRecord(value) || value.type !== "line" || !isRecord(value.start) || !isRecord(value.end)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -656,7 +685,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   const wallEndJoinMode = supportsWallJunctionOverrides ? readJoinMode(value.wallEndJoinMode) : architecturalRole === "wall" ? "auto" : null;
   const wallOpenings = supportsWallOpenings
     ? Array.isArray(value.wallOpenings) && value.wallOpenings.length <= MAXIMUM_WALL_OPENING_COUNT
-      ? value.wallOpenings.map((opening) => readWallOpening(opening, supportsOpeningTypes, supportsHostAwareHeaders, building))
+      ? value.wallOpenings.map((opening) => readWallOpening(opening, supportsOpeningTypes, supportsHostAwareHeaders, supportsComponentOverrides, building))
       : null
     : [];
   if (
@@ -1014,7 +1043,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.lines) || value.lines.length > MAXIMUM_LINE_COUNT) {
       return { ok: false, error: "The project line collection is missing or invalid." };
     }
-    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20, version >= 23, version >= 27, version >= 28, version >= 30, version >= 35, building));
+    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20, version >= 23, version >= 27, version >= 28, version >= 30, version >= 35, version >= 37, building));
     if (parsedLines.some((line) => line === null)) {
       return { ok: false, error: "One or more drawing lines are invalid." };
     }
@@ -1036,6 +1065,11 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     const headerTypeIds = new Set(building.headerTypes.map((type) => type.id));
     if (lines.some((line) => line.wallOpenings.some((opening) => opening.headerTypeIdOverride !== null && !headerTypeIds.has(opening.headerTypeIdOverride)))) return { ok: false, error: "One or more Wall openings reference a missing header assembly override." };
     const openingTypesById = new Map(building.openingTypes.map((type) => [type.id, type]));
+    if (lines.some((line) => line.wallOpenings.some((opening) => {
+      if (opening.wallOpeningTypeId === null) return opening.componentOverrides.length > 0;
+      const type = openingTypesById.get(opening.wallOpeningTypeId);
+      return !type || resolveOpeningComponents(type, opening.componentOverrides) === null;
+    }))) return { ok: false, error: "One or more Wall openings contain invalid 3D component overrides." };
     if (lines.some((line) => line.wallOpenings.some((opening) => {
       if (opening.wallOpeningTypeId === null) return false;
       const type = openingTypesById.get(opening.wallOpeningTypeId);
