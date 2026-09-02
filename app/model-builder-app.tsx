@@ -8615,6 +8615,147 @@ function nextFoundationWallTypeId(building: BuildingStructure): string {
   return `foundation-wall-type-${String(number).padStart(2, "0")}`;
 }
 
+function FoundationDiagramDimension({
+  label,
+  onChange,
+  value,
+}: {
+  label: string;
+  onChange: (value: number) => void;
+  value: number;
+}) {
+  const [draft, setDraft] = useState(() => formatArchitectural(value));
+  const [error, setError] = useState(false);
+  const commit = () => {
+    const parsed = parseArchitectural(draft);
+    if (parsed === null || parsed <= 0) {
+      setError(true);
+      return;
+    }
+    setError(false);
+    onChange(snapToSixteenth(parsed));
+  };
+  return (
+    <div className={error ? "foundation-diagram-input is-error" : "foundation-diagram-input"}>
+      <span>{label}</span>
+      <input
+        aria-label={`${label} in section diagram`}
+        value={draft}
+        onChange={(event) => { setDraft(event.target.value); setError(false); }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") { setDraft(formatArchitectural(value)); setError(false); event.currentTarget.blur(); }
+        }}
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
+function FoundationSectionDiagram({
+  onFootingChange,
+  onSillChange,
+  onWallWidthChange,
+  type,
+}: {
+  onFootingChange: (change: Partial<FoundationWallType["footing"]>) => void;
+  onSillChange: (change: Partial<FoundationWallType["sill"]>) => void;
+  onWallWidthChange: (wallWidth: number) => void;
+  type: FoundationWallType;
+}) {
+  const maximumWidth = Math.max(type.wallWidth, type.sill.plateWidth, type.footing.enabled ? type.footing.width : 0, 18);
+  const horizontalScale = 205 / maximumWidth;
+  const verticalScale = 4;
+  const centerX = 185;
+  const wallWidth = Math.max(8, type.wallWidth * horizontalScale);
+  const wallTop = 152 - Math.max(-34, Math.min(34, type.topOffset * 1.5));
+  const footingHeight = type.footing.enabled ? Math.max(10, Math.min(90, type.footing.height * verticalScale)) : 0;
+  const footingBottom = 414;
+  const footingTop = footingBottom - footingHeight;
+  const wallBottom = type.footing.enabled ? footingTop : footingBottom;
+  const wallX = centerX - wallWidth / 2;
+  const plateHeight = Math.max(6, Math.min(22, type.sill.plateHeight * verticalScale));
+  const plateStackHeight = plateHeight * type.sill.foundationPlateCount;
+  const plateTop = wallTop - plateStackHeight;
+  const plateWidth = Math.max(8, type.sill.plateWidth * horizontalScale);
+  const plateX = Math.max(18, Math.min(374 - plateWidth, wallX + type.sill.exteriorSetback * horizontalScale));
+  const rawFootingWidth = type.footing.width * horizontalScale;
+  const footingWidth = Math.max(wallWidth, Math.min(300, rawFootingWidth));
+  const rawFootingX = centerX + type.footing.centerOffset * horizontalScale - footingWidth / 2;
+  const footingX = Math.max(18, Math.min(392 - footingWidth, rawFootingX));
+  const floorHeight = 48;
+  const floorY = plateTop - floorHeight;
+  const floorX = plateX;
+  const floorWidth = Math.max(30, 397 - floorX);
+  const wallDimensionY = Math.min(wallBottom - 52, wallTop + 105);
+
+  return (
+    <svg className="foundation-section-svg" viewBox="0 0 420 490" role="img" aria-labelledby="foundation-section-title foundation-section-description">
+      <title id="foundation-section-title">Editable Foundation Wall support section</title>
+      <desc id="foundation-section-description">A proportional section through the concrete wall, sill plates, floor platform, and continuous footing. Dimension fields in the drawing edit the same values as the form.</desc>
+      <defs>
+        <pattern id="foundation-concrete-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+          <rect width="20" height="20" className="foundation-svg-concrete-fill" />
+          <circle cx="4" cy="5" r="1.3" className="foundation-svg-concrete-stone" />
+          <circle cx="15" cy="13" r="1" className="foundation-svg-concrete-stone" />
+          <path d="M0 18L7 14M13 3L20 0" className="foundation-svg-concrete-mark" />
+        </pattern>
+        <pattern id="foundation-floor-pattern" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+          <rect width="12" height="12" className="foundation-svg-floor-fill" />
+          <line x1="0" y1="0" x2="0" y2="12" className="foundation-svg-floor-line" />
+        </pattern>
+        <marker id="foundation-dimension-arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse">
+          <path d="M0,3 L6,0 L6,6 Z" className="foundation-svg-dimension-arrow" />
+        </marker>
+      </defs>
+
+      <path d={`M18 ${Math.min(285, wallTop + 65)} H${Math.max(18, wallX - 5)} M18 ${Math.min(285, wallTop + 65)} L18 430`} className="foundation-svg-grade" />
+      <text x="22" y={Math.min(279, wallTop + 59)} className="foundation-svg-note">EXTERIOR GRADE</text>
+      <line x1="18" y1="102" x2="397" y2="102" className="foundation-svg-datum" />
+      <text x="22" y="96" className="foundation-svg-note">PROJECT FOUNDATION TOP DATUM · OFFSET {formatSignedArchitectural(type.topOffset)}</text>
+
+      <rect x={floorX} y={floorY} width={floorWidth} height={floorHeight} rx="1" fill="url(#foundation-floor-pattern)" className="foundation-svg-floor" />
+      <rect x={floorX} y={floorY} width={floorWidth} height="7" className="foundation-svg-subfloor" />
+      <text x={floorX + floorWidth / 2} y={floorY + 29} textAnchor="middle" className="foundation-svg-component-label">FLOOR PLATFORM</text>
+      <line x1={floorX} y1={floorY - 7} x2={floorX} y2={floorY + floorHeight + 6} className="foundation-svg-stop-edge" />
+      <text x={Math.min(392, floorX + 7)} y={floorY - 11} className="foundation-svg-stop-label">FLOOR STOP EDGE</text>
+
+      {Array.from({ length: type.sill.foundationPlateCount }, (_, index) => (
+        <rect key={index} x={plateX} y={wallTop - plateHeight * (index + 1)} width={plateWidth} height={plateHeight} className="foundation-svg-lumber" />
+      ))}
+      {Array.from({ length: type.sill.upperWallBottomPlateCount }, (_, index) => (
+        <rect key={index} x={plateX} y={floorY - plateHeight * (index + 1)} width={plateWidth} height={plateHeight} className="foundation-svg-lumber foundation-svg-upper-wall-plate" />
+      ))}
+      {type.sill.upperWallBottomPlateCount ? <text x={plateX + plateWidth / 2} y={Math.max(10, floorY - plateHeight * type.sill.upperWallBottomPlateCount - 5)} textAnchor="middle" className="foundation-svg-upper-wall-label">FRAMED-WALL PLATE</text> : null}
+      <rect x={wallX} y={wallTop} width={wallWidth} height={Math.max(24, wallBottom - wallTop)} fill="url(#foundation-concrete-pattern)" className="foundation-svg-concrete" />
+      {type.footing.enabled ? <rect x={footingX} y={footingTop} width={footingWidth} height={footingHeight} fill="url(#foundation-concrete-pattern)" className="foundation-svg-concrete foundation-svg-footing" /> : null}
+      <line x1={centerX} y1={wallTop - 8} x2={centerX} y2={footingBottom + 10} className="foundation-svg-centerline" />
+      <text x={centerX} y={(wallTop + wallBottom) / 2} textAnchor="middle" className="foundation-svg-material-label">{type.material}</text>
+
+      <line x1={plateX} y1={plateTop - 11} x2={plateX + plateWidth} y2={plateTop - 11} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
+      <line x1={plateX} y1={plateTop - 17} x2={plateX} y2={plateTop - 3} className="foundation-svg-extension" />
+      <line x1={plateX + plateWidth} y1={plateTop - 17} x2={plateX + plateWidth} y2={plateTop - 3} className="foundation-svg-extension" />
+      <foreignObject x="294" y="24" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-pw:${type.sill.plateWidth}`} label="Sill plate width" value={type.sill.plateWidth} onChange={(plateWidth) => onSillChange({ plateWidth })} /></foreignObject>
+
+      <line x1={Math.max(8, plateX - 12)} y1={plateTop} x2={Math.max(8, plateX - 12)} y2={wallTop} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
+      <foreignObject x="7" y="112" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-ph:${type.sill.plateHeight}`} label="Plate height each" value={type.sill.plateHeight} onChange={(plateHeight) => onSillChange({ plateHeight })} /></foreignObject>
+
+      <line x1={wallX} y1={wallDimensionY} x2={wallX + wallWidth} y2={wallDimensionY} className="foundation-svg-dimension foundation-svg-dimension-contrast" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
+      <foreignObject x="294" y="207" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-ww:${type.wallWidth}`} label="Concrete width" value={type.wallWidth} onChange={onWallWidthChange} /></foreignObject>
+
+      {type.footing.enabled ? <>
+        <line x1={footingX} y1={footingBottom + 18} x2={footingX + footingWidth} y2={footingBottom + 18} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
+        <line x1={footingX} y1={footingBottom + 4} x2={footingX} y2={footingBottom + 24} className="foundation-svg-extension" />
+        <line x1={footingX + footingWidth} y1={footingBottom + 4} x2={footingX + footingWidth} y2={footingBottom + 24} className="foundation-svg-extension" />
+        <foreignObject x="151" y="443" width="118" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-fw:${type.footing.width}`} label="Footing width" value={type.footing.width} onChange={(width) => onFootingChange({ width })} /></foreignObject>
+        <line x1={Math.min(402, footingX + footingWidth + 12)} y1={footingTop} x2={Math.min(402, footingX + footingWidth + 12)} y2={footingBottom} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
+        <foreignObject x="294" y="350" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-fh:${type.footing.height}`} label="Footing height" value={type.footing.height} onChange={(height) => onFootingChange({ height })} /></foreignObject>
+      </> : <text x="210" y="433" textAnchor="middle" className="foundation-svg-disabled-note">CONTINUOUS FOOTING OFF</text>}
+    </svg>
+  );
+}
+
 function FoundationWallManagerDialog({
   building,
   onCancel,
@@ -8723,13 +8864,8 @@ function FoundationWallManagerDialog({
             </section>
           </main>
           <aside className="foundation-section-preview" aria-label="Foundation Wall section preview">
-            <header><strong>Support Section</strong><span>Not to scale · exterior at left</span></header>
-            <div className="foundation-preview-canvas">
-              <div className="foundation-preview-floor"><span>Floor perimeter stops here</span></div>
-              <div className="foundation-preview-plates" style={{ width: `${Math.max(34, Math.min(78, selected.sill.plateWidth / Math.max(selected.wallWidth, 1) * 58))}%` }}>{Array.from({ length: selected.sill.foundationPlateCount }, (_, index) => <i key={index} />)}<b>FOUNDATION SILL</b></div>
-              <div className="foundation-preview-wall" style={{ width: `${Math.max(38, Math.min(78, selected.wallWidth / 12 * 62))}%` }}><span>{selected.material}</span><small>{formatArchitectural(selected.wallWidth)} Main</small></div>
-              {selected.footing.enabled ? <div className="foundation-preview-footing" style={{ width: `${Math.max(62, Math.min(96, selected.footing.width / 20 * 90))}%` }}><span>CONTINUOUS FOOTING</span></div> : null}
-            </div>
+            <header><strong>Editable Support Section</strong><span>Proportional component preview · exterior at left</span></header>
+            <div className="foundation-preview-canvas"><FoundationSectionDiagram type={selected} onWallWidthChange={(wallWidth) => replaceSelected({ wallWidth })} onFootingChange={replaceFooting} onSillChange={replaceSill} /></div>
             <dl><div><dt>Condition</dt><dd>{FOUNDATION_CONDITION_LABELS[selected.condition]}</dd></div><div><dt>Concrete top</dt><dd>{formatSignedArchitectural(selected.topOffset)}</dd></div><div><dt>Sill edge</dt><dd>{selected.sill.exteriorSetback === 0 ? "Flush to Main exterior" : `${formatSignedArchitectural(selected.sill.exteriorSetback)} setback`}</dd></div><div><dt>Plate ownership</dt><dd>{ownershipLabel}</dd></div></dl>
           </aside>
         </div>
