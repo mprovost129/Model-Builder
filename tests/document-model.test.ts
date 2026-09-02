@@ -70,6 +70,7 @@ import {
   updateWallOpening,
   updateRoomObject,
   wallOpeningRoughBottom,
+  wallVerticalExtent,
   updateCircleGrip,
   updateArcGrip,
   updatePolylineObjectVertex,
@@ -1243,6 +1244,15 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   assert.ok(added);
   const wall = createWallFromLine(added.document, added.line.id);
   assert.ok(wall);
+  assert.deepEqual(wallVerticalExtent(wall, wall.lines[0]), {
+    adjacentRoomIds: [],
+    baseElevation: 0,
+    hasDifferentRoomCeilings: false,
+    hasDifferentRoomFloors: false,
+    height: 109.125,
+    source: "story",
+    topElevation: 109.125,
+  });
   const windowResult = addWallOpening(wall, added.line.id, "window");
   assert.ok(windowResult);
   const windowOpening = windowResult.opening;
@@ -1300,6 +1310,36 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   assert.equal(effective.roughFloorElevation, 1.5);
   assert.equal(effective.roughCeilingHeight, 108);
   assert.deepEqual(effective.floorStructure, refreshed.building.stories[0].floorStructure);
+
+  const otherRoom = refreshed.rooms.find((room) => room.id !== office.id);
+  assert.ok(otherRoom);
+  const officeOnlyWallId = office.boundaryWallIds.find((wallId) => !otherRoom.boundaryWallIds.includes(wallId));
+  const sharedWallId = office.boundaryWallIds.find((wallId) => otherRoom.boundaryWallIds.includes(wallId));
+  const officeOnlyWall = refreshed.lines.find((line) => line.id === officeOnlyWallId);
+  const sharedWall = refreshed.lines.find((line) => line.id === sharedWallId);
+  assert.ok(officeOnlyWall);
+  assert.ok(sharedWall);
+  assert.deepEqual(wallVerticalExtent(refreshed, officeOnlyWall), {
+    adjacentRoomIds: [office.id],
+    baseElevation: 1.5,
+    hasDifferentRoomCeilings: false,
+    hasDifferentRoomFloors: false,
+    height: 108,
+    source: "rooms",
+    topElevation: 109.5,
+  });
+  const sharedExtent = wallVerticalExtent(refreshed, sharedWall);
+  assert.ok(sharedExtent);
+  assert.deepEqual(sharedExtent.adjacentRoomIds, refreshed.rooms.map((room) => room.id).sort());
+  assert.equal(sharedExtent.baseElevation, 0);
+  assert.equal(sharedExtent.topElevation, 109.5);
+  assert.equal(sharedExtent.height, 109.5);
+  assert.equal(sharedExtent.hasDifferentRoomFloors, true);
+  assert.equal(sharedExtent.hasDifferentRoomCeilings, true);
+
+  const hostedWindow = addWallOpening(refreshed, officeOnlyWall.id, "window");
+  assert.ok(hostedWindow);
+  assert.equal(updateRoomObject(hostedWindow.document, office.id, { roughCeilingHeightOverride: 72 }), null);
 });
 
 test("keeps Walls on their Story when moved or copied and reassigns removed wall types", () => {

@@ -222,6 +222,16 @@ export type EffectiveRoomSettings = {
   roughFloorElevation: number;
 };
 
+export type WallVerticalExtent = {
+  adjacentRoomIds: string[];
+  baseElevation: number;
+  hasDifferentRoomCeilings: boolean;
+  hasDifferentRoomFloors: boolean;
+  height: number;
+  source: "rooms" | "story";
+  topElevation: number;
+};
+
 export type ModelGroup = {
   id: string;
   name: string;
@@ -497,6 +507,59 @@ export function effectiveRoomSettings(
   };
 }
 
+/**
+ * Resolves the automatic rough-framing envelope for a Wall.
+ *
+ * A detected adjacent Room supplies its effective local subfloor and ceiling
+ * conditions. A Wall shared by rooms with different conditions spans the full
+ * rough envelope for this first vertical-constraint stage; stepped per-side
+ * finish profiles remain a separate generated-geometry concern.
+ */
+export function wallVerticalExtent(document: ModelDocument, line: LineObject): WallVerticalExtent | null {
+  if (line.architecturalRole !== "wall") return null;
+  const story = document.building.stories.find((candidate) => candidate.id === line.storyId);
+  const storyElevation = calculateStoryElevations(document.building).find((candidate) => candidate.storyId === line.storyId);
+  if (!story || !storyElevation) return null;
+  const rooms = document.rooms.filter((room) => room.storyId === line.storyId && room.boundaryWallIds.includes(line.id));
+  if (!rooms.length) {
+    return {
+      adjacentRoomIds: [],
+      baseElevation: storyElevation.roughFloorElevation,
+      hasDifferentRoomCeilings: false,
+      hasDifferentRoomFloors: false,
+      height: story.roughCeilingHeight,
+      source: "story",
+      topElevation: storyElevation.roughCeilingElevation,
+    };
+  }
+  const roomExtents = rooms.map((room) => {
+    const settings = effectiveRoomSettings(room, story, storyElevation.roughFloorElevation);
+    return {
+      baseElevation: settings.roughFloorElevation,
+      roomId: room.id,
+      topElevation: snapToSixteenth(settings.roughFloorElevation + settings.roughCeilingHeight),
+    };
+  });
+  const baseElevation = snapToSixteenth(Math.min(...roomExtents.map((extent) => extent.baseElevation)));
+  const topElevation = snapToSixteenth(Math.max(...roomExtents.map((extent) => extent.topElevation)));
+  return {
+    adjacentRoomIds: roomExtents.map((extent) => extent.roomId).sort(),
+    baseElevation,
+    hasDifferentRoomCeilings: new Set(roomExtents.map((extent) => extent.topElevation)).size > 1,
+    hasDifferentRoomFloors: new Set(roomExtents.map((extent) => extent.baseElevation)).size > 1,
+    height: snapToSixteenth(topElevation - baseElevation),
+    source: "rooms",
+    topElevation,
+  };
+}
+
+function documentWallOpeningsAreValid(document: ModelDocument): boolean {
+  return document.lines.every((line) => {
+    const wallHeight = wallVerticalExtent(document, line)?.height ?? document.building.stories.find((story) => story.id === line.storyId)?.roughCeilingHeight ?? 0;
+    return wallOpeningsAreValid(line, wallHeight);
+  });
+}
+
 function roomBoundaryWallIds(boundary: PolylineGeometry, walls: LineObject[]): string[] {
   const tolerance = 1e-5;
   const ids = new Set<string>();
@@ -556,7 +619,7 @@ export function refreshRoomsForStory(document: ModelDocument, storyId: string): 
   if (rooms.length > MAXIMUM_ROOM_COUNT) return null;
   const next = cloneDocument(document);
   next.rooms = [...next.rooms.filter((room) => room.storyId !== storyId), ...rooms];
-  return next.rooms.every((room) => roomObjectIsValid(room, next)) ? next : null;
+  return next.rooms.every((room) => roomObjectIsValid(room, next)) && documentWallOpeningsAreValid(next) ? next : null;
 }
 
 export function updateRoomObject(document: ModelDocument, roomId: string, change: Partial<Omit<RoomObject, "id" | "storyId" | "boundary" | "boundaryWallIds">>): ModelDocument | null {
@@ -564,7 +627,7 @@ export function updateRoomObject(document: ModelDocument, roomId: string, change
   const index = next.rooms.findIndex((room) => room.id === roomId);
   if (index < 0) return null;
   next.rooms[index] = { ...next.rooms[index], ...change, name: change.name?.trim() || next.rooms[index].name };
-  return roomObjectIsValid(next.rooms[index], next) ? next : null;
+  return roomObjectIsValid(next.rooms[index], next) && documentWallOpeningsAreValid(next) ? next : null;
 }
 
 export function cloneDocument(document: ModelDocument): ModelDocument {
@@ -708,8 +771,7 @@ export function updateDocumentBuilding(
     return { ...room, boundary: { ...clonePolylineGeometry(room.boundary), elevation: snapToSixteenth(room.boundary.elevation + change.delta) }, storyId: change.storyId };
   });
   next.building = cloneBuildingStructure(building);
-  const storiesById = new Map(building.stories.map((story) => [story.id, story]));
-  if (next.lines.some((line) => !wallOpeningsAreValid(line, storiesById.get(line.storyId)?.roughCeilingHeight ?? 0))) return null;
+  if (!documentWallOpeningsAreValid(next)) return null;
   if (next.rooms.some((room) => !roomObjectIsValid(room, next))) return null;
   return next;
 }
@@ -1284,10 +1346,11 @@ export function addWallOpening(
   const story = document.building.stories.find((candidate) => candidate.id === line?.storyId);
   const wallType = document.building.wallTypes.find((candidate) => candidate.id === line?.wallTypeId);
   if (!line || line.architecturalRole !== "wall" || !story || !wallType || !lineIsEditable(document, line) || line.wallOpenings.length >= MAXIMUM_WALL_OPENING_COUNT) return null;
+  const wallHeight = wallVerticalExtent(document, line)?.height ?? story.roughCeilingHeight;
   const defaults = kind === "door"
     ? { headerBottomHeight: 82.5, roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36 }
-    : { headerBottomHeight: Math.min(80, story.roughCeilingHeight), roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36 };
-  if (defaults.headerBottomHeight > story.roughCeilingHeight || defaults.headerBottomHeight < defaults.roughHeight) return null;
+    : { headerBottomHeight: Math.min(80, wallHeight), roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36 };
+  if (defaults.headerBottomHeight > wallHeight || defaults.headerBottomHeight < defaults.roughHeight) return null;
   const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
   const wrapDepth = wallType.layers.filter((layer) => wallType.wallEndCapLayerIds?.includes(layer.id)).reduce((total, layer) => total + layer.thickness, 0);
   const occupied = line.wallOpenings.map((opening) => ({ start: opening.centerOffset - opening.roughWidth / 2, end: opening.centerOffset + opening.roughWidth / 2 })).sort((first, second) => first.start - second.start);
@@ -1306,7 +1369,7 @@ export function addWallOpening(
     name: nextWallOpeningName(line, kind),
   };
   const nextLine = { ...cloneLineObject(line), wallOpenings: [...line.wallOpenings.map((candidate) => ({ ...candidate })), opening].sort((first, second) => first.centerOffset - second.centerOffset) };
-  if (!wallOpeningsAreValid(nextLine, story.roughCeilingHeight)) return null;
+  if (!wallOpeningsAreValid(nextLine, wallHeight)) return null;
   return { document: withLines(document, document.lines.map((candidate) => candidate.id === lineId ? nextLine : candidate)), opening: { ...opening } };
 }
 
@@ -1320,11 +1383,12 @@ export function updateWallOpening(
   const story = document.building.stories.find((candidate) => candidate.id === line?.storyId);
   const opening = line?.wallOpenings.find((candidate) => candidate.id === openingId);
   if (!line || line.architecturalRole !== "wall" || !story || !opening || !lineIsEditable(document, line)) return null;
+  const wallHeight = wallVerticalExtent(document, line)?.height ?? story.roughCeilingHeight;
   const updated = { ...opening, ...change };
   updated.name = updated.name.trim();
   if (updated.kind === "door") updated.headerBottomHeight = updated.roughHeight;
   const nextLine = { ...cloneLineObject(line), wallOpenings: line.wallOpenings.map((candidate) => candidate.id === openingId ? updated : { ...candidate }).sort((first, second) => first.centerOffset - second.centerOffset) };
-  if (!wallOpeningsAreValid(nextLine, story.roughCeilingHeight)) return null;
+  if (!wallOpeningsAreValid(nextLine, wallHeight)) return null;
   return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? nextLine : candidate));
 }
 
@@ -1893,10 +1957,9 @@ function documentCoordinatesWithinBounds(document: ModelDocument): boolean {
       arc.center.z,
     ]),
   ];
-  const storiesById = new Map(document.building.stories.map((story) => [story.id, story]));
   return coordinates.every(
     (coordinate) => Number.isFinite(coordinate) && Math.abs(coordinate) <= MAXIMUM_COORDINATE,
-  ) && document.lines.every((line) => wallOpeningsAreValid(line, storiesById.get(line.storyId)?.roughCeilingHeight ?? 0));
+  ) && documentWallOpeningsAreValid(document);
 }
 
 export function moveModelEntities(document: ModelDocument, refs: ModelEntityRef[], delta: LinePoint): ModelDocument | null {

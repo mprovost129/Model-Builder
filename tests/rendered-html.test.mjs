@@ -204,6 +204,8 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /RoomManagerDialog/);
   assert.match(component, /Detect \/ Update Rooms/);
   assert.match(component, /refreshRoomsForStory/);
+  assert.match(component, /wallVerticalExtent/);
+  assert.match(component, /base and top automatically follow adjacent Room rough conditions/);
   assert.match(component, /building-browser/);
   assert.match(component, /Project Setup/);
   assert.match(component, /Building standards · saved with project/);

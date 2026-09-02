@@ -269,8 +269,11 @@ and enclosed Rooms with inherited defaults and explicit overrides. The first
 focused interface pass is complete: blank plans now open with an in-canvas setup
 guide, the Home ribbon exposes the building workflow, Properties summarizes the
 active project defaults, and Model Explorer has a Building view for Stories,
-Wall Types, and Rooms. The next engineering milestone is Room-derived wall
-vertical constraints and generated floor/ceiling platforms.
+Wall Types, and Rooms. Walls now derive their automatic rough base and top from
+adjacent Room overrides, fall back to Story defaults before Rooms are detected,
+and expose mixed adjacent conditions without storing duplicate heights. The next
+engineering milestone is generated floor/ceiling platforms from those same Room
+elevations and assemblies.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.

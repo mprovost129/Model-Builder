@@ -256,6 +256,7 @@ import {
   updatePolylineObject,
   updatePolylineObjectVertex,
   effectiveRoomSettings,
+  wallVerticalExtent,
   type BoxObject,
   type ArcObject,
   type CircleObject,
@@ -268,6 +269,7 @@ import {
   type ModelDocument,
   type ModelEntityRef,
   type RoomObject,
+  type WallVerticalExtent,
 } from "@/lib/document-model";
 import {
   addBuildingStory,
@@ -1368,7 +1370,7 @@ function clearWallView(view: WallView) {
 function updateWallView(
   view: WallView,
   line: LineObject,
-  story: BuildingStructure["stories"][number],
+  vertical: WallVerticalExtent,
   wallType: LayeredAssembly,
   joinPlan: AutomaticWallJoinPlan,
   linesById: ReadonlyMap<string, LineObject>,
@@ -1381,7 +1383,7 @@ function updateWallView(
   if (length < 1 / 16) return;
   wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
-    wallLayerSolidSegments(line, wallType, index, joinPlan, linesById, wallTypesById, story.roughCeilingHeight).forEach((segment) => {
+    wallLayerSolidSegments(line, wallType, index, joinPlan, linesById, wallTypesById, vertical.height).forEach((segment) => {
       const shape = new THREE.Shape();
       shape.moveTo(segment.startExterior.x, segment.startExterior.y);
       shape.lineTo(segment.startInterior.x, segment.startInterior.y);
@@ -1391,7 +1393,7 @@ function updateWallView(
       const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: segment.height, steps: 1 });
       const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
       const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.z = line.start.z + segment.baseHeight;
+      mesh.position.z = vertical.baseElevation + segment.baseHeight;
       mesh.userData.lineId = line.id;
       mesh.userData.wallLayer = layer.name;
       view.group.add(mesh);
@@ -1407,10 +1409,10 @@ function updateWallView(
     shape.lineTo(footprint.endInterior.x, footprint.endInterior.y);
     shape.lineTo(footprint.endExterior.x, footprint.endExterior.y);
     shape.closePath();
-    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: story.roughCeilingHeight, steps: 1 });
+    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: vertical.height, steps: 1 });
     const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.z = line.start.z;
+    mesh.position.z = vertical.baseElevation;
     mesh.userData.lineId = line.id;
     mesh.userData.wallLayer = `${layer.name} end cap`;
     view.group.add(mesh);
@@ -2779,10 +2781,10 @@ function Viewport({
       const lineXs = lines.flatMap((line) => [line.start.x, line.end.x]);
       const lineYs = lines.flatMap((line) => [line.start.y, line.end.y]);
       const lineZs = lines.flatMap((line) => {
-        const wallHeight = line.architecturalRole === "wall"
-          ? documentRef.current.building.stories.find((story) => story.id === line.storyId)?.roughCeilingHeight ?? 0
-          : 0;
-        return [line.start.z, line.end.z, line.start.z + wallHeight, line.end.z + wallHeight];
+        const vertical = wallVerticalExtent(documentRef.current, line);
+        return vertical
+          ? [vertical.baseElevation, vertical.baseElevation, vertical.topElevation, vertical.topElevation]
+          : [line.start.z, line.end.z];
       });
       const polylineXs = polylines.flatMap((polyline) => polyline.vertices.map((point) => point.x));
       const polylineYs = polylines.flatMap((polyline) => polyline.vertices.map((point) => point.y));
@@ -6316,10 +6318,10 @@ function Viewport({
         view = createWallView(scene);
         wallViewsRef.current.set(line.id, view);
       }
-      const story = document.building.stories.find((candidate) => candidate.id === line.storyId);
+      const vertical = wallVerticalExtent(document, line);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (story && wallType) updateWallView(view, line, story, wallType, wallJoinPlan, wallLinesById, wallTypesById);
-      view.group.visible = Boolean(story && wallType && (findLayer(document, line.layerId)?.visible ?? true));
+      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById);
+      view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
     polylineViewsRef.current.forEach((view, polylineId) => {
@@ -7932,16 +7934,15 @@ function LineGeometryControl({ line, onUpdate }: { line: LineObject; onUpdate: (
 }
 
 function WallGeometryControl({
-  building,
+  document,
   line,
   onUpdate,
 }: {
-  building: BuildingStructure;
+  document: ModelDocument;
   line: LineObject;
   onUpdate: (geometry: LineGeometry) => boolean;
 }) {
-  const story = building.stories.find((candidate) => candidate.id === line.storyId);
-  const calculation = calculateStoryElevations(building).find((candidate) => candidate.storyId === line.storyId);
+  const vertical = wallVerticalExtent(document, line);
   const referenceLabel = WALL_REFERENCE_LINE_LABELS[line.wallReferenceLine ?? "wall-center"];
   const exteriorSideLabel = line.wallExteriorSide === "right" ? "right" : "left";
   const updatePoint = (endpoint: "start" | "end", axis: "x" | "y", draft: string) => {
@@ -7959,10 +7960,12 @@ function WallGeometryControl({
       <LineCoordinateField label="End Y" value={line.end.y} onCommit={(draft) => updatePoint("end", "y", draft)} />
       <PropertyGridRow label="Length"><span className="property-readout">{formatArchitectural(Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y))}</span></PropertyGridRow>
       <PropertyGridRow label="Plan angle"><span className="property-readout">{lineAngle(line)}°</span></PropertyGridRow>
-      <PropertyGridRow label="Rough floor"><span className="property-readout">{calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Rough ceiling"><span className="property-readout">{calculation ? formatSignedArchitectural(calculation.roughCeilingElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Wall height"><span className="property-readout">{story ? formatArchitectural(story.roughCeilingHeight) : "—"}</span></PropertyGridRow>
-      <p className="property-grid-note">X and Y define the {referenceLabel.toLowerCase()}. Looking from Start to End, the exterior is on the {exteriorSideLabel}; base and top follow the assigned Story rough framing.</p>
+      <PropertyGridRow label="Automatic base"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.baseElevation) : "—"}</span></PropertyGridRow>
+      <PropertyGridRow label="Automatic top"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.topElevation) : "—"}</span></PropertyGridRow>
+      <PropertyGridRow label="Wall height"><span className="property-readout">{vertical ? formatArchitectural(vertical.height) : "—"}</span></PropertyGridRow>
+      <PropertyGridRow label="Vertical source"><span className="property-readout">{vertical?.source === "rooms" ? `${vertical.adjacentRoomIds.length} adjacent Room${vertical.adjacentRoomIds.length === 1 ? "" : "s"}` : "Story defaults"}</span></PropertyGridRow>
+      <p className="property-grid-note">X and Y define the {referenceLabel.toLowerCase()}. Looking from Start to End, the exterior is on the {exteriorSideLabel}; base and top automatically follow adjacent Room rough conditions, then fall back to the Story defaults.</p>
+      {vertical?.hasDifferentRoomFloors || vertical?.hasDifferentRoomCeilings ? <p className="property-grid-note">Adjacent Rooms have different rough conditions. This Wall spans their full structural envelope; stepped finish profiles will be generated separately.</p> : null}
     </PropertyGridSection>
   );
 }
@@ -12639,7 +12642,7 @@ export function ModelBuilderApp() {
           ) : selectedLine ? (
             selectedLine.architecturalRole === "wall"
               ? <>
-                <WallGeometryControl building={editor.present.building} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
+                <WallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
                 <WallOpeningsControl line={selectedLine} onAdd={addSelectedWallOpening} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
               </>
               : <LineGeometryControl key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.start.z}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.end.z}`} line={selectedLine} onUpdate={updateSelectedLine} />
