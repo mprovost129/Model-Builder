@@ -303,6 +303,25 @@ button { color: inherit; }
 .current-settings > div { display: grid; gap: 3px; padding: 6px 8px; }
 .current-settings span { color: #8f9ba7; font-size: 8px; text-transform: uppercase; }
 .current-settings strong { color: #d9e0e6; font: 10px var(--font-geist-mono), monospace; }
+.ribbon-manage .manage-project-summary { min-width: 190px; }
+.manage-setting-group { padding-right: 7px; padding-left: 7px; }
+.manage-tools button { position: relative; min-width: 64px; padding-right: 5px; padding-left: 5px; }
+.manage-tools button > span { line-height: 1.15; text-align: center; }
+.manage-tools button > small {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: #252f39;
+  color: #84919c;
+  font-size: 6px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.manage-tools button.is-planned { opacity: .58; }
 .ribbon-reserve { display: grid; place-items: center; min-width: 210px; flex: 1; }
 .ribbon-reserve span { color: #697683; font-size: 9px; font-style: italic; }
 
@@ -1905,6 +1924,7 @@ button { color: inherit; }
 .theme-light .current-settings span { color: var(--muted); }
 .theme-light .planned-tools span { border-color: var(--ui-border); background: #edf2f4; color: #6b7f8d; }
 .theme-light .current-settings strong { color: #344f62; }
+.theme-light .manage-tools button > small { background: #d7e1e6; color: #657b89; }
 .theme-light .ribbon-reserve span { color: #81929d; }
 
 .theme-light .document-tabs { border-color: var(--ui-border); background: #e2eaee; }

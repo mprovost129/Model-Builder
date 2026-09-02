@@ -206,6 +206,12 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /refreshRoomsForStory/);
   assert.match(component, /building-browser/);
   assert.match(component, /Project Setup/);
+  assert.match(component, /Building standards · saved with project/);
+  assert.match(component, /Documentation standards · saved with project/);
+  assert.match(component, /Application preferences · follows user/);
+  assert.match(component, /Floors &amp;/);
+  assert.match(component, /Layer<br \/>Properties/);
+  assert.match(component, /className="is-planned" disabled/);
   assert.match(component, /Confirm project settings/);
   assert.match(component, /saveProjectAs/);
   assert.match(component, /File and application commands/);

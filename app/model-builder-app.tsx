@@ -12407,10 +12407,33 @@ export function ModelBuilderApp() {
         ) : null}
         {activeRibbonTab === "Manage" ? (
           <>
-            <div className="ribbon-group current-settings"><div><span>Units</span><strong>Architectural</strong></div><div><span>Active Story</span><strong>{activeStory.name}</strong></div><small>Project settings</small></div>
-            <div className="ribbon-group"><div className="ribbon-tools compact-tools"><button type="button" onClick={() => setStoryManagerOpen(true)} title="Define rough framing Stories and layered floor assemblies"><b>≋</b><span>Stories</span></button><button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable layered wall assemblies"><b>▥</b><span>Wall Types</span></button><button type="button" onClick={() => setRoomManagerOpen(true)} title="Detect enclosed Rooms and manage Story overrides"><b>▦</b><span>Rooms</span></button></div><small>Building</small></div>
-            <div className="ribbon-group"><div className="ribbon-tools compact-tools"><button type="button" onClick={() => setExplorerTab("layers")}><b>▤</b><span>Layers</span></button><button type="button" onClick={addNewLayer}><b>＋</b><span>New Layer</span></button></div><small>Layers</small></div>
-            <div className="ribbon-group planned-group"><div className="planned-tools"><span>Materials</span><span>Styles</span></div><small>Standards · planned</small></div>
+            <div className="ribbon-group current-settings manage-project-summary"><div><span>Units</span><strong>Architectural</strong></div><div><span>Active Story</span><strong>{activeStory.name}</strong></div><small>Project</small></div>
+            <div className="ribbon-group manage-setting-group">
+              <div className="ribbon-tools compact-tools manage-tools">
+                <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor and ceiling assemblies, and vertical building defaults"><b>≋</b><span>Floors &amp;<br />Ceilings</span></button>
+                <button type="button" className="is-planned" disabled title="Foundation settings will be added with foundation modeling"><b>▰</b><span>Foundation</span><small>Planned</small></button>
+                <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
+                <button type="button" className="is-planned" disabled title="Roof standards will be added with roof modeling"><b>⌂</b><span>Roof</span><small>Planned</small></button>
+                <button type="button" className="is-planned" disabled title="Framing defaults will be added with framing generation"><b>╫</b><span>Framing</span><small>Planned</small></button>
+                <button type="button" className="is-planned" disabled title="Project material definitions are planned"><b>▧</b><span>Materials</span><small>Planned</small></button>
+              </div>
+              <small>Building standards · saved with project</small>
+            </div>
+            <div className="ribbon-group manage-setting-group">
+              <div className="ribbon-tools compact-tools manage-tools">
+                <button type="button" className="is-planned" disabled title="Annotation styles are planned"><b>A</b><span>Annotation</span><small>Planned</small></button>
+                <button type="button" className="is-planned" disabled title="Dimension styles are planned"><b>↔</b><span>Dimensions</span><small>Planned</small></button>
+                <button type="button" onClick={() => setExplorerTab("layers")} title="Open Layer Properties in Model Explorer"><b>▤</b><span>Layer<br />Properties</span></button>
+              </div>
+              <small>Documentation standards · saved with project</small>
+            </div>
+            <div className="ribbon-group manage-setting-group">
+              <div className="ribbon-tools compact-tools manage-tools">
+                <button type="button" onClick={() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light")} title={`Switch to the ${interfaceTheme === "light" ? "dark" : "light"} interface`}><b>{interfaceTheme === "light" ? "☾" : "☀"}</b><span>Interface</span></button>
+                <button type="button" className="is-planned" disabled title="Application-wide drafting preferences are planned"><b>⌖</b><span>Drafting</span><small>Planned</small></button>
+              </div>
+              <small>Application preferences · follows user</small>
+            </div>
           </>
         ) : null}
         <div className="ribbon-reserve"><span>Reserved for future {activeRibbonTab.toLowerCase()} tools</span></div>

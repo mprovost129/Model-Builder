@@ -15,6 +15,9 @@ polylines, rectangles, Circles, and Arcs.
   and compact XYZ letters in three-dimensional views
 - AutoCAD/Revit-inspired workspace shell with quick access, tabbed ribbon,
   project tabs, left Properties, right Model Explorer, command line, and status bar
+- Scope-aware Manage ribbon separating project building standards, documentation
+  standards, and user-level application preferences; future disciplines are visibly
+  labeled without presenting unfinished settings as available
 - Revit-inspired application hierarchy with a dedicated program control, top-level
   New/Open/Save/Save As and history shortcuts, conventional application menus,
   and a separate task-based modeling ribbon
