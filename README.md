@@ -121,6 +121,9 @@ polylines, rectangles, Circles, and Arcs.
   shared Room boundaries, and report the resolved rule in Room Manager
 - Room-hosted Platform Openings for stairwells, shafts, and open-below areas, with
   independent floor, ceiling, or combined cuts, 2D plan outlines, and 3D assembly holes
+- Platform Openings can continue through adjacent Stories as one validated vertical
+  path; matching cuts are created or linked, required floor/ceiling cuts are enforced,
+  and editing the footprint or purpose updates every connected Story
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an
@@ -204,7 +207,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-27 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-28 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -301,8 +304,10 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   foundation-hosted sill plates in 3D, and supply the preferred sill edge to the Room
   floor solver. Their stems, footings, and sill plates now clean up independently at
   corners and T-junctions. Framed Walls save an editable supporting Foundation Wall
-  relationship, with automatic matching for newly aligned Walls. The next engineering
-  milestone is vertical opening continuity across adjacent Stories.
+  relationship, with automatic matching for newly aligned Walls. Stairwell, shaft,
+  and open-below cuts can now continue as aligned, validated paths through adjacent
+  Stories. The next engineering milestone is reusable Door and Window component
+  definitions with opening-return geometry.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -313,7 +318,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, and assembly definitions, and format metadata. Version-1 through version-27 files open and upgrade
+Foundation Wall Type, and assembly definitions, and format metadata. Version-1 through version-28 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

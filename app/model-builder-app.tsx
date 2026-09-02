@@ -175,6 +175,7 @@ import {
   createFoundationWallFromLine,
   createWallFromLine,
   createBoundaryPolylineObject,
+  continuePlatformOpening,
   DEFAULT_LAYER_ID,
   NEW_PROJECT_DOCUMENT,
   deleteLayer,
@@ -260,9 +261,12 @@ import {
   updatePolylineObjectVertex,
   addPlatformOpening,
   deletePlatformOpening,
+  disconnectPlatformOpeningContinuity,
   effectiveRoomSettings,
   PLATFORM_OPENING_CUTS,
   PLATFORM_OPENING_KINDS,
+  platformOpeningContinuity,
+  platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
   updatePlatformOpening,
   foundationSillOffsetFromReference,
@@ -9084,7 +9088,7 @@ function RoomManagerDialog({
     if (!selected) return;
     const next = updatePlatformOpening(draft, selected.id, openingId, change);
     if (!next) {
-      setError("Platform Openings must remain fully inside the Room and cannot overlap another opening.");
+      setError("Platform Openings must remain inside the Room, avoid overlaps, and preserve any connected vertical path.");
       return;
     }
     setDraft(next);
@@ -9115,10 +9119,26 @@ function RoomManagerDialog({
     if (next) setDraft(next);
     setError("");
   };
+  const continueOpening = (openingId: string, direction: "above" | "below") => {
+    if (!selected) return;
+    const next = continuePlatformOpening(draft, selected.id, openingId, direction);
+    if (!next) {
+      setError(`The opening cannot continue ${direction}. Detect Rooms on the adjacent Story and make sure the same footprint fits fully inside one Room.`);
+      return;
+    }
+    setDraft(next);
+    setError("");
+  };
+  const disconnectOpening = (openingId: string) => {
+    if (!selected) return;
+    const next = disconnectPlatformOpeningContinuity(draft, selected.id, openingId);
+    if (next) setDraft(next);
+    setError("");
+  };
   const save = () => {
     const next = cloneDocument(draft);
-    if (next.rooms.some((room) => !roomObjectIsValid(room, next))) {
-      setError("Check the Room names, heights, offsets, and assembly layers before applying these settings.");
+    if (next.rooms.some((room) => !roomObjectIsValid(room, next)) || !platformOpeningContinuityIsValid(next)) {
+      setError("Check the Room settings and make sure every connected platform opening stays aligned through adjacent Stories.");
       return;
     }
     onSave(next);
@@ -9189,6 +9209,17 @@ function RoomManagerDialog({
                 <header><div><strong>Platform Openings</strong><span>Hosted cuts for stairs, shafts, and open-below areas</span></div><button type="button" onClick={addOpening}>+ Add Opening</button></header>
                 {selected.platformOpenings.length ? selected.platformOpenings.map((opening) => {
                   const bounds = openingBounds(opening);
+                  const continuity = platformOpeningContinuity(draft, selected.id, opening.id);
+                  const storyIndex = draft.building.stories.findIndex((candidate) => candidate.id === selected.storyId);
+                  const canContinueBelow = storyIndex > 0 && !continuity?.below;
+                  const canContinueAbove = storyIndex >= 0 && storyIndex < draft.building.stories.length - 1 && !continuity?.above;
+                  const continuityLabel = continuity?.above && continuity.below
+                    ? `Continues below to ${continuity.below.storyName} and above to ${continuity.above.storyName}`
+                    : continuity?.above
+                      ? `Continues above to ${continuity.above.storyName}`
+                      : continuity?.below
+                        ? `Continues below to ${continuity.below.storyName}`
+                        : "Single-Story opening";
                   return <article className="room-platform-opening" key={opening.id}>
                     <div className="room-platform-opening-heading">
                       <label><span>Name</span><input value={opening.name} maxLength={120} onChange={(event) => replaceOpening(opening.id, { name: event.target.value })} /></label>
@@ -9201,6 +9232,14 @@ function RoomManagerDialog({
                       <StoryDimensionInput key={`${opening.id}:d:${bounds.depth}`} label="Depth" value={bounds.depth} onChange={(depth) => replaceOpeningRectangle(opening, { depth })} />
                       <StoryDimensionInput signed key={`${opening.id}:x:${bounds.centerX}`} label="Center X" value={bounds.centerX} onChange={(centerX) => replaceOpeningRectangle(opening, { centerX })} />
                       <StoryDimensionInput signed key={`${opening.id}:y:${bounds.centerY}`} label="Center Y" value={bounds.centerY} onChange={(centerY) => replaceOpeningRectangle(opening, { centerY })} />
+                    </div>
+                    <div className="room-platform-opening-continuity">
+                      <span><strong>Vertical path</strong>{continuityLabel}</span>
+                      <div>
+                        {canContinueBelow ? <button type="button" onClick={() => continueOpening(opening.id, "below")}>Continue Below</button> : null}
+                        {canContinueAbove ? <button type="button" onClick={() => continueOpening(opening.id, "above")}>Continue Above</button> : null}
+                        {continuity?.verticalOpeningId ? <button type="button" onClick={() => disconnectOpening(opening.id)}>Disconnect Path</button> : null}
+                      </div>
                     </div>
                   </article>;
                 }) : <p>No platform openings in this Room. Add one when the design needs a stairwell, shaft, or open-below cut.</p>}

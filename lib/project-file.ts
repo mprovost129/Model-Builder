@@ -33,6 +33,7 @@ import {
   type PlatformOpening,
   type RoomObject,
   cloneRoomObject,
+  platformOpeningContinuityIsValid,
   roomObjectIsValid,
   wallOpeningsAreValid,
 } from "./document-model.ts";
@@ -72,7 +73,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 28;
+export const PROJECT_FILE_VERSION = 29;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -545,22 +546,23 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
   return { ...geometry, architecturalRole, id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), shape: value.shape, storyId, type: "polyline" };
 }
 
-function readPlatformOpening(value: unknown): PlatformOpening | null {
+function readPlatformOpening(value: unknown, supportsVerticalOpeningContinuity: boolean): PlatformOpening | null {
   if (
     !isRecord(value) || !isRecord(value.boundary) || !Array.isArray(value.boundary.vertices) ||
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
     typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120 ||
     typeof value.kind !== "string" || !PLATFORM_OPENING_KINDS.includes(value.kind as PlatformOpening["kind"]) ||
-    typeof value.cuts !== "string" || !PLATFORM_OPENING_CUTS.includes(value.cuts as PlatformOpening["cuts"])
+    typeof value.cuts !== "string" || !PLATFORM_OPENING_CUTS.includes(value.cuts as PlatformOpening["cuts"]) ||
+    (supportsVerticalOpeningContinuity && !(value.verticalOpeningId === null || typeof value.verticalOpeningId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.verticalOpeningId)))
   ) return null;
   const vertices = value.boundary.vertices.map((point) => isRecord(point) && isFiniteNumber(point.x) && isFiniteNumber(point.y) ? { x: point.x, y: point.y } : null);
   if (vertices.some((point) => point === null) || !Array.isArray(value.boundary.bulges) || !value.boundary.bulges.every(isFiniteNumber) || !isFiniteNumber(value.boundary.elevation) || !isFiniteNumber(value.boundary.width) || value.boundary.closed !== true) return null;
   const boundary: PolylineGeometry = { bulges: value.boundary.bulges as number[], closed: true, elevation: value.boundary.elevation, vertices: vertices as Array<{ x: number; y: number }>, width: value.boundary.width };
   if (!polylineGeometryIsValid(boundary)) return null;
-  return { boundary, cuts: value.cuts as PlatformOpening["cuts"], id: value.id, kind: value.kind as PlatformOpening["kind"], name: value.name.trim() };
+  return { boundary, cuts: value.cuts as PlatformOpening["cuts"], id: value.id, kind: value.kind as PlatformOpening["kind"], name: value.name.trim(), verticalOpeningId: supportsVerticalOpeningContinuity ? value.verticalOpeningId as string | null : null };
 }
 
-function readRoomObject(value: unknown, supportsPlatformOpenings: boolean): RoomObject | null {
+function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, supportsVerticalOpeningContinuity: boolean): RoomObject | null {
   if (
     !isRecord(value) || !isRecord(value.boundary) || !Array.isArray(value.boundary.vertices) ||
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -582,7 +584,7 @@ function readRoomObject(value: unknown, supportsPlatformOpenings: boolean): Room
   if ((value.floorStructureOverride !== null && !floorStructureOverride) || (value.floorFinishOverride !== null && !floorFinishOverride) || (value.ceilingStructureOverride !== null && !ceilingStructureOverride) || (value.ceilingFinishOverride !== null && !ceilingFinishOverride)) return null;
   const platformOpenings = supportsPlatformOpenings
     ? Array.isArray(value.platformOpenings) && value.platformOpenings.length <= MAXIMUM_PLATFORM_OPENING_COUNT
-      ? value.platformOpenings.map(readPlatformOpening)
+      ? value.platformOpenings.map((opening) => readPlatformOpening(opening, supportsVerticalOpeningContinuity))
       : null
     : [];
   if (!platformOpenings || platformOpenings.some((opening) => opening === null)) return null;
@@ -916,11 +918,12 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   let rooms: RoomObject[] = [];
   if (version >= 24) {
     if (!Array.isArray(value.rooms) || value.rooms.length > MAXIMUM_ROOM_COUNT) return { ok: false, error: "The project Room collection is missing or invalid." };
-    const parsedRooms = value.rooms.map((room) => readRoomObject(room, version >= 25));
+    const parsedRooms = value.rooms.map((room) => readRoomObject(room, version >= 25, version >= 29));
     if (parsedRooms.some((room) => room === null)) return { ok: false, error: "One or more Rooms are invalid." };
     rooms = parsedRooms as RoomObject[];
     const roomDocument: ModelDocument = { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines, rooms };
     if (new Set(rooms.map((room) => room.id)).size !== rooms.length || rooms.some((room) => !roomObjectIsValid(room, roomDocument))) return { ok: false, error: "One or more Rooms reference invalid Stories, Walls, or settings." };
+    if (!platformOpeningContinuityIsValid(roomDocument)) return { ok: false, error: "One or more vertical platform-opening paths are invalid or discontinuous." };
   }
   const allEntityIds = [...validObjects.map((object) => object.id), ...lines.map((line) => line.id), ...polylines.map((polyline) => polyline.id), ...circles.map((circle) => circle.id), ...arcs.map((arc) => arc.id)];
   const allEntityNames = [...validObjects.map((object) => object.name.toLowerCase()), ...lines.map((line) => line.name.toLowerCase()), ...polylines.map((polyline) => polyline.name.toLowerCase()), ...circles.map((circle) => circle.name.toLowerCase()), ...arcs.map((arc) => arc.name.toLowerCase())];

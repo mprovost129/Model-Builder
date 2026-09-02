@@ -109,7 +109,7 @@ nodes remain unwrapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-28 project files store the Building Datum, ordered Stories, active and
+- Version-29 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -122,6 +122,12 @@ nodes remain unwrapped so their junction logic stays authoritative.
   bottom of the structural header above that same datum and calculate rough sill
   height as `bottom of header - rough-opening height`. This preserves the inputs
   needed for later king studs, trimmers, headers, sills, and cripple framing.
+- Room-hosted stairwell, shaft, and open-below openings can be continued above
+  or below into an immediately adjacent Story. The program creates or links the
+  matching footprint inside the containing Room, enforces the floor/ceiling cuts
+  required at each Story transition, and stores one vertical-path identity.
+  Footprint and purpose edits propagate through the path; deleting or explicitly
+  disconnecting a member safely removes the saved relationship.
 
 ## Foundation Wall Types
 
@@ -202,12 +208,10 @@ than hard-coded geometry.
 
 ## Next Steps
 
-1. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-2. Add openings/holes and per-room platform overrides to floor footprints.
-3. Extend hosted wall openings with selectable Door/Window library components,
+1. Extend hosted wall openings with selectable Door/Window library components,
    opening-specific finish returns, configurable return depths, and framing
    members generated from the existing rough-opening and header data.
-4. Detect Rooms from Wall reference boundaries and let Rooms inherit or override Story
-   floor, ceiling, and assembly defaults.
-5. Add split-level, open-below, vaulted-ceiling, and manual wall-height exceptions
+2. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+3. Add manual per-edge platform overrides for exceptional support details.
+4. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

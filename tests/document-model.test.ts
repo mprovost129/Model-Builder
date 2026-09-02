@@ -18,6 +18,7 @@ import {
   assignWallFoundationSupport,
   assignWallType,
   cloneDocument,
+  continuePlatformOpening,
   copyBoxObjects,
   copyModelEntities,
   createBoundaryPolylineObject,
@@ -32,6 +33,7 @@ import {
   deleteBoxObjects,
   deleteModelEntities,
   deletePlatformOpening,
+  disconnectPlatformOpeningContinuity,
   deleteWallOpening,
   documentsEqual,
   discoverDocumentBoundary,
@@ -66,6 +68,8 @@ import {
   renameBoxObject,
   removeWallRole,
   refreshRoomsForStory,
+  platformOpeningContinuity,
+  platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
   rotateBoxObjects,
   rotateModelEntities,
@@ -89,6 +93,7 @@ import {
   snapObjectMoveDistance,
   toggleLayerLock,
   toggleLayerVisibility,
+  type ModelDocument,
   ungroupBoxObjects,
   updateBoxObject,
 } from "../lib/document-model.ts";
@@ -1472,6 +1477,81 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   const hostedWindow = addWallOpening(refreshed, officeOnlyWall.id, "window");
   assert.ok(hostedWindow);
   assert.equal(updateRoomObject(hostedWindow.document, office.id, { roughCeilingHeightOverride: 72 }), null);
+});
+
+test("continues aligned platform openings through adjacent Stories", () => {
+  const building = addBuildingStory(NEW_PROJECT_DOCUMENT.building, "story-01", "above");
+  assert.ok(building);
+  const lowerStoryId = building.stories[0].id;
+  const upperStoryId = building.stories[1].id;
+  const initial = updateDocumentBuilding(NEW_PROJECT_DOCUMENT, building);
+  assert.ok(initial);
+  let document: ModelDocument = initial;
+
+  const encloseStory = (source: ModelDocument, storyId: string): ModelDocument => {
+    const activeBuilding = cloneBuildingStructure(source.building);
+    activeBuilding.activeStoryId = storyId;
+    let next = updateDocumentBuilding(source, activeBuilding);
+    assert.ok(next);
+    const elevation = calculateStoryElevations(activeBuilding).find((story) => story.storyId === storyId)?.roughFloorElevation ?? 0;
+    for (const [start, end] of [
+      [{ x: 0, y: 0, z: elevation }, { x: 240, y: 0, z: elevation }],
+      [{ x: 240, y: 0, z: elevation }, { x: 240, y: 180, z: elevation }],
+      [{ x: 240, y: 180, z: elevation }, { x: 0, y: 180, z: elevation }],
+      [{ x: 0, y: 180, z: elevation }, { x: 0, y: 0, z: elevation }],
+    ] as const) {
+      const added = addLineObject(next, start, end);
+      assert.ok(added);
+      const wall = createWallFromLine(added.document, added.line.id);
+      assert.ok(wall);
+      next = wall;
+    }
+    const refreshed = refreshRoomsForStory(next, storyId);
+    assert.ok(refreshed);
+    return refreshed;
+  };
+
+  document = encloseStory(document, lowerStoryId);
+  document = encloseStory(document, upperStoryId);
+  const lowerRoom = document.rooms.find((room) => room.storyId === lowerStoryId);
+  assert.ok(lowerRoom);
+  const added = addPlatformOpening(document, lowerRoom.id, "shaft", "ceiling");
+  assert.ok(added);
+  const continued = continuePlatformOpening(added.document, lowerRoom.id, added.opening.id, "above");
+  assert.ok(continued);
+  const upperRoom = continued.rooms.find((room) => room.storyId === upperStoryId);
+  assert.ok(upperRoom);
+  const upperOpening = upperRoom.platformOpenings[0];
+  const lowerOpening = continued.rooms.find((room) => room.id === lowerRoom.id)?.platformOpenings[0];
+  assert.ok(lowerOpening);
+  assert.equal(lowerOpening.verticalOpeningId, upperOpening.verticalOpeningId);
+  assert.equal(lowerOpening.cuts, "ceiling");
+  assert.equal(upperOpening.cuts, "floor");
+  assert.equal(platformOpeningContinuityIsValid(continued), true);
+  assert.equal(platformOpeningContinuity(continued, lowerRoom.id, lowerOpening.id)?.above?.storyId, upperStoryId);
+  assert.equal(platformOpeningContinuity(continued, upperRoom.id, upperOpening.id)?.below?.storyId, lowerStoryId);
+
+  const shiftedBoundary = {
+    ...lowerOpening.boundary,
+    vertices: lowerOpening.boundary.vertices.map((point) => ({ x: point.x + 6, y: point.y })),
+  };
+  const shifted = updatePlatformOpening(continued, lowerRoom.id, lowerOpening.id, { boundary: shiftedBoundary });
+  assert.ok(shifted);
+  assert.deepEqual(
+    shifted.rooms.find((room) => room.id === upperRoom.id)?.platformOpenings[0].boundary.vertices,
+    shiftedBoundary.vertices,
+  );
+  assert.equal(updatePlatformOpening(shifted, lowerRoom.id, lowerOpening.id, { cuts: "floor" }), null);
+
+  const disconnected = disconnectPlatformOpeningContinuity(shifted, lowerRoom.id, lowerOpening.id);
+  assert.ok(disconnected);
+  assert.ok(disconnected.rooms.every((room) => room.platformOpenings.every((opening) => opening.verticalOpeningId === null)));
+  const relinked = continuePlatformOpening(disconnected, lowerRoom.id, lowerOpening.id, "above");
+  assert.ok(relinked);
+  assert.equal(relinked.rooms.find((room) => room.id === upperRoom.id)?.platformOpenings.length, 1);
+  const deleted = deletePlatformOpening(relinked, upperRoom.id, upperOpening.id);
+  assert.ok(deleted);
+  assert.equal(deleted.rooms.find((room) => room.id === lowerRoom.id)?.platformOpenings[0].verticalOpeningId, null);
 });
 
 test("keeps Walls on their Story when moved or copied and reassigns removed wall types", () => {

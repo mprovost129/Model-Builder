@@ -586,6 +586,12 @@ button { color: inherit; }
 .room-platform-opening-heading select { min-width: 0; height: 28px; padding: 0 7px; border: 1px solid #465462; border-radius: 2px; background: #141b22; color: #e4e9ed; font-size: 8px; }
 .room-platform-opening-delete { min-height: 28px; padding: 0 8px; border: 1px solid #65494a; border-radius: 2px; background: #322526; color: #dba0a3; font-size: 8px; cursor: pointer; }
 .room-platform-opening-geometry { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 7px; }
+.room-platform-opening-continuity { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding-top: 7px; border-top: 1px solid #3b4752; }
+.room-platform-opening-continuity > span { display: grid; gap: 2px; color: #91a0ac; font-size: 8px; }
+.room-platform-opening-continuity > span strong { color: #d9b869; font-size: 7px; letter-spacing: .06em; text-transform: uppercase; }
+.room-platform-opening-continuity > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.room-platform-opening-continuity button { min-height: 25px; padding: 0 8px; border: 1px solid #506576; border-radius: 2px; background: #263643; color: #c8d9e4; font-size: 8px; cursor: pointer; }
+.room-platform-opening-continuity button:hover { border-color: #6f8ba0; background: #304756; }
 .room-override-section { margin-bottom: 8px; border: 1px solid #3b4752; background: #1c242d; }
 .room-override-section > label { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 9px; color: #cbd4db; font-size: 8px; }
 .room-override-section .story-assembly { margin: 0; border-right: 0; border-bottom: 0; border-left: 0; }
@@ -2309,6 +2315,11 @@ button { color: inherit; }
 .theme-light .room-platform-opening { border-color: var(--ui-border); background: #f3f5f4; }
 .theme-light :is(.room-platform-opening-heading input, .room-platform-opening-heading select) { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
 .theme-light .room-platform-opening-delete { border-color: #c6a7a5; background: #f1e5e3; color: #7b4545; }
+.theme-light .room-platform-opening-continuity { border-color: var(--ui-border); }
+.theme-light .room-platform-opening-continuity > span { color: var(--muted); }
+.theme-light .room-platform-opening-continuity > span strong { color: #3a657c; }
+.theme-light .room-platform-opening-continuity button { border-color: var(--ui-border-strong); background: #e5edf0; color: #3b5d71; }
+.theme-light .room-platform-opening-continuity button:hover { background: #d9e6eb; }
 .theme-light .room-empty-state { border-color: var(--ui-border-strong); color: var(--muted); }
 .theme-light .room-empty-state strong { color: #304d60; }
 .theme-light :is(.room-inherit-toggle input, .room-override-section > label input, .story-layer-join input) { accent-color: var(--ui-blue); }

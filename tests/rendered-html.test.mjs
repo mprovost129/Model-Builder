@@ -217,6 +217,9 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /Platform Openings/);
   assert.match(component, /addPlatformOpening/);
   assert.match(component, /updatePlatformOpening/);
+  assert.match(component, /continuePlatformOpening/);
+  assert.match(component, /Disconnect Path/);
+  assert.match(component, /Vertical path/);
   assert.match(component, /room\.platformOpenings/);
   assert.match(component, /building-browser/);
   assert.match(component, /Project Setup/);

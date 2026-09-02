@@ -233,6 +233,17 @@ export type PlatformOpening = {
   id: string;
   kind: PlatformOpeningKind;
   name: string;
+  /** Shared identity for one aligned opening path through adjacent Stories. */
+  verticalOpeningId: string | null;
+};
+
+export type PlatformOpeningContinuationDirection = "above" | "below";
+
+export type PlatformOpeningContinuation = {
+  openingId: string;
+  roomId: string;
+  storyId: string;
+  storyName: string;
 };
 
 export type EffectiveRoomSettings = {
@@ -519,6 +530,7 @@ export function clonePlatformOpening(opening: PlatformOpening): PlatformOpening 
     id: opening.id,
     kind: opening.kind,
     name: opening.name,
+    verticalOpeningId: opening.verticalOpeningId,
   };
 }
 
@@ -596,6 +608,7 @@ function polylinePathsIntersect(first: PolylineGeometry, second: PolylineGeometr
 export function platformOpeningIsValid(opening: PlatformOpening, room: RoomObject): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.id) &&
     opening.name.trim().length > 0 && opening.name.trim().length <= 120 &&
+    (opening.verticalOpeningId === null || /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.verticalOpeningId)) &&
     PLATFORM_OPENING_KINDS.includes(opening.kind) && PLATFORM_OPENING_CUTS.includes(opening.cuts) &&
     polylineGeometryIsValid(opening.boundary) && opening.boundary.closed && opening.boundary.vertices.length === 4 &&
     (opening.boundary.bulges ?? []).every((bulge) => Math.abs(bulge) < 1e-10) && polylineArea(opening.boundary) > 0 &&
@@ -631,6 +644,103 @@ export function roomObjectIsValid(room: RoomObject, document: ModelDocument): bo
     roomAssemblyIsValid(room.floorFinishOverride, "floor-finish") &&
     roomAssemblyIsValid(room.ceilingStructureOverride, "ceiling-structure") &&
     roomAssemblyIsValid(room.ceilingFinishOverride, "ceiling-finish");
+}
+
+type PlatformOpeningMember = {
+  opening: PlatformOpening;
+  room: RoomObject;
+  storyIndex: number;
+};
+
+function platformOpeningCutsFloor(opening: PlatformOpening): boolean {
+  return opening.cuts === "floor" || opening.cuts === "both";
+}
+
+function platformOpeningCutsCeiling(opening: PlatformOpening): boolean {
+  return opening.cuts === "ceiling" || opening.cuts === "both";
+}
+
+function platformOpeningBoundaryMatches(first: PolylineGeometry, second: PolylineGeometry): boolean {
+  if (first.vertices.length !== second.vertices.length) return false;
+  const count = first.vertices.length;
+  const matches = (reverse: boolean, shift: number) => first.vertices.every((point, index) => {
+    const candidateIndex = reverse
+      ? (shift - index + count) % count
+      : (index + shift) % count;
+    const candidate = second.vertices[candidateIndex];
+    return Math.abs(point.x - candidate.x) < 1e-8 && Math.abs(point.y - candidate.y) < 1e-8;
+  });
+  return Array.from({ length: count }, (_, shift) => shift).some((shift) => matches(false, shift) || matches(true, shift));
+}
+
+function platformOpeningMembers(document: ModelDocument): PlatformOpeningMember[] {
+  const storyIndices = new Map(document.building.stories.map((story, index) => [story.id, index]));
+  return document.rooms.flatMap((room) => room.platformOpenings.map((opening) => ({
+    opening,
+    room,
+    storyIndex: storyIndices.get(room.storyId) ?? -1,
+  })));
+}
+
+function invalidVerticalOpeningIds(document: ModelDocument): Set<string> {
+  const groups = new Map<string, PlatformOpeningMember[]>();
+  platformOpeningMembers(document).forEach((member) => {
+    if (member.opening.verticalOpeningId === null) return;
+    const group = groups.get(member.opening.verticalOpeningId) ?? [];
+    group.push(member);
+    groups.set(member.opening.verticalOpeningId, group);
+  });
+  const invalid = new Set<string>();
+  groups.forEach((members, id) => {
+    const ordered = [...members].sort((first, second) => first.storyIndex - second.storyIndex);
+    const reference = ordered[0];
+    if (
+      ordered.length < 2 ||
+      ordered.some((member) => member.storyIndex < 0 || member.opening.kind !== reference.opening.kind || !platformOpeningBoundaryMatches(member.opening.boundary, reference.opening.boundary)) ||
+      new Set(ordered.map((member) => member.storyIndex)).size !== ordered.length ||
+      ordered.some((member, index) => index > 0 && member.storyIndex !== ordered[index - 1].storyIndex + 1) ||
+      ordered.some((member, index) => index > 0 && (!platformOpeningCutsCeiling(ordered[index - 1].opening) || !platformOpeningCutsFloor(member.opening)))
+    ) invalid.add(id);
+  });
+  return invalid;
+}
+
+/** Validates saved, aligned opening paths that pass through adjacent Stories. */
+export function platformOpeningContinuityIsValid(document: ModelDocument): boolean {
+  return invalidVerticalOpeningIds(document).size === 0;
+}
+
+function clearInvalidPlatformOpeningContinuity(document: ModelDocument): ModelDocument {
+  const invalidIds = invalidVerticalOpeningIds(document);
+  if (invalidIds.size === 0) return document;
+  const next = cloneDocument(document);
+  next.rooms.forEach((room) => room.platformOpenings.forEach((opening) => {
+    if (opening.verticalOpeningId !== null && invalidIds.has(opening.verticalOpeningId)) opening.verticalOpeningId = null;
+  }));
+  return next;
+}
+
+/** Reports the immediately adjacent members of one saved vertical opening path. */
+export function platformOpeningContinuity(
+  document: ModelDocument,
+  roomId: string,
+  openingId: string,
+): { above: PlatformOpeningContinuation | null; below: PlatformOpeningContinuation | null; verticalOpeningId: string | null } | null {
+  const source = platformOpeningMembers(document).find((member) => member.room.id === roomId && member.opening.id === openingId);
+  if (!source) return null;
+  const members = source.opening.verticalOpeningId === null
+    ? []
+    : platformOpeningMembers(document).filter((member) => member.opening.verticalOpeningId === source.opening.verticalOpeningId);
+  const result = (storyIndex: number): PlatformOpeningContinuation | null => {
+    const member = members.find((candidate) => candidate.storyIndex === storyIndex);
+    const story = member ? document.building.stories[member.storyIndex] : null;
+    return member && story ? { openingId: member.opening.id, roomId: member.room.id, storyId: member.room.storyId, storyName: story.name } : null;
+  };
+  return {
+    above: result(source.storyIndex + 1),
+    below: result(source.storyIndex - 1),
+    verticalOpeningId: source.opening.verticalOpeningId,
+  };
 }
 
 export function effectiveRoomSettings(
@@ -1027,7 +1137,8 @@ export function refreshRoomsForStory(document: ModelDocument, storyId: string): 
   if (rooms.length > MAXIMUM_ROOM_COUNT) return null;
   const next = cloneDocument(document);
   next.rooms = [...next.rooms.filter((room) => room.storyId !== storyId), ...rooms];
-  return next.rooms.every((room) => roomObjectIsValid(room, next)) && documentWallOpeningsAreValid(next) ? next : null;
+  const normalized = clearInvalidPlatformOpeningContinuity(next);
+  return normalized.rooms.every((room) => roomObjectIsValid(room, normalized)) && documentWallOpeningsAreValid(normalized) ? normalized : null;
 }
 
 export function updateRoomObject(document: ModelDocument, roomId: string, change: Partial<Omit<RoomObject, "id" | "storyId" | "boundary" | "boundaryWallIds" | "platformOpenings">>): ModelDocument | null {
@@ -1075,7 +1186,7 @@ export function addPlatformOpening(
       room.boundary.elevation,
     );
     if (!boundary) continue;
-    const opening: PlatformOpening = { boundary, cuts, id: identity.id, kind, name: identity.name };
+    const opening: PlatformOpening = { boundary, cuts, id: identity.id, kind, name: identity.name, verticalOpeningId: null };
     const next = cloneDocument(document);
     const nextRoom = next.rooms.find((candidate) => candidate.id === roomId);
     if (!nextRoom) return null;
@@ -1089,7 +1200,7 @@ export function updatePlatformOpening(
   document: ModelDocument,
   roomId: string,
   openingId: string,
-  change: Partial<Omit<PlatformOpening, "id">>,
+  change: Partial<Omit<PlatformOpening, "id" | "verticalOpeningId">>,
 ): ModelDocument | null {
   const next = cloneDocument(document);
   const room = next.rooms.find((candidate) => candidate.id === roomId);
@@ -1102,15 +1213,106 @@ export function updatePlatformOpening(
     boundary: change.boundary ? clonePolylineGeometry(change.boundary) : current.boundary,
     name: change.name?.trim() || current.name,
   };
-  return roomObjectIsValid(room, next) ? next : null;
+  if (current.verticalOpeningId !== null && (change.boundary || change.kind)) {
+    next.rooms.forEach((candidateRoom) => candidateRoom.platformOpenings.forEach((candidateOpening) => {
+      if (candidateOpening.verticalOpeningId !== current.verticalOpeningId || candidateRoom.id === roomId && candidateOpening.id === openingId) return;
+      if (change.boundary) candidateOpening.boundary = { ...clonePolylineGeometry(change.boundary), elevation: candidateRoom.boundary.elevation };
+      if (change.kind) candidateOpening.kind = change.kind;
+    }));
+  }
+  return next.rooms.every((candidate) => roomObjectIsValid(candidate, next)) && platformOpeningContinuityIsValid(next) ? next : null;
 }
 
 export function deletePlatformOpening(document: ModelDocument, roomId: string, openingId: string): ModelDocument | null {
   const next = cloneDocument(document);
   const room = next.rooms.find((candidate) => candidate.id === roomId);
-  if (!room || !room.platformOpenings.some((opening) => opening.id === openingId)) return null;
+  const opening = room?.platformOpenings.find((candidate) => candidate.id === openingId);
+  if (!room || !opening) return null;
   room.platformOpenings = room.platformOpenings.filter((opening) => opening.id !== openingId);
-  return roomObjectIsValid(room, next) ? next : null;
+  if (opening.verticalOpeningId !== null) next.rooms.forEach((candidateRoom) => candidateRoom.platformOpenings.forEach((candidateOpening) => {
+    if (candidateOpening.verticalOpeningId === opening.verticalOpeningId) candidateOpening.verticalOpeningId = null;
+  }));
+  return next.rooms.every((candidate) => roomObjectIsValid(candidate, next)) && platformOpeningContinuityIsValid(next) ? next : null;
+}
+
+function nextVerticalOpeningId(document: ModelDocument): string {
+  const ids = new Set(platformOpeningMembers(document).map((member) => member.opening.verticalOpeningId).filter((id): id is string => id !== null));
+  let number = 1;
+  while (ids.has(`vertical-opening-${String(number).padStart(2, "0")}`)) number += 1;
+  return `vertical-opening-${String(number).padStart(2, "0")}`;
+}
+
+function addRequiredPlatformCut(cuts: PlatformOpeningCuts, cut: "ceiling" | "floor"): PlatformOpeningCuts {
+  if (cuts === "both" || cuts === cut) return cuts;
+  return "both";
+}
+
+/** Creates or links an aligned opening in the immediately adjacent Story. */
+export function continuePlatformOpening(
+  document: ModelDocument,
+  roomId: string,
+  openingId: string,
+  direction: PlatformOpeningContinuationDirection,
+): ModelDocument | null {
+  const sourceRoom = document.rooms.find((room) => room.id === roomId);
+  const sourceOpening = sourceRoom?.platformOpenings.find((opening) => opening.id === openingId);
+  const sourceStoryIndex = document.building.stories.findIndex((story) => story.id === sourceRoom?.storyId);
+  const targetStoryIndex = sourceStoryIndex + (direction === "above" ? 1 : -1);
+  const targetStory = document.building.stories[targetStoryIndex];
+  if (!sourceRoom || !sourceOpening || sourceStoryIndex < 0 || !targetStory) return null;
+  const existingContinuation = platformOpeningContinuity(document, roomId, openingId);
+  if (existingContinuation?.[direction]) return cloneDocument(document);
+
+  const targetRooms = document.rooms.filter((room) => room.storyId === targetStory.id);
+  const matchingMembers = targetRooms.flatMap((room) => room.platformOpenings
+    .filter((opening) => platformOpeningBoundaryMatches(opening.boundary, sourceOpening.boundary))
+    .map((opening) => ({ opening, room })));
+  if (matchingMembers.length > 1) return null;
+
+  const verticalOpeningId = sourceOpening.verticalOpeningId ?? nextVerticalOpeningId(document);
+  const next = cloneDocument(document);
+  const nextSourceRoom = next.rooms.find((room) => room.id === roomId);
+  const nextSourceOpening = nextSourceRoom?.platformOpenings.find((opening) => opening.id === openingId);
+  if (!nextSourceOpening) return null;
+  nextSourceOpening.verticalOpeningId = verticalOpeningId;
+  nextSourceOpening.cuts = addRequiredPlatformCut(nextSourceOpening.cuts, direction === "above" ? "ceiling" : "floor");
+
+  if (matchingMembers.length === 1) {
+    const match = matchingMembers[0];
+    if (match.opening.kind !== sourceOpening.kind || match.opening.verticalOpeningId !== null && match.opening.verticalOpeningId !== verticalOpeningId) return null;
+    const targetOpening = next.rooms.find((room) => room.id === match.room.id)?.platformOpenings.find((opening) => opening.id === match.opening.id);
+    if (!targetOpening) return null;
+    targetOpening.verticalOpeningId = verticalOpeningId;
+    targetOpening.cuts = addRequiredPlatformCut(targetOpening.cuts, direction === "above" ? "floor" : "ceiling");
+  } else {
+    const boundaryAtTarget = { ...clonePolylineGeometry(sourceOpening.boundary), elevation: targetRooms[0]?.boundary.elevation ?? 0 };
+    const containingRooms = targetRooms.filter((room) => platformOpeningIsValid({ ...sourceOpening, boundary: { ...boundaryAtTarget, elevation: room.boundary.elevation } }, room));
+    if (containingRooms.length !== 1 || containingRooms[0].platformOpenings.length >= MAXIMUM_PLATFORM_OPENING_COUNT) return null;
+    const targetRoom = next.rooms.find((room) => room.id === containingRooms[0].id);
+    if (!targetRoom) return null;
+    const identity = nextPlatformOpeningIdentity(targetRoom, sourceOpening.kind);
+    targetRoom.platformOpenings.push({
+      boundary: { ...clonePolylineGeometry(sourceOpening.boundary), elevation: targetRoom.boundary.elevation },
+      cuts: direction === "above" ? "floor" : "ceiling",
+      id: identity.id,
+      kind: sourceOpening.kind,
+      name: identity.name,
+      verticalOpeningId,
+    });
+  }
+  return next.rooms.every((room) => roomObjectIsValid(room, next)) && platformOpeningContinuityIsValid(next) ? next : null;
+}
+
+/** Disconnects every Story member of the selected vertical opening path. */
+export function disconnectPlatformOpeningContinuity(document: ModelDocument, roomId: string, openingId: string): ModelDocument | null {
+  const source = document.rooms.find((room) => room.id === roomId)?.platformOpenings.find((opening) => opening.id === openingId);
+  if (!source) return null;
+  if (source.verticalOpeningId === null) return cloneDocument(document);
+  const next = cloneDocument(document);
+  next.rooms.forEach((room) => room.platformOpenings.forEach((opening) => {
+    if (opening.verticalOpeningId === source.verticalOpeningId) opening.verticalOpeningId = null;
+  }));
+  return next;
 }
 
 export function cloneDocument(document: ModelDocument): ModelDocument {
@@ -1188,7 +1390,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         polylineGeometriesEqual(room.boundary, other.boundary) &&
         room.platformOpenings.length === other.platformOpenings.length && room.platformOpenings.every((opening, openingIndex) => {
           const otherOpening = other.platformOpenings[openingIndex];
-          return otherOpening !== undefined && opening.id === otherOpening.id && opening.name === otherOpening.name && opening.kind === otherOpening.kind && opening.cuts === otherOpening.cuts && polylineGeometriesEqual(opening.boundary, otherOpening.boundary);
+          return otherOpening !== undefined && opening.id === otherOpening.id && opening.name === otherOpening.name && opening.kind === otherOpening.kind && opening.cuts === otherOpening.cuts && opening.verticalOpeningId === otherOpening.verticalOpeningId && polylineGeometriesEqual(opening.boundary, otherOpening.boundary);
         }) &&
         JSON.stringify(room.floorStructureOverride) === JSON.stringify(other.floorStructureOverride) &&
         JSON.stringify(room.floorFinishOverride) === JSON.stringify(other.floorFinishOverride) &&
@@ -1258,12 +1460,21 @@ export function updateDocumentBuilding(
   });
   next.rooms = next.rooms.map((room) => {
     const change = storyChange(room.storyId);
-    return { ...room, boundary: { ...clonePolylineGeometry(room.boundary), elevation: snapToSixteenth(room.boundary.elevation + change.delta) }, storyId: change.storyId };
+    return {
+      ...room,
+      boundary: { ...clonePolylineGeometry(room.boundary), elevation: snapToSixteenth(room.boundary.elevation + change.delta) },
+      platformOpenings: room.platformOpenings.map((opening) => ({
+        ...clonePlatformOpening(opening),
+        boundary: { ...clonePolylineGeometry(opening.boundary), elevation: snapToSixteenth(opening.boundary.elevation + change.delta) },
+      })),
+      storyId: change.storyId,
+    };
   });
   next.building = cloneBuildingStructure(building);
-  if (!documentWallOpeningsAreValid(next)) return null;
-  if (next.rooms.some((room) => !roomObjectIsValid(room, next))) return null;
-  return next;
+  const normalized = clearInvalidPlatformOpeningContinuity(next);
+  if (!documentWallOpeningsAreValid(normalized)) return null;
+  if (normalized.rooms.some((room) => !roomObjectIsValid(room, normalized))) return null;
+  return normalized;
 }
 
 export function assignModelEntityToStory(
