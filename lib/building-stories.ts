@@ -24,6 +24,10 @@ export const WALL_OPENING_KINDS = ["door", "window"] as const;
 export type WallOpeningKind = (typeof WALL_OPENING_KINDS)[number];
 export const PRODUCT_SOURCE_FORMATS = ["mbproduct", "svg", "glb", "gltf", "dxf", "dwg", "rfa", "ifc", "skp", "other"] as const;
 export type ProductSourceFormat = (typeof PRODUCT_SOURCE_FORMATS)[number];
+export const PRODUCT_ASSET_ROLES = ["plan-symbol", "elevation-symbol", "model-3d", "thumbnail"] as const;
+export type ProductAssetRole = (typeof PRODUCT_ASSET_ROLES)[number];
+export const PRODUCT_ASSET_FORMATS = ["svg", "glb", "gltf", "png", "jpeg"] as const;
+export type ProductAssetFormat = (typeof PRODUCT_ASSET_FORMATS)[number];
 export const WALL_HEADER_LAYOUTS = ["solid", "on-edge", "flat-stack"] as const;
 export type WallHeaderLayout = (typeof WALL_HEADER_LAYOUTS)[number];
 export const WALL_HEADER_FILL_METHODS = ["none", "interior-insulation", "between-plies"] as const;
@@ -181,6 +185,17 @@ export type ManufacturerProductSource = {
   verifiedAt: string;
 };
 
+export type ProductAssetReference = {
+  byteLength: number;
+  checksumSha256: string;
+  fileName: string;
+  format: ProductAssetFormat;
+  id: string;
+  name: string;
+  role: ProductAssetRole;
+  sourceUrl: string;
+};
+
 export type WallOpeningType = {
   /** Joined parametric parts that generate the placed Door or Window model. */
   components: OpeningAssemblyComponent[];
@@ -199,6 +214,8 @@ export type WallOpeningType = {
   /** Full-height king studs generated at each side of the rough opening. */
   kingStudCountPerSide: number;
   name: string;
+  /** Validated representation manifest; asset binary storage remains separate. */
+  productAssets: ProductAssetReference[];
   /** Manufacturer identity and source provenance; null denotes a native generic Type. */
   productSource: ManufacturerProductSource | null;
   /** Header-bearing jack studs generated at each side of the rough opening. */
@@ -469,6 +486,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       kingStudCountPerSide: 1,
       kind: "door",
       name: "3-0 x 6-8 Door",
+      productAssets: [],
       productSource: null,
       roughHeight: 82.5,
       roughWidth: 38,
@@ -490,6 +508,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       kingStudCountPerSide: 1,
       kind: "window",
       name: "3-0 x 4-0 Window",
+      productAssets: [],
       productSource: null,
       roughHeight: 48.5,
       roughWidth: 36.5,
@@ -685,7 +704,7 @@ export function cloneFoundationWallType(type: FoundationWallType): FoundationWal
 }
 
 export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
-  return { ...type, components: type.components.map((component) => ({ ...component })), productSource: type.productSource === null ? null : { ...type.productSource } };
+  return { ...type, components: type.components.map((component) => ({ ...component })), productAssets: type.productAssets.map((asset) => ({ ...asset })), productSource: type.productSource === null ? null : { ...type.productSource } };
 }
 
 export function cloneWallHeaderType(type: WallHeaderType): WallHeaderType {
@@ -792,6 +811,7 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
   };
   if (type.components.some((component) => resolveBounds(component) === null)) return false;
   return IDENTIFIER_PATTERN.test(type.id) && (type.headerTypeId === null || IDENTIFIER_PATTERN.test(type.headerTypeId)) &&
+    productAssetReferencesAreValid(type.productAssets) &&
     manufacturerProductSourceIsValid(type.productSource) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
     WALL_OPENING_KINDS.includes(type.kind) &&
@@ -818,6 +838,21 @@ export function manufacturerProductSourceIsValid(source: ManufacturerProductSour
   return required.every((value) => typeof value === "string" && Boolean(value.trim()) && value.trim().length <= 240) &&
     optional.every((value) => typeof value === "string" && value.trim().length <= 500) &&
     typeof source.verifiedAt === "string" && (source.verifiedAt === "" || Number.isFinite(Date.parse(source.verifiedAt)));
+}
+
+export function productAssetReferencesAreValid(assets: ProductAssetReference[]): boolean {
+  if (!Array.isArray(assets) || assets.length > 16) return false;
+  const ids = new Set<string>();
+  return assets.every((asset) => {
+    if (typeof asset !== "object" || asset === null || ids.has(asset.id)) return false;
+    ids.add(asset.id);
+    return IDENTIFIER_PATTERN.test(asset.id) && PRODUCT_ASSET_ROLES.includes(asset.role) && PRODUCT_ASSET_FORMATS.includes(asset.format) &&
+      typeof asset.name === "string" && Boolean(asset.name.trim()) && asset.name.trim().length <= 100 &&
+      typeof asset.fileName === "string" && Boolean(asset.fileName.trim()) && asset.fileName.trim().length <= 240 &&
+      typeof asset.sourceUrl === "string" && asset.sourceUrl.trim().length <= 500 &&
+      typeof asset.checksumSha256 === "string" && (asset.checksumSha256 === "" || /^[a-f0-9]{64}$/i.test(asset.checksumSha256)) &&
+      Number.isInteger(asset.byteLength) && asset.byteLength >= 0 && asset.byteLength <= 100_000_000;
+  });
 }
 
 export function wallHeaderTypeRequiredMainThickness(type: WallHeaderType): number {

@@ -59,6 +59,8 @@ import {
   OPENING_COMPONENT_DEPTH_ANCHORS,
   OPENING_COMPONENT_GEOMETRIES,
   OPENING_COMPONENT_ROLES,
+  PRODUCT_ASSET_FORMATS,
+  PRODUCT_ASSET_ROLES,
   PRODUCT_SOURCE_FORMATS,
   WALL_CORNER_FRAMING_STYLES,
   WALL_HEADER_ALIGNMENTS,
@@ -88,6 +90,9 @@ import {
   type OpeningComponentGeometry,
   type OpeningComponentRole,
   type ManufacturerProductSource,
+  type ProductAssetFormat,
+  type ProductAssetReference,
+  type ProductAssetRole,
   type ProductSourceFormat,
   type WallExteriorSide,
   type WallJoinMode,
@@ -107,7 +112,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 39;
+export const PROJECT_FILE_VERSION = 40;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -350,7 +355,24 @@ function readManufacturerProductSource(value: unknown): ManufacturerProductSourc
   };
 }
 
-function readWallOpeningType(value: unknown, supportsOpeningFraming: boolean, fallbackHeaderDepth: number, supportsHeaderTypes: boolean, fallbackHeaderTypeId: string, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean): WallOpeningType | null {
+function readProductAssetReference(value: unknown): ProductAssetReference | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string" || typeof value.fileName !== "string" ||
+    typeof value.role !== "string" || !PRODUCT_ASSET_ROLES.includes(value.role as ProductAssetRole) ||
+    typeof value.format !== "string" || !PRODUCT_ASSET_FORMATS.includes(value.format as ProductAssetFormat) ||
+    typeof value.sourceUrl !== "string" || typeof value.checksumSha256 !== "string" || !Number.isInteger(value.byteLength)) return null;
+  return {
+    byteLength: value.byteLength as number,
+    checksumSha256: value.checksumSha256.trim(),
+    fileName: value.fileName.trim(),
+    format: value.format as ProductAssetFormat,
+    id: value.id,
+    name: value.name.trim(),
+    role: value.role as ProductAssetRole,
+    sourceUrl: value.sourceUrl.trim(),
+  };
+}
+
+function readWallOpeningType(value: unknown, supportsOpeningFraming: boolean, fallbackHeaderDepth: number, supportsHeaderTypes: boolean, fallbackHeaderTypeId: string, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean): WallOpeningType | null {
   if (!isRecord(value) ||
     typeof value.id !== "string" || typeof value.name !== "string" ||
     typeof value.kind !== "string" || !WALL_OPENING_KINDS.includes(value.kind as WallOpeningKind) ||
@@ -361,7 +383,8 @@ function readWallOpeningType(value: unknown, supportsOpeningFraming: boolean, fa
     (supportsAssemblyComponents && (!Array.isArray(value.components) || !isFiniteNumber(value.unitOffsetX) || !isFiniteNumber(value.unitOffsetZ))) ||
     (supportsOpeningFraming && (!isFiniteNumber(value.headerDepth) || !Number.isInteger(value.kingStudCountPerSide) || !Number.isInteger(value.jackStudCountPerSide) || !Number.isInteger(value.windowSillPlateCount))) ||
     (supportsHeaderTypes && (supportsHostAwareHeaders ? value.headerTypeId !== null && typeof value.headerTypeId !== "string" : typeof value.headerTypeId !== "string")) ||
-    (supportsProductSources && value.productSource !== null && !isRecord(value.productSource))) return null;
+    (supportsProductSources && value.productSource !== null && !isRecord(value.productSource)) ||
+    (supportsProductAssets && !Array.isArray(value.productAssets))) return null;
   const kind = value.kind as WallOpeningKind;
   const components = supportsAssemblyComponents
     ? (value.components as unknown[]).map(readOpeningAssemblyComponent)
@@ -369,6 +392,8 @@ function readWallOpeningType(value: unknown, supportsOpeningFraming: boolean, fa
   if (components.some((component) => component === null)) return null;
   const productSource = supportsProductSources ? readManufacturerProductSource(value.productSource) : null;
   if (productSource === undefined) return null;
+  const productAssets = supportsProductAssets ? (value.productAssets as unknown[]).map(readProductAssetReference) : [];
+  if (productAssets.some((asset) => asset === null)) return null;
   return {
     components: components as OpeningAssemblyComponent[],
     defaultHeaderBottomHeight: value.defaultHeaderBottomHeight,
@@ -381,6 +406,7 @@ function readWallOpeningType(value: unknown, supportsOpeningFraming: boolean, fa
     kingStudCountPerSide: supportsOpeningFraming ? value.kingStudCountPerSide as number : 1,
     kind,
     name: value.name.trim(),
+    productAssets: productAssets as ProductAssetReference[],
     productSource,
     roughHeight: value.roughHeight,
     roughWidth: value.roughWidth,
@@ -446,7 +472,7 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -477,7 +503,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   const fallbackHeaderTypeId = supportsHeaderTypes ? defaults.headerTypes[0].id : defaults.headerTypes.find((type) => type.layout === "solid")!.id;
   if (supportsOpeningTypes && !Array.isArray(value.openingTypes)) return null;
   const openingTypes = supportsOpeningTypes
-    ? (value.openingTypes as unknown[]).map((type) => readWallOpeningType(type, supportsOpeningFraming, wallFraming.headerHeight, supportsHeaderTypes, fallbackHeaderTypeId, supportsHostAwareHeaders, supportsAssemblyComponents, supportsProductSources))
+    ? (value.openingTypes as unknown[]).map((type) => readWallOpeningType(type, supportsOpeningFraming, wallFraming.headerHeight, supportsHeaderTypes, fallbackHeaderTypeId, supportsHostAwareHeaders, supportsAssemblyComponents, supportsProductSources, supportsProductAssets))
     : defaults.openingTypes;
   if (openingTypes.some((openingType) => openingType === null)) return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : legacyWallType.id;
@@ -963,7 +989,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

@@ -238,7 +238,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-34 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-39 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -349,9 +349,13 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   output remains editable component geometry; manufacturer identity and certified
   product profiles are intentionally not inferred from these generic layouts. Those
   generators now update a live exterior-elevation preview inside the Type Manager.
-  Manufacturer catalog import is planned as a versioned product package containing
-  source provenance, SVG 2D views, a web-ready GLB model, and explicit opening/framing
-  metadata; proprietary CAD/BIM formats will require conversion or dedicated adapters.
+  The Project Product Library now indexes native Door and Window Types, their generated
+  plan/elevation/3D representations, and validated manufacturer asset manifests. It can
+  set the active Door or Window and place that product directly into a selected Wall.
+  Version-2 product packages carry referenced SVG/GLB representation metadata while
+  preserving source provenance and editable opening/framing data. Binary asset storage
+  and rendering remain a separate import step; proprietary CAD/BIM formats require
+  conversion or dedicated adapters.
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing
   visibility. Wall Types now classify exterior/interior and bearing/non-bearing use
@@ -381,7 +385,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, manufacturer product provenance, assembly definitions, and format metadata. Version-1 through version-38 files open and upgrade
+Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-39 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

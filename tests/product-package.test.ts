@@ -22,6 +22,16 @@ const source: ManufacturerProductSource = {
 test("round-trips a native manufacturer product package", () => {
   const windowType = createDefaultBuildingStructure().openingTypes.find((type) => type.kind === "window")!;
   windowType.headerTypeId = "header-type-01";
+  windowType.productAssets = [{
+    byteLength: 24_576,
+    checksumSha256: "a".repeat(64),
+    fileName: "heritage-dh-3040.glb",
+    format: "glb",
+    id: "asset-dh-3040-model",
+    name: "Manufacturer 3D Model",
+    role: "model-3d",
+    sourceUrl: "https://example.test/products/dh-3040.glb",
+  }];
   const parsed = parseProductPackage(serializeProductPackage(windowType, source));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
@@ -29,6 +39,18 @@ test("round-trips a native manufacturer product package", () => {
   assert.equal(parsed.openingType.productSource?.modelNumber, source.modelNumber);
   assert.equal(parsed.openingType.headerTypeId, null);
   assert.equal(parsed.openingType.components.length, windowType.components.length);
+  assert.deepEqual(parsed.openingType.productAssets, windowType.productAssets);
+});
+
+test("opens version-1 product packages without an asset manifest", () => {
+  const openingType = createDefaultBuildingStructure().openingTypes[1];
+  const current = JSON.parse(serializeProductPackage(openingType, source)) as Record<string, unknown>;
+  current.version = 1;
+  delete current.assets;
+  const parsed = parseProductPackage(JSON.stringify(current));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.openingType.productAssets, []);
 });
 
 test("rejects packages without complete source provenance", () => {
@@ -36,6 +58,7 @@ test("rejects packages without complete source provenance", () => {
   const parsed = parseProductPackage(JSON.stringify({
     format: PRODUCT_PACKAGE_FORMAT,
     version: PRODUCT_PACKAGE_VERSION,
+    assets: [],
     product: { ...source, manufacturer: "" },
     openingType,
   }));
@@ -49,6 +72,7 @@ test("rejects invalid native dimensions without throwing", () => {
   const parsed = parseProductPackage(JSON.stringify({
     format: PRODUCT_PACKAGE_FORMAT,
     version: PRODUCT_PACKAGE_VERSION,
+    assets: [],
     product: source,
     openingType: { ...openingType, name: null },
   }));

@@ -383,6 +383,7 @@ import {
   PRODUCT_PACKAGE_EXTENSION,
   parseProductPackage,
 } from "@/lib/product-package";
+import { createProjectProductLibrary, filterProjectProductLibrary } from "@/lib/product-library";
 import {
   createRecoverySnapshot,
   parseRecoverySnapshot,
@@ -9380,6 +9381,70 @@ function OpeningTypePreview({ openingType, wallType }: { openingType: WallOpenin
   );
 }
 
+function ProductLibraryDialog({
+  building,
+  selectedWallName,
+  onActivate,
+  onCancel,
+  onManageTypes,
+  onPlace,
+}: {
+  building: BuildingStructure;
+  selectedWallName: string | null;
+  onActivate: (typeId: string) => void;
+  onCancel: () => void;
+  onManageTypes: () => void;
+  onPlace: (typeId: string) => void;
+}) {
+  const [category, setCategory] = useState<"all" | WallOpeningKind>("all");
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+  const entries = filterProjectProductLibrary(createProjectProductLibrary(building), query, category);
+  return (
+    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="story-manager product-library-manager" role="dialog" aria-modal="true" aria-labelledby="product-library-title">
+        <header className="story-manager-header"><div><strong id="product-library-title">Project Product Library</strong><span>Search reusable Doors and Windows, set active defaults, or place a product in the selected Wall.</span></div><button type="button" onClick={onCancel} aria-label="Close Product Library">×</button></header>
+        <div className="product-library-body">
+          <div className="product-library-toolbar">
+            <label><span>Search products</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, manufacturer, model, or revision" /></label>
+            <div className="product-library-filters" role="group" aria-label="Product category">
+              {(["all", "door", "window"] as const).map((value) => <button type="button" key={value} className={category === value ? "is-active" : ""} onClick={() => setCategory(value)}>{value === "all" ? "All Products" : value === "door" ? "Doors" : "Windows"}</button>)}
+            </div>
+          </div>
+          {entries.length ? <div className="product-library-grid">
+            {entries.map((entry) => {
+              const openingType = building.openingTypes.find((type) => type.id === entry.openingTypeId)!;
+              const referencedCount = entry.representations.filter((representation) => representation.source === "manufacturer-reference").length;
+              return <article className={entry.isActive ? "product-library-card is-active" : "product-library-card"} key={entry.id}>
+                <header><span className="product-library-icon">▣</span><div><small>{entry.category === "door" ? "Door" : "Window"}</small><strong>{entry.name}</strong></div>{entry.isActive ? <b>ACTIVE</b> : null}</header>
+                <dl>
+                  <div><dt>Manufacturer</dt><dd>{entry.manufacturer}</dd></div>
+                  <div><dt>Product</dt><dd>{entry.productLine} · {entry.modelNumber}</dd></div>
+                  <div><dt>Unit size</dt><dd>{formatArchitectural(openingType.unitWidth)} × {formatArchitectural(openingType.unitHeight)}</dd></div>
+                  <div><dt>Rough opening</dt><dd>{formatArchitectural(openingType.roughWidth)} × {formatArchitectural(openingType.roughHeight)}</dd></div>
+                  <div><dt>Revision</dt><dd>{entry.revision}</dd></div>
+                </dl>
+                <section className="product-library-representations"><strong>Representations</strong><div>{entry.representations.map((representation) => <span key={representation.id} className={representation.source === "manufacturer-reference" ? "is-reference" : ""} title={representation.source === "manufacturer-reference" ? "Validated reference manifest; asset rendering is not enabled yet" : "Generated from the editable native Type"}>{representation.label}<small>{representation.format.toUpperCase()}</small></span>)}</div>{referencedCount ? <p>{referencedCount} manufacturer asset reference{referencedCount === 1 ? "" : "s"} recorded. Binary asset loading is a future import step.</p> : <p>Native plan, elevation, and 3D geometry are generated from editable components.</p>}</section>
+                <footer><button type="button" disabled={entry.isActive} onClick={() => onActivate(entry.openingTypeId)}>{entry.isActive ? "Active for New" : "Use for New"}</button><button type="button" className="story-save" disabled={!selectedWallName} title={selectedWallName ? `Place in ${selectedWallName}` : "Select a Wall before placing a product"} onClick={() => onPlace(entry.openingTypeId)}>Place in Selected Wall</button></footer>
+              </article>;
+            })}
+          </div> : <div className="product-library-empty"><strong>No matching products</strong><span>Change the search or category filter. New products are imported through Door &amp; Window Types.</span></div>}
+        </div>
+        <footer className="story-manager-footer"><span>{entries.length} shown · {building.openingTypes.length} project products · {selectedWallName ? `Placement target: ${selectedWallName}` : "Select a Wall to enable placement"}</span><div><button type="button" onClick={onCancel}>Close</button><button type="button" className="story-save" onClick={onManageTypes}>Manage Types &amp; Import</button></div></footer>
+      </section>
+    </div>
+  );
+}
+
 function OpeningTypeManagerDialog({
   document,
   onCancel,
@@ -10073,6 +10138,7 @@ export function ModelBuilderApp() {
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
   const [framingManagerOpen, setFramingManagerOpen] = useState(false);
   const [openingTypeManagerOpen, setOpeningTypeManagerOpen] = useState(false);
+  const [productLibraryOpen, setProductLibraryOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
@@ -13078,6 +13144,46 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present]);
 
+  const activateLibraryProduct = useCallback((typeId: string) => {
+    const openingType = editor.present.building.openingTypes.find((type) => type.id === typeId);
+    if (!openingType) return;
+    const building = cloneBuildingStructure(editor.present.building);
+    if (openingType.kind === "door") building.activeDoorTypeId = typeId;
+    else building.activeWindowTypeId = typeId;
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "That product could not be made active because its project Type is invalid.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${openingType.name} is active for new ${openingType.kind === "door" ? "Doors" : "Windows"}.`, tone: "success" });
+  }, [editor.present]);
+
+  const placeLibraryProduct = useCallback((typeId: string) => {
+    if (!selectedLine || selectedLine.architecturalRole !== "wall") {
+      setFileNotice({ text: "Select a Wall before placing a Door or Window product.", tone: "error" });
+      return;
+    }
+    const openingType = editor.present.building.openingTypes.find((type) => type.id === typeId);
+    if (!openingType) return;
+    const building = cloneBuildingStructure(editor.present.building);
+    if (openingType.kind === "door") building.activeDoorTypeId = typeId;
+    else building.activeWindowTypeId = typeId;
+    const withActiveProduct = updateDocumentBuilding(editor.present, building);
+    if (!withActiveProduct) {
+      setFileNotice({ text: "That product could not be activated for placement.", tone: "error" });
+      return;
+    }
+    const result = addWallOpening(withActiveProduct, selectedLine.id, openingType.kind);
+    if (!result) {
+      setFileNotice({ text: `There is not enough clear Wall length or height for ${openingType.name}.`, tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next: result.document });
+    setProductLibraryOpen(false);
+    setFileNotice({ text: `Placed ${openingType.name} in ${selectedLine.name}; its rough opening cuts every Wall layer.`, tone: "success" });
+  }, [editor.present, selectedLine]);
+
   const applyWallFraming = useCallback((building: BuildingStructure) => {
     const next = updateDocumentBuilding(editor.present, building);
     if (!next) {
@@ -13812,7 +13918,7 @@ export function ModelBuilderApp() {
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
                   {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
-                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
+                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setProductLibraryOpen(true))}><span>Product Library…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
                   {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
                 </div>
               ) : null}
@@ -14019,6 +14125,7 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={() => setFoundationManagerOpen(true)} title="Define concrete Foundation Wall, footing, and sill support types"><b>▰</b><span>Foundation</span></button>
                 <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
                 <button type="button" onClick={() => setOpeningTypeManagerOpen(true)} title="Define reusable Door and Window unit sizes, rough openings, headers, and finish returns"><b>▣</b><span>Doors &amp;<br />Windows</span></button>
+                <button type="button" onClick={() => setProductLibraryOpen(true)} title="Browse project Door and Window products, set active defaults, and place into a selected Wall"><b>▦</b><span>Product<br />Library</span></button>
                 <button type="button" className="is-planned" disabled title="Roof standards will be added with roof modeling"><b>⌂</b><span>Roof</span><small>Planned</small></button>
                 <button type="button" onClick={() => setFramingManagerOpen(true)} title="Set generated Wall stud, plate, and opening-framing defaults"><b>╫</b><span>Framing</span></button>
                 <button type="button" className="is-planned" disabled title="Project material definitions are planned"><b>▧</b><span>Materials</span><small>Planned</small></button>
@@ -14691,6 +14798,7 @@ export function ModelBuilderApp() {
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
       {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
+      {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onCancel={() => setProductLibraryOpen(false)} onManageTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
     </main>
