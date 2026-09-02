@@ -52,7 +52,7 @@ polylines, rectangles, Circles, and Arcs.
 - CAD-style box grips: 6 face centers, 12 edge midpoints, and 8 corners
 - Direct signed architectural-distance entry from face-center grips
 - Whole-object center grip for snapped X/Y work-plane movement
-- Camera-synchronized 3D navigation cube with click-drag orbiting, smooth transitions, six face views, diagonal edge views, isometric corner views, and a Home perspective
+- Camera-synchronized 3D navigation cube with click-drag orbiting, smooth transitions, six face views, diagonal edge views, isometric corner views, and a Home action that returns to Top plan view
 - Unified Move and Copy commands for boxes, Lines, Polylines, Rectangles, Circles, and Arcs
 - CAD-style base-point and target-point placement with live preview, drafting snaps, and exact axis offsets
 - Mixed-entity Copy with unique identities, source-layer preservation, and copied-selection handoff

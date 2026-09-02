@@ -77,7 +77,7 @@ test("server-renders the Model Builder workspace", async () => {
   assert.match(html, /Create a closed Polyline from a visible enclosed area/);
   assert.match(html, /Precision 3D modeling in U\.S\. architectural units/);
   assert.match(html, /aria-label="3D navigation cube"/);
-  assert.match(html, /aria-label="Home perspective"/);
+  assert.match(html, /aria-label="Home — Top plan view"/);
   assert.match(html, /aria-label="Toggle model space grid"/);
   assert.match(html, /title="Grid Display \(F7\)"/);
   assert.match(html, /GRID <small>1&#x27;-0&quot;<\/small>/);
@@ -209,7 +209,8 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /Confirm project settings/);
   assert.match(component, /saveProjectAs/);
   assert.match(component, /File and application commands/);
-  assert.match(component, /Home Perspective/);
+  assert.match(component, /3D Perspective/);
+  assert.match(component, /onClick=\{\(\) => onNavigate\(VIEW_PRESETS\.top\)\}/);
   assert.match(component, /Model Explorer · Building/);
   assert.match(component, /stretchModelEntities/);
   assert.match(component, /selectScreenStretchTargets/);
