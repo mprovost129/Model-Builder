@@ -255,8 +255,13 @@ import {
   updatePolylineObjectGrip,
   updatePolylineObject,
   updatePolylineObjectVertex,
+  addPlatformOpening,
+  deletePlatformOpening,
   effectiveRoomSettings,
+  PLATFORM_OPENING_CUTS,
+  PLATFORM_OPENING_KINDS,
   roomHorizontalPlatformSolution,
+  updatePlatformOpening,
   wallVerticalExtent,
   type BoxObject,
   type ArcObject,
@@ -266,6 +271,7 @@ import {
   type WallOpening,
   type WallOpeningKind,
   type PolylineObject,
+  type PlatformOpening,
   type AlignmentMode,
   type ModelDocument,
   type ModelEntityRef,
@@ -1278,6 +1284,8 @@ type FloorPlatformView = {
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
   meshes: THREE.Mesh[];
+  outlineMaterials: THREE.LineDashedMaterial[];
+  outlines: THREE.Line[];
 };
 
 type WallView = {
@@ -1300,7 +1308,7 @@ function createFloorPlatformView(scene: THREE.Scene): FloorPlatformView {
   const group = new THREE.Group();
   group.renderOrder = 5;
   scene.add(group);
-  return { group, materials: [], meshes: [] };
+  return { group, materials: [], meshes: [], outlineMaterials: [], outlines: [] };
 }
 
 function clearFloorPlatformView(view: FloorPlatformView) {
@@ -1309,19 +1317,55 @@ function clearFloorPlatformView(view: FloorPlatformView) {
     mesh.geometry.dispose();
   });
   view.materials.forEach((material) => material.dispose());
+  view.outlines.forEach((outline) => {
+    view.group.remove(outline);
+    outline.geometry.dispose();
+  });
+  view.outlineMaterials.forEach((material) => material.dispose());
   view.meshes = [];
   view.materials = [];
+  view.outlines = [];
+  view.outlineMaterials = [];
 }
 
-function platformShape(boundary: PolylineGeometry) {
+function platformPath(boundary: PolylineGeometry) {
   const path = polylinePathPoints(boundary);
   if (path.length < 4) return null;
   const outline = path.slice(0, -1);
-  const shape = new THREE.Shape();
+  const shape = new THREE.Path();
   shape.moveTo(outline[0].x, outline[0].y);
   outline.slice(1).forEach((point) => shape.lineTo(point.x, point.y));
   shape.closePath();
   return shape;
+}
+
+function platformShape(boundary: PolylineGeometry, holes: PolylineGeometry[] = []) {
+  const path = platformPath(boundary);
+  if (!path) return null;
+  const shape = new THREE.Shape();
+  shape.curves = path.curves;
+  shape.currentPoint.copy(path.currentPoint);
+  holes.forEach((hole) => {
+    const holePath = platformPath(hole);
+    if (holePath) shape.holes.push(holePath);
+  });
+  return shape;
+}
+
+function addPlatformOpeningOutline(view: FloorPlatformView, boundary: PolylineGeometry, elevation: number, opening: PlatformOpening) {
+  const path = polylinePathPoints(boundary);
+  if (path.length < 4) return;
+  const points = path[0].x === path.at(-1)?.x && path[0].y === path.at(-1)?.y ? path : [...path, path[0]];
+  const geometry = new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(point.x, point.y, elevation)));
+  const material = new THREE.LineDashedMaterial({ color: 0xd69b3f, dashSize: 5, depthTest: false, gapSize: 3, opacity: 0.95, transparent: true });
+  const outline = new THREE.Line(geometry, material);
+  outline.computeLineDistances();
+  outline.renderOrder = 18;
+  outline.userData.platformOpeningId = opening.id;
+  outline.userData.roomOpeningKind = opening.kind;
+  view.group.add(outline);
+  view.outlines.push(outline);
+  view.outlineMaterials.push(material);
 }
 
 function addHorizontalPlatformLayer(
@@ -1362,9 +1406,11 @@ function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObje
 
 function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizontalPlatformSolution) {
   clearFloorPlatformView(view);
-  const shape = platformShape(solution.boundary);
-  if (!shape) return;
+  const floorShape = platformShape(solution.boundary, solution.floorOpeningBoundaries);
+  const ceilingShape = platformShape(solution.boundary, solution.ceilingOpeningBoundaries);
+  if (!floorShape || !ceilingShape) return;
   const addRoomLayer = (thickness: number, baseZ: number, role: AssemblyLayerRole, layerName: string, platformKind: string) => {
+    const shape = platformKind.startsWith("floor") ? floorShape : ceilingShape;
     addHorizontalPlatformLayer(view, shape, thickness, baseZ, role, {
       platformKind,
       roomId: solution.roomId,
@@ -1393,6 +1439,14 @@ function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizonta
     const base = ceilingFinishTop - layer.thickness;
     addRoomLayer(layer.thickness, base, layer.role, layer.name, "ceiling-finish");
     ceilingFinishTop = base;
+  });
+  solution.platformOpenings.forEach((opening) => {
+    if (opening.cuts === "floor" || opening.cuts === "both") {
+      addPlatformOpeningOutline(view, opening.boundary, solution.finishedFloorElevation + 1 / 16, opening);
+    }
+    if (opening.cuts === "ceiling" || opening.cuts === "both") {
+      addPlatformOpeningOutline(view, opening.boundary, solution.finishedCeilingElevation - 1 / 16, opening);
+    }
   });
 }
 
@@ -8598,6 +8652,55 @@ function RoomManagerDialog({
     const storyKey = key.replace("Override", "") as "floorStructure" | "floorFinish" | "ceilingStructure" | "ceilingFinish";
     replaceSelected({ [key]: enabled ? cloneLayeredAssembly(story[storyKey]) : null });
   };
+  const openingBounds = (opening: PlatformOpening) => {
+    const xs = opening.boundary.vertices.map((point) => point.x);
+    const ys = opening.boundary.vertices.map((point) => point.y);
+    const minimumX = Math.min(...xs);
+    const maximumX = Math.max(...xs);
+    const minimumY = Math.min(...ys);
+    const maximumY = Math.max(...ys);
+    return {
+      centerX: (minimumX + maximumX) / 2,
+      centerY: (minimumY + maximumY) / 2,
+      depth: maximumY - minimumY,
+      width: maximumX - minimumX,
+    };
+  };
+  const replaceOpening = (openingId: string, change: Partial<Omit<PlatformOpening, "id">>) => {
+    if (!selected) return;
+    const next = updatePlatformOpening(draft, selected.id, openingId, change);
+    if (!next) {
+      setError("Platform Openings must remain fully inside the Room and cannot overlap another opening.");
+      return;
+    }
+    setDraft(next);
+    setError("");
+  };
+  const replaceOpeningRectangle = (opening: PlatformOpening, change: Partial<{ centerX: number; centerY: number; depth: number; width: number }>) => {
+    const bounds = { ...openingBounds(opening), ...change };
+    const boundary = rectangleFromCorners(
+      { x: bounds.centerX - bounds.width / 2, y: bounds.centerY - bounds.depth / 2 },
+      { x: bounds.centerX + bounds.width / 2, y: bounds.centerY + bounds.depth / 2 },
+      opening.boundary.elevation,
+    );
+    if (boundary) replaceOpening(opening.id, { boundary });
+  };
+  const addOpening = () => {
+    if (!selected) return;
+    const result = addPlatformOpening(draft, selected.id, "stairwell", "both");
+    if (!result) {
+      setError("A centered opening could not fit inside this Room. Adjust the Room shape before adding an opening.");
+      return;
+    }
+    setDraft(result.document);
+    setError("");
+  };
+  const removeOpening = (openingId: string) => {
+    if (!selected) return;
+    const next = deletePlatformOpening(draft, selected.id, openingId);
+    if (next) setDraft(next);
+    setError("");
+  };
   const save = () => {
     const next = cloneDocument(draft);
     if (next.rooms.some((room) => !roomObjectIsValid(room, next))) {
@@ -8624,7 +8727,7 @@ function RoomManagerDialog({
           <aside className="story-list">
             <header><strong>{story.name}</strong><span>{rooms.length} detected Room{rooms.length === 1 ? "" : "s"}</span></header>
             <label className="room-story-picker"><span>Story</span><select value={story.id} onChange={(event) => selectStory(event.target.value)}>{draft.building.stories.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}</select></label>
-            {rooms.map((room) => <button type="button" key={room.id} className={room.id === selected?.id ? "is-selected" : ""} onClick={() => setSelectedRoomId(room.id)}><strong>{room.name}</strong><span>{formatRoomArea(room)} · {room.boundaryWallIds.length} walls</span>{room.roughCeilingHeightOverride !== null || room.roughFloorOffset !== 0 || room.floorStructureOverride || room.floorFinishOverride || room.ceilingStructureOverride || room.ceilingFinishOverride ? <small>OVERRIDES</small> : <small>STORY DEFAULTS</small>}</button>)}
+            {rooms.map((room) => <button type="button" key={room.id} className={room.id === selected?.id ? "is-selected" : ""} onClick={() => setSelectedRoomId(room.id)}><strong>{room.name}</strong><span>{formatRoomArea(room)} · {room.boundaryWallIds.length} walls · {room.platformOpenings.length} opening{room.platformOpenings.length === 1 ? "" : "s"}</span>{room.roughCeilingHeightOverride !== null || room.roughFloorOffset !== 0 || room.floorStructureOverride || room.floorFinishOverride || room.ceilingStructureOverride || room.ceilingFinishOverride ? <small>OVERRIDES</small> : <small>STORY DEFAULTS</small>}</button>)}
             <div className="story-list-actions"><button type="button" onClick={detect}>↻ Detect / Update Rooms</button></div>
           </aside>
           <main className="story-editor">
@@ -8652,6 +8755,26 @@ function RoomManagerDialog({
                 <div><span>Generated finished floor</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedFloorElevation) : "—"}</strong></div>
                 <div><span>Generated rough ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.roughCeilingElevation) : "—"}</strong></div>
                 <div><span>Generated finished ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedCeilingElevation) : "—"}</strong></div>
+              </section>
+              <section className="room-platform-openings" aria-label="Platform Openings">
+                <header><div><strong>Platform Openings</strong><span>Hosted cuts for stairs, shafts, and open-below areas</span></div><button type="button" onClick={addOpening}>+ Add Opening</button></header>
+                {selected.platformOpenings.length ? selected.platformOpenings.map((opening) => {
+                  const bounds = openingBounds(opening);
+                  return <article className="room-platform-opening" key={opening.id}>
+                    <div className="room-platform-opening-heading">
+                      <label><span>Name</span><input value={opening.name} maxLength={120} onChange={(event) => replaceOpening(opening.id, { name: event.target.value })} /></label>
+                      <label><span>Purpose</span><select value={opening.kind} onChange={(event) => replaceOpening(opening.id, { kind: event.target.value as PlatformOpening["kind"] })}>{PLATFORM_OPENING_KINDS.map((kind) => <option key={kind} value={kind}>{kind === "open-below" ? "Open Below" : kind === "stairwell" ? "Stairwell" : "Shaft"}</option>)}</select></label>
+                      <label><span>Cuts</span><select value={opening.cuts} onChange={(event) => replaceOpening(opening.id, { cuts: event.target.value as PlatformOpening["cuts"] })}>{PLATFORM_OPENING_CUTS.map((cuts) => <option key={cuts} value={cuts}>{cuts === "both" ? "Floor + Ceiling" : cuts === "floor" ? "Floor only" : "Ceiling only"}</option>)}</select></label>
+                      <button type="button" className="room-platform-opening-delete" onClick={() => removeOpening(opening.id)}>Delete</button>
+                    </div>
+                    <div className="room-platform-opening-geometry">
+                      <StoryDimensionInput key={`${opening.id}:w:${bounds.width}`} label="Width" value={bounds.width} onChange={(width) => replaceOpeningRectangle(opening, { width })} />
+                      <StoryDimensionInput key={`${opening.id}:d:${bounds.depth}`} label="Depth" value={bounds.depth} onChange={(depth) => replaceOpeningRectangle(opening, { depth })} />
+                      <StoryDimensionInput signed key={`${opening.id}:x:${bounds.centerX}`} label="Center X" value={bounds.centerX} onChange={(centerX) => replaceOpeningRectangle(opening, { centerX })} />
+                      <StoryDimensionInput signed key={`${opening.id}:y:${bounds.centerY}`} label="Center Y" value={bounds.centerY} onChange={(centerY) => replaceOpeningRectangle(opening, { centerY })} />
+                    </div>
+                  </article>;
+                }) : <p>No platform openings in this Room. Add one when the design needs a stairwell, shaft, or open-below cut.</p>}
               </section>
               {overrideEditor("floorStructureOverride", "Floor structure")}
               {overrideEditor("floorFinishOverride", "Floor finish")}
@@ -13124,7 +13247,7 @@ export function ModelBuilderApp() {
               </section>
               <section className="building-browser-section">
                 <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>
-                {editor.present.rooms.filter((room) => room.storyId === activeStory.id).map((room) => <button type="button" className="building-browser-row" key={room.id} onClick={() => setRoomManagerOpen(true)}><span className="building-browser-icon">▦</span><span><strong>{room.name}</strong><small>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {room.boundaryWallIds.length} Walls</small></span></button>)}
+                {editor.present.rooms.filter((room) => room.storyId === activeStory.id).map((room) => <button type="button" className="building-browser-row" key={room.id} onClick={() => setRoomManagerOpen(true)}><span className="building-browser-icon">▦</span><span><strong>{room.name}</strong><small>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {room.boundaryWallIds.length} Walls · {room.platformOpenings.length} Openings</small></span></button>)}
                 {!activeStoryRoomCount ? <div className="building-browser-empty"><span>No Rooms detected yet.</span><button type="button" onClick={() => setRoomManagerOpen(true)}>Open Room Manager</button></div> : null}
               </section>
               <div className="building-browser-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>

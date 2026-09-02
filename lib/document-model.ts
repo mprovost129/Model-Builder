@@ -53,6 +53,7 @@ import {
   polylineCentroid,
   polylineGeometriesEqual,
   polylineGeometryIsValid,
+  polylinePathPoints,
   polylineSegmentCircularGeometry,
   polylineSegments,
   rectangleFromCorners,
@@ -208,10 +209,24 @@ export type RoomObject = {
   floorStructureOverride: LayeredAssembly | null;
   id: string;
   name: string;
+  platformOpenings: PlatformOpening[];
   /** Local offset above or below the Story rough floor/subfloor. */
   roughFloorOffset: number;
   roughCeilingHeightOverride: number | null;
   storyId: string;
+};
+
+export const PLATFORM_OPENING_KINDS = ["stairwell", "shaft", "open-below"] as const;
+export type PlatformOpeningKind = (typeof PLATFORM_OPENING_KINDS)[number];
+export const PLATFORM_OPENING_CUTS = ["floor", "ceiling", "both"] as const;
+export type PlatformOpeningCuts = (typeof PLATFORM_OPENING_CUTS)[number];
+
+export type PlatformOpening = {
+  boundary: PolylineGeometry;
+  cuts: PlatformOpeningCuts;
+  id: string;
+  kind: PlatformOpeningKind;
+  name: string;
 };
 
 export type EffectiveRoomSettings = {
@@ -225,9 +240,12 @@ export type EffectiveRoomSettings = {
 
 export type RoomHorizontalPlatformSolution = EffectiveRoomSettings & {
   boundary: PolylineGeometry;
+  ceilingOpeningBoundaries: PolylineGeometry[];
   ceilingStructureBottomElevation: number;
   finishedCeilingElevation: number;
   finishedFloorElevation: number;
+  floorOpeningBoundaries: PolylineGeometry[];
+  platformOpenings: PlatformOpening[];
   roomId: string;
   roughCeilingElevation: number;
   storyId: string;
@@ -283,6 +301,7 @@ export const MAXIMUM_ARC_COUNT = 1000;
 export const MAXIMUM_LAYER_COUNT = 64;
 export const MAXIMUM_GROUP_COUNT = 64;
 export const MAXIMUM_ROOM_COUNT = 1000;
+export const MAXIMUM_PLATFORM_OPENING_COUNT = 64;
 export const DEFAULT_LAYER_ID = "layer-default";
 
 export const DEFAULT_LAYER: ModelLayer = {
@@ -467,6 +486,16 @@ export function cloneGroup(group: ModelGroup): ModelGroup {
   return { ...group };
 }
 
+export function clonePlatformOpening(opening: PlatformOpening): PlatformOpening {
+  return {
+    boundary: clonePolylineGeometry(opening.boundary),
+    cuts: opening.cuts,
+    id: opening.id,
+    kind: opening.kind,
+    name: opening.name,
+  };
+}
+
 export function cloneRoomObject(room: RoomObject): RoomObject {
   return {
     boundary: clonePolylineGeometry(room.boundary),
@@ -477,10 +506,76 @@ export function cloneRoomObject(room: RoomObject): RoomObject {
     floorStructureOverride: room.floorStructureOverride ? cloneLayeredAssembly(room.floorStructureOverride) : null,
     id: room.id,
     name: room.name,
+    platformOpenings: (room.platformOpenings ?? []).map(clonePlatformOpening),
     roughCeilingHeightOverride: room.roughCeilingHeightOverride,
     roughFloorOffset: room.roughFloorOffset,
     storyId: room.storyId,
   };
+}
+
+function pointOnPlanSegment(point: PlanPoint, start: PlanPoint, end: PlanPoint, tolerance = 1e-7): boolean {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const cross = (point.x - start.x) * dy - (point.y - start.y) * dx;
+  if (Math.abs(cross) > tolerance * Math.max(1, Math.hypot(dx, dy))) return false;
+  const dot = (point.x - start.x) * dx + (point.y - start.y) * dy;
+  return dot >= -tolerance && dot <= dx * dx + dy * dy + tolerance;
+}
+
+function pointInsidePolyline(point: PlanPoint, boundary: PolylineGeometry): boolean {
+  const path = polylinePathPoints(boundary);
+  if (path.length < 3) return false;
+  const closed = path[0].x === path.at(-1)?.x && path[0].y === path.at(-1)?.y ? path : [...path, path[0]];
+  let inside = false;
+  for (let index = 0; index < closed.length - 1; index += 1) {
+    const start = closed[index];
+    const end = closed[index + 1];
+    if (pointOnPlanSegment(point, start, end)) return false;
+    const crosses = (start.y > point.y) !== (end.y > point.y) &&
+      point.x < (end.x - start.x) * (point.y - start.y) / (end.y - start.y) + start.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function planSegmentsIntersect(firstStart: PlanPoint, firstEnd: PlanPoint, secondStart: PlanPoint, secondEnd: PlanPoint): boolean {
+  const orient = (a: PlanPoint, b: PlanPoint, c: PlanPoint) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const firstA = orient(firstStart, firstEnd, secondStart);
+  const firstB = orient(firstStart, firstEnd, secondEnd);
+  const secondA = orient(secondStart, secondEnd, firstStart);
+  const secondB = orient(secondStart, secondEnd, firstEnd);
+  const tolerance = 1e-7;
+  if (((firstA > tolerance && firstB < -tolerance) || (firstA < -tolerance && firstB > tolerance)) &&
+      ((secondA > tolerance && secondB < -tolerance) || (secondA < -tolerance && secondB > tolerance))) return true;
+  return Math.abs(firstA) <= tolerance && pointOnPlanSegment(secondStart, firstStart, firstEnd) ||
+    Math.abs(firstB) <= tolerance && pointOnPlanSegment(secondEnd, firstStart, firstEnd) ||
+    Math.abs(secondA) <= tolerance && pointOnPlanSegment(firstStart, secondStart, secondEnd) ||
+    Math.abs(secondB) <= tolerance && pointOnPlanSegment(firstEnd, secondStart, secondEnd);
+}
+
+function polylinePathsIntersect(first: PolylineGeometry, second: PolylineGeometry): boolean {
+  const firstPath = polylinePathPoints(first);
+  const secondPath = polylinePathPoints(second);
+  const close = (path: PlanPoint[]) => path[0].x === path.at(-1)?.x && path[0].y === path.at(-1)?.y ? path : [...path, path[0]];
+  const firstClosed = close(firstPath);
+  const secondClosed = close(secondPath);
+  for (let firstIndex = 0; firstIndex < firstClosed.length - 1; firstIndex += 1) {
+    for (let secondIndex = 0; secondIndex < secondClosed.length - 1; secondIndex += 1) {
+      if (planSegmentsIntersect(firstClosed[firstIndex], firstClosed[firstIndex + 1], secondClosed[secondIndex], secondClosed[secondIndex + 1])) return true;
+    }
+  }
+  return false;
+}
+
+export function platformOpeningIsValid(opening: PlatformOpening, room: RoomObject): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.id) &&
+    opening.name.trim().length > 0 && opening.name.trim().length <= 120 &&
+    PLATFORM_OPENING_KINDS.includes(opening.kind) && PLATFORM_OPENING_CUTS.includes(opening.cuts) &&
+    polylineGeometryIsValid(opening.boundary) && opening.boundary.closed && opening.boundary.vertices.length === 4 &&
+    (opening.boundary.bulges ?? []).every((bulge) => Math.abs(bulge) < 1e-10) && polylineArea(opening.boundary) > 0 &&
+    Math.abs(opening.boundary.elevation - room.boundary.elevation) < 1e-8 &&
+    !polylinePathsIntersect(opening.boundary, room.boundary) &&
+    polylinePathPoints(opening.boundary).every((point) => pointInsidePolyline(point, room.boundary));
 }
 
 function roomAssemblyIsValid(assembly: LayeredAssembly | null, kind: LayeredAssembly["kind"]): boolean {
@@ -489,6 +584,9 @@ function roomAssemblyIsValid(assembly: LayeredAssembly | null, kind: LayeredAsse
 
 export function roomObjectIsValid(room: RoomObject, document: ModelDocument): boolean {
   const wallIds = new Set(document.lines.filter((line) => line.architecturalRole === "wall" && line.storyId === room.storyId).map((line) => line.id));
+  const openings = room.platformOpenings ?? [];
+  const openingIds = new Set(openings.map((opening) => opening.id));
+  const openingNames = new Set(openings.map((opening) => opening.name.trim().toLowerCase()));
   return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room.id) &&
     room.name.trim().length > 0 && room.name.trim().length <= 120 &&
     document.building.stories.some((story) => story.id === room.storyId) &&
@@ -497,6 +595,12 @@ export function roomObjectIsValid(room: RoomObject, document: ModelDocument): bo
     Number.isFinite(room.roughFloorOffset) && Math.abs(room.roughFloorOffset) <= MAXIMUM_COORDINATE && Math.abs(room.roughFloorOffset * 16 - Math.round(room.roughFloorOffset * 16)) < 1e-8 &&
     (room.roughCeilingHeightOverride === null ||
       (Number.isFinite(room.roughCeilingHeightOverride) && room.roughCeilingHeightOverride >= MINIMUM_ROUGH_CEILING_HEIGHT && room.roughCeilingHeightOverride <= MAXIMUM_ROUGH_CEILING_HEIGHT && Math.abs(room.roughCeilingHeightOverride * 16 - Math.round(room.roughCeilingHeightOverride * 16)) < 1e-8)) &&
+    openings.length <= MAXIMUM_PLATFORM_OPENING_COUNT && openingIds.size === openings.length && openingNames.size === openings.length &&
+    openings.every((opening) => platformOpeningIsValid(opening, room)) &&
+    openings.every((opening, index) => openings.slice(index + 1).every((other) =>
+      !polylinePathsIntersect(opening.boundary, other.boundary) &&
+      !pointInsidePolyline(opening.boundary.vertices[0], other.boundary) &&
+      !pointInsidePolyline(other.boundary.vertices[0], opening.boundary))) &&
     roomAssemblyIsValid(room.floorStructureOverride, "floor-structure") &&
     roomAssemblyIsValid(room.floorFinishOverride, "floor-finish") &&
     roomAssemblyIsValid(room.ceilingStructureOverride, "ceiling-structure") &&
@@ -541,6 +645,7 @@ export function roomHorizontalPlatformSolution(
   return {
     ...effective,
     boundary: clonePolylineGeometry(room.boundary),
+    ceilingOpeningBoundaries: room.platformOpenings.filter((opening) => opening.cuts === "ceiling" || opening.cuts === "both").map((opening) => clonePolylineGeometry(opening.boundary)),
     ceilingStructureBottomElevation,
     finishedCeilingElevation: snapToSixteenth(
       ceilingStructureBottomElevation - assemblyTotalThickness(effective.ceilingFinish),
@@ -548,6 +653,8 @@ export function roomHorizontalPlatformSolution(
     finishedFloorElevation: snapToSixteenth(
       effective.roughFloorElevation + assemblyTotalThickness(effective.floorFinish),
     ),
+    floorOpeningBoundaries: room.platformOpenings.filter((opening) => opening.cuts === "floor" || opening.cuts === "both").map((opening) => clonePolylineGeometry(opening.boundary)),
+    platformOpenings: room.platformOpenings.map(clonePlatformOpening),
     roomId: room.id,
     roughCeilingElevation,
     storyId: room.storyId,
@@ -658,6 +765,7 @@ export function refreshRoomsForStory(document: ModelDocument, storyId: string): 
       floorStructureOverride: null,
       id: nextId(),
       name: `Room ${String(index + 1).padStart(2, "0")}`,
+      platformOpenings: [],
       roughCeilingHeightOverride: null,
       roughFloorOffset: 0,
       storyId,
@@ -669,12 +777,87 @@ export function refreshRoomsForStory(document: ModelDocument, storyId: string): 
   return next.rooms.every((room) => roomObjectIsValid(room, next)) && documentWallOpeningsAreValid(next) ? next : null;
 }
 
-export function updateRoomObject(document: ModelDocument, roomId: string, change: Partial<Omit<RoomObject, "id" | "storyId" | "boundary" | "boundaryWallIds">>): ModelDocument | null {
+export function updateRoomObject(document: ModelDocument, roomId: string, change: Partial<Omit<RoomObject, "id" | "storyId" | "boundary" | "boundaryWallIds" | "platformOpenings">>): ModelDocument | null {
   const next = cloneDocument(document);
   const index = next.rooms.findIndex((room) => room.id === roomId);
   if (index < 0) return null;
   next.rooms[index] = { ...next.rooms[index], ...change, name: change.name?.trim() || next.rooms[index].name };
   return roomObjectIsValid(next.rooms[index], next) && documentWallOpeningsAreValid(next) ? next : null;
+}
+
+function nextPlatformOpeningIdentity(room: RoomObject, kind: PlatformOpeningKind) {
+  const label = kind === "stairwell" ? "Stairwell" : kind === "shaft" ? "Shaft" : "Open Below";
+  let number = 1;
+  while (room.platformOpenings.some((opening) => opening.id === `${room.id}-platform-opening-${String(number).padStart(2, "0")}`)) number += 1;
+  let name = `${label} ${String(number).padStart(2, "0")}`;
+  while (room.platformOpenings.some((opening) => opening.name.trim().toLowerCase() === name.toLowerCase())) {
+    number += 1;
+    name = `${label} ${String(number).padStart(2, "0")}`;
+  }
+  return { id: `${room.id}-platform-opening-${String(number).padStart(2, "0")}`, name };
+}
+
+export function addPlatformOpening(
+  document: ModelDocument,
+  roomId: string,
+  kind: PlatformOpeningKind = "stairwell",
+  cuts: PlatformOpeningCuts = "both",
+): { document: ModelDocument; opening: PlatformOpening } | null {
+  const room = document.rooms.find((candidate) => candidate.id === roomId);
+  if (!room || room.platformOpenings.length >= MAXIMUM_PLATFORM_OPENING_COUNT || !PLATFORM_OPENING_KINDS.includes(kind) || !PLATFORM_OPENING_CUTS.includes(cuts)) return null;
+  const center = polylineCentroid(room.boundary);
+  if (!center) return null;
+  const xs = room.boundary.vertices.map((point) => point.x);
+  const ys = room.boundary.vertices.map((point) => point.y);
+  const maximumWidth = Math.min(48, (Math.max(...xs) - Math.min(...xs)) * 0.4);
+  const maximumDepth = Math.min(48, (Math.max(...ys) - Math.min(...ys)) * 0.4);
+  const identity = nextPlatformOpeningIdentity(room, kind);
+  for (const scale of [1, 0.75, 0.5, 0.35, 0.25]) {
+    const width = snapToSixteenth(maximumWidth * scale);
+    const depth = snapToSixteenth(maximumDepth * scale);
+    if (width < 6 || depth < 6) continue;
+    const boundary = rectangleFromCorners(
+      { x: center.x - width / 2, y: center.y - depth / 2 },
+      { x: center.x + width / 2, y: center.y + depth / 2 },
+      room.boundary.elevation,
+    );
+    if (!boundary) continue;
+    const opening: PlatformOpening = { boundary, cuts, id: identity.id, kind, name: identity.name };
+    const next = cloneDocument(document);
+    const nextRoom = next.rooms.find((candidate) => candidate.id === roomId);
+    if (!nextRoom) return null;
+    nextRoom.platformOpenings.push(clonePlatformOpening(opening));
+    if (roomObjectIsValid(nextRoom, next)) return { document: next, opening: clonePlatformOpening(opening) };
+  }
+  return null;
+}
+
+export function updatePlatformOpening(
+  document: ModelDocument,
+  roomId: string,
+  openingId: string,
+  change: Partial<Omit<PlatformOpening, "id">>,
+): ModelDocument | null {
+  const next = cloneDocument(document);
+  const room = next.rooms.find((candidate) => candidate.id === roomId);
+  const openingIndex = room?.platformOpenings.findIndex((opening) => opening.id === openingId) ?? -1;
+  if (!room || openingIndex < 0) return null;
+  const current = room.platformOpenings[openingIndex];
+  room.platformOpenings[openingIndex] = {
+    ...current,
+    ...change,
+    boundary: change.boundary ? clonePolylineGeometry(change.boundary) : current.boundary,
+    name: change.name?.trim() || current.name,
+  };
+  return roomObjectIsValid(room, next) ? next : null;
+}
+
+export function deletePlatformOpening(document: ModelDocument, roomId: string, openingId: string): ModelDocument | null {
+  const next = cloneDocument(document);
+  const room = next.rooms.find((candidate) => candidate.id === roomId);
+  if (!room || !room.platformOpenings.some((opening) => opening.id === openingId)) return null;
+  room.platformOpenings = room.platformOpenings.filter((opening) => opening.id !== openingId);
+  return roomObjectIsValid(room, next) ? next : null;
 }
 
 export function cloneDocument(document: ModelDocument): ModelDocument {
@@ -750,6 +933,10 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         room.roughFloorOffset === other.roughFloorOffset && room.roughCeilingHeightOverride === other.roughCeilingHeightOverride &&
         room.boundaryWallIds.length === other.boundaryWallIds.length && room.boundaryWallIds.every((wallId, wallIndex) => wallId === other.boundaryWallIds[wallIndex]) &&
         polylineGeometriesEqual(room.boundary, other.boundary) &&
+        room.platformOpenings.length === other.platformOpenings.length && room.platformOpenings.every((opening, openingIndex) => {
+          const otherOpening = other.platformOpenings[openingIndex];
+          return otherOpening !== undefined && opening.id === otherOpening.id && opening.name === otherOpening.name && opening.kind === otherOpening.kind && opening.cuts === otherOpening.cuts && polylineGeometriesEqual(opening.boundary, otherOpening.boundary);
+        }) &&
         JSON.stringify(room.floorStructureOverride) === JSON.stringify(other.floorStructureOverride) &&
         JSON.stringify(room.floorFinishOverride) === JSON.stringify(other.floorFinishOverride) &&
         JSON.stringify(room.ceilingStructureOverride) === JSON.stringify(other.ceilingStructureOverride) &&

@@ -109,6 +109,8 @@ polylines, rectangles, Circles, and Arcs.
 - Derived Room floor and ceiling platforms generated from each Room boundary and
   effective structural/finish assemblies, with calculated finished elevations and
   unobstructed 2D Top drafting while layered platforms remain visible in 3D views
+- Room-hosted Platform Openings for stairwells, shafts, and open-below areas, with
+  independent floor, ceiling, or combined cuts, 2D plan outlines, and 3D assembly holes
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an
@@ -192,7 +194,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-23 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-24 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -277,9 +279,11 @@ adjacent Room overrides, fall back to Story defaults before Rooms are detected,
 and expose mixed adjacent conditions without storing duplicate heights. Enclosed
 Rooms now also generate layered floor and ceiling platforms from the same effective
 elevations and assembly overrides without storing duplicate Polylines; the Top view
-keeps those 3D solids hidden so plan drafting stays clear. The next engineering
-milestone is a hosted Platform Opening model for stairs, shafts, and open-below
-conditions, followed by finish-edge refinement at Wall faces.
+keeps those 3D solids hidden so plan drafting stays clear. Hosted Platform Openings
+now cut those derived floor and ceiling assemblies for stairwells, shafts, and
+open-below conditions while retaining a visible plan outline. The next engineering
+milestone is platform finish-edge refinement at Wall faces, followed by vertical
+opening continuity across adjacent Stories.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -289,7 +293,7 @@ residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
 Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
-the project name, unit settings, Story, Room, and assembly definitions, and format metadata. Version-1 through version-23 files open and upgrade
+the project name, unit settings, Story, Room, Platform Opening, and assembly definitions, and format metadata. Version-1 through version-24 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

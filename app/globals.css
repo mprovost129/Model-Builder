@@ -490,6 +490,20 @@ button { color: inherit; }
 .room-inherit-toggle input,
 .room-override-section > label input { width: 14px; height: 14px; accent-color: #d3aa55; }
 .room-output { display: flex; align-items: center; min-height: 28px; padding: 0 7px; border: 1px solid #465462; border-radius: 2px; background: #141b22; color: #e4e9ed; font: 9px var(--font-geist-mono), monospace; }
+.room-platform-openings { display: grid; gap: 7px; margin-bottom: 8px; padding: 8px; border: 1px solid #3b4752; background: #1c242d; }
+.room-platform-openings > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.room-platform-openings > header > div { display: grid; gap: 2px; }
+.room-platform-openings > header strong { color: #e4e9ed; font-size: 9px; }
+.room-platform-openings > header span,
+.room-platform-openings > p { margin: 0; color: #91a0ac; font-size: 8px; }
+.room-platform-openings > header button { min-height: 27px; padding: 0 9px; border: 1px solid #846936; border-radius: 2px; background: #3b3122; color: #f3d18d; font-size: 8px; cursor: pointer; }
+.room-platform-opening { display: grid; gap: 7px; padding: 8px; border: 1px solid #3b4752; background: #202933; }
+.room-platform-opening-heading { display: grid; grid-template-columns: minmax(150px, 1fr) 115px 125px auto; align-items: end; gap: 7px; }
+.room-platform-opening-heading label { display: grid; gap: 3px; color: #95a3ae; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
+.room-platform-opening-heading input,
+.room-platform-opening-heading select { min-width: 0; height: 28px; padding: 0 7px; border: 1px solid #465462; border-radius: 2px; background: #141b22; color: #e4e9ed; font-size: 8px; }
+.room-platform-opening-delete { min-height: 28px; padding: 0 8px; border: 1px solid #65494a; border-radius: 2px; background: #322526; color: #dba0a3; font-size: 8px; cursor: pointer; }
+.room-platform-opening-geometry { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 7px; }
 .room-override-section { margin-bottom: 8px; border: 1px solid #3b4752; background: #1c242d; }
 .room-override-section > label { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 9px; color: #cbd4db; font-size: 8px; }
 .room-override-section .story-assembly { margin: 0; border-right: 0; border-bottom: 0; border-left: 0; }
@@ -2116,7 +2130,7 @@ button { color: inherit; }
 .theme-light .story-list > button span,
 .theme-light .story-list > button small { color: #607787; }
 .theme-light .story-editor { background: #f4f6f5; }
-.theme-light :is(.story-editor-summary, .room-height-settings, .story-calculated-grid, .story-assembly, .room-override-section) { border-color: var(--ui-border); background: #e9eff1; }
+.theme-light :is(.story-editor-summary, .room-height-settings, .story-calculated-grid, .story-assembly, .room-override-section, .room-platform-openings) { border-color: var(--ui-border); background: #e9eff1; }
 .theme-light :is(.story-editor-summary label > span, .story-field > span, .story-calculated-grid span, .story-assembly > header span, .story-layer-grid > span, .story-wall-group-heading span, .room-story-picker) { color: var(--muted); }
 .theme-light :is(.story-editor-summary input, .story-editor-summary select, .story-editor-summary output, .story-layer-grid input, .story-layer-grid select, .story-field-shell, .room-story-picker select, .room-output) {
   border-color: var(--ui-border-strong);
@@ -2154,6 +2168,14 @@ button { color: inherit; }
 .theme-light .story-section-preview > p { color: var(--muted); }
 .theme-light .story-pole-level > i { border-color: #86a6b7; background: repeating-linear-gradient(90deg, #adc3cf 0 5px, #d6e1e5 5px 10px); }
 .theme-light .room-story-picker { border-color: var(--ui-border); }
+.theme-light .room-platform-openings > header strong { color: #304d60; }
+.theme-light .room-platform-openings > header span,
+.theme-light .room-platform-openings > p,
+.theme-light .room-platform-opening-heading label { color: var(--muted); }
+.theme-light .room-platform-openings > header button { border-color: var(--ui-border-strong); background: #edf2f3; color: #3a586b; }
+.theme-light .room-platform-opening { border-color: var(--ui-border); background: #f3f5f4; }
+.theme-light :is(.room-platform-opening-heading input, .room-platform-opening-heading select) { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
+.theme-light .room-platform-opening-delete { border-color: #c6a7a5; background: #f1e5e3; color: #7b4545; }
 .theme-light .room-empty-state { border-color: var(--ui-border-strong); color: var(--muted); }
 .theme-light .room-empty-state strong { color: #304d60; }
 .theme-light :is(.room-inherit-toggle input, .room-override-section > label input, .story-layer-join input) { accent-color: var(--ui-blue); }

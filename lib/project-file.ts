@@ -18,6 +18,9 @@ import {
   MAXIMUM_POLYLINE_COUNT,
   MAXIMUM_ROOM_COUNT,
   MAXIMUM_OBJECT_COUNT,
+  MAXIMUM_PLATFORM_OPENING_COUNT,
+  PLATFORM_OPENING_CUTS,
+  PLATFORM_OPENING_KINDS,
   type BoxObject,
   type ArcObject,
   type CircleObject,
@@ -27,6 +30,7 @@ import {
   type LineObject,
   type WallOpening,
   type PolylineObject,
+  type PlatformOpening,
   type RoomObject,
   cloneRoomObject,
   roomObjectIsValid,
@@ -65,7 +69,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 24;
+export const PROJECT_FILE_VERSION = 25;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -486,7 +490,22 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
   return { ...geometry, architecturalRole, id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), shape: value.shape, storyId, type: "polyline" };
 }
 
-function readRoomObject(value: unknown): RoomObject | null {
+function readPlatformOpening(value: unknown): PlatformOpening | null {
+  if (
+    !isRecord(value) || !isRecord(value.boundary) || !Array.isArray(value.boundary.vertices) ||
+    typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
+    typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120 ||
+    typeof value.kind !== "string" || !PLATFORM_OPENING_KINDS.includes(value.kind as PlatformOpening["kind"]) ||
+    typeof value.cuts !== "string" || !PLATFORM_OPENING_CUTS.includes(value.cuts as PlatformOpening["cuts"])
+  ) return null;
+  const vertices = value.boundary.vertices.map((point) => isRecord(point) && isFiniteNumber(point.x) && isFiniteNumber(point.y) ? { x: point.x, y: point.y } : null);
+  if (vertices.some((point) => point === null) || !Array.isArray(value.boundary.bulges) || !value.boundary.bulges.every(isFiniteNumber) || !isFiniteNumber(value.boundary.elevation) || !isFiniteNumber(value.boundary.width) || value.boundary.closed !== true) return null;
+  const boundary: PolylineGeometry = { bulges: value.boundary.bulges as number[], closed: true, elevation: value.boundary.elevation, vertices: vertices as Array<{ x: number; y: number }>, width: value.boundary.width };
+  if (!polylineGeometryIsValid(boundary)) return null;
+  return { boundary, cuts: value.cuts as PlatformOpening["cuts"], id: value.id, kind: value.kind as PlatformOpening["kind"], name: value.name.trim() };
+}
+
+function readRoomObject(value: unknown, supportsPlatformOpenings: boolean): RoomObject | null {
   if (
     !isRecord(value) || !isRecord(value.boundary) || !Array.isArray(value.boundary.vertices) ||
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -506,6 +525,12 @@ function readRoomObject(value: unknown): RoomObject | null {
   const ceilingStructureOverride = readOverride(value.ceilingStructureOverride, "ceiling-structure");
   const ceilingFinishOverride = readOverride(value.ceilingFinishOverride, "ceiling-finish");
   if ((value.floorStructureOverride !== null && !floorStructureOverride) || (value.floorFinishOverride !== null && !floorFinishOverride) || (value.ceilingStructureOverride !== null && !ceilingStructureOverride) || (value.ceilingFinishOverride !== null && !ceilingFinishOverride)) return null;
+  const platformOpenings = supportsPlatformOpenings
+    ? Array.isArray(value.platformOpenings) && value.platformOpenings.length <= MAXIMUM_PLATFORM_OPENING_COUNT
+      ? value.platformOpenings.map(readPlatformOpening)
+      : null
+    : [];
+  if (!platformOpenings || platformOpenings.some((opening) => opening === null)) return null;
   return {
     boundary,
     boundaryWallIds: value.boundaryWallIds as string[],
@@ -515,6 +540,7 @@ function readRoomObject(value: unknown): RoomObject | null {
     floorStructureOverride,
     id: value.id,
     name: value.name.trim(),
+    platformOpenings: platformOpenings as PlatformOpening[],
     roughCeilingHeightOverride: value.roughCeilingHeightOverride as number | null,
     roughFloorOffset: value.roughFloorOffset,
     storyId: value.storyId,
@@ -827,7 +853,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   let rooms: RoomObject[] = [];
   if (version >= 24) {
     if (!Array.isArray(value.rooms) || value.rooms.length > MAXIMUM_ROOM_COUNT) return { ok: false, error: "The project Room collection is missing or invalid." };
-    const parsedRooms = value.rooms.map(readRoomObject);
+    const parsedRooms = value.rooms.map((room) => readRoomObject(room, version >= 25));
     if (parsedRooms.some((room) => room === null)) return { ok: false, error: "One or more Rooms are invalid." };
     rooms = parsedRooms as RoomObject[];
     const roomDocument: ModelDocument = { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines, rooms };

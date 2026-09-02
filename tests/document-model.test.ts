@@ -7,6 +7,7 @@ import {
   addCircleObject,
   addLineObject,
   addPolylineObject,
+  addPlatformOpening,
   addRectangleObject,
   addWallOpening,
   addLayer,
@@ -27,6 +28,7 @@ import {
   deleteBoxObject,
   deleteBoxObjects,
   deleteModelEntities,
+  deletePlatformOpening,
   deleteWallOpening,
   documentsEqual,
   discoverDocumentBoundary,
@@ -70,6 +72,7 @@ import {
   updateWallPlacement,
   updateWallOpening,
   updateRoomObject,
+  updatePlatformOpening,
   wallOpeningRoughBottom,
   wallVerticalExtent,
   updateCircleGrip,
@@ -1321,6 +1324,21 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   assert.deepEqual(platforms.floorStructure, refreshed.building.stories[0].floorStructure);
   assert.notEqual(platforms.boundary, office.boundary);
   assert.deepEqual(platforms.boundary, office.boundary);
+  const addedPlatformOpening = addPlatformOpening(refreshed, office.id, "stairwell", "both");
+  assert.ok(addedPlatformOpening);
+  assert.equal(addedPlatformOpening.document.rooms.find((room) => room.id === office.id)?.platformOpenings.length, 1);
+  const withFloorOnlyOpening = updatePlatformOpening(addedPlatformOpening.document, office.id, addedPlatformOpening.opening.id, { cuts: "floor", name: "Main Stair Opening" });
+  assert.ok(withFloorOnlyOpening);
+  const openingSolution = roomHorizontalPlatformSolution(withFloorOnlyOpening, withFloorOnlyOpening.rooms.find((room) => room.id === office.id)!);
+  assert.ok(openingSolution);
+  assert.equal(openingSolution.floorOpeningBoundaries.length, 1);
+  assert.equal(openingSolution.ceilingOpeningBoundaries.length, 0);
+  assert.equal(openingSolution.platformOpenings[0].name, "Main Stair Opening");
+  const outsideBoundary = { ...addedPlatformOpening.opening.boundary, vertices: addedPlatformOpening.opening.boundary.vertices.map((point) => ({ x: point.x + 1000, y: point.y })) };
+  assert.equal(updatePlatformOpening(withFloorOnlyOpening, office.id, addedPlatformOpening.opening.id, { boundary: outsideBoundary }), null);
+  const withoutOpening = deletePlatformOpening(withFloorOnlyOpening, office.id, addedPlatformOpening.opening.id);
+  assert.ok(withoutOpening);
+  assert.equal(withoutOpening.rooms.find((room) => room.id === office.id)?.platformOpenings.length, 0);
 
   const otherRoom = refreshed.rooms.find((room) => room.id !== office.id);
   assert.ok(otherRoom);
