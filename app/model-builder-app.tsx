@@ -745,6 +745,10 @@ function formatDraftingSpacing(value: number): string {
   return formatted;
 }
 
+function titleCase(value: string): string {
+  return value.replaceAll("-", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 const DEFAULT_CAD_DRAFTING_SETTINGS: CadDraftingSettings = {
   activeElevation: 0,
   gridSpacing: 12,
