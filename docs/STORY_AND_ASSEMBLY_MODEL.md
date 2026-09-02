@@ -109,7 +109,7 @@ nodes remain unwrapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-29 project files store the Building Datum, ordered Stories, active and
+- Version-31 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -231,11 +231,34 @@ a Wall thinner than the combined requested depths, both sides are proportionally
 limited so they meet without overlapping. The structural rough opening remains
 the authoritative void for later framing and unit placement.
 
+## Wall Framing Defaults
+
+Wall framing is generated from each Wall's Main layer, so the structural layer
+defines member depth and the host Wall continues to own placement and layer
+visibility. Project defaults control stud spacing and width, plate height and
+counts, framing material, header depth, and whether the framing reveal is shown
+in 3D. These defaults are stored in version-31 project files; earlier files open
+with conservative editable defaults.
+
+Common studs and continuous top plates are laid out along the Wall. Door and
+Window rough-opening edges generate king and jack studs plus a header whose
+bottom is the saved bottom-of-header elevation. Windows also generate a rough
+sill, lower cripples, and upper cripples; Door bottom plates stop at the rough
+opening while Window bottom plates remain continuous. The generated members are
+derived geometry rather than separately editable drawing objects, preventing
+them from drifting out of sync with the host Wall or opening.
+
+The header depth is a user-editable project rule, not an engineered beam-size
+calculation. Span tables, loads, species, grades, and built-up header
+construction must be modeled separately before framing can be treated as a
+structural design result.
+
 ## Next Steps
 
-1. Add framing members from the reusable Door/Window rough-opening and header
-   data, then develop product-unit and casing geometry independently of framing.
-2. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-3. Add manual per-edge platform overrides for exceptional support details.
-4. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+1. Add corner, intersection, partition backing, and opening-specific framing
+   rules without making unsafe engineering assumptions.
+2. Develop Door/Window product-unit and casing geometry independently of framing.
+3. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+4. Add manual per-edge platform overrides for exceptional support details.
+5. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

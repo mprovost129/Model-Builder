@@ -112,6 +112,9 @@ polylines, rectangles, Circles, and Arcs.
 - Reusable Door and Window component types with independent active defaults,
   unit and rough-opening sizes, Window header defaults, and exterior/interior
   finish-return depths that generate jamb, head, and Window sill geometry; placed openings retain a type link and can be reassigned
+- Project-level Wall Framing Defaults that generate studs, bottom and top plates,
+  king and jack studs, headers, Window rough sills, and cripple studs from the
+  Wall Main layer and structural rough openings, with an optional 3D framing reveal
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling
@@ -310,8 +313,12 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   relationship, with automatic matching for newly aligned Walls. Stairwell, shaft,
   and open-below cuts can now continue as aligned, validated paths through adjacent
   Stories. Door and Window component definitions now provide reusable unit sizes,
-  rough openings, header defaults, and generated finish-return geometry. The next
-  engineering milestone is framing members driven by the same structural openings.
+  rough openings, header defaults, and generated finish-return geometry. Those
+  structural openings now drive an initial conventional light-frame member layout,
+  with project settings for spacing, member size, plate counts, header depth, and
+  3D framing visibility. Header depth remains an editable rule rather than an
+  engineered span calculation. The next framing milestone is explicit corner,
+  intersection, backing, and opening-specific construction rules.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -322,7 +329,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, and assembly definitions, and format metadata. Version-1 through version-29 files open and upgrade
+Foundation Wall Type, Door/Window Type, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-30 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

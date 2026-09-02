@@ -100,6 +100,18 @@ export type WallOpeningType = {
   unitWidth: number;
 };
 
+export type WallFramingSettings = {
+  bottomPlateCount: number;
+  enabled: boolean;
+  headerHeight: number;
+  material: string;
+  plateHeight: number;
+  showInModel: boolean;
+  studSpacing: number;
+  studWidth: number;
+  topPlateCount: number;
+};
+
 export type BuildingStructure = {
   activeDoorTypeId: string;
   activeFoundationWallTypeId: string;
@@ -111,6 +123,7 @@ export type BuildingStructure = {
   foundationWallTypes: FoundationWallType[];
   openingTypes: WallOpeningType[];
   stories: BuildingStory[];
+  wallFraming: WallFramingSettings;
   wallTypes: LayeredAssembly[];
 };
 
@@ -287,6 +300,20 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
   ];
 }
 
+export function createDefaultWallFramingSettings(): WallFramingSettings {
+  return {
+    bottomPlateCount: 1,
+    enabled: true,
+    headerHeight: 9.25,
+    material: "Lumber",
+    plateHeight: 1.5,
+    showInModel: false,
+    studSpacing: 16,
+    studWidth: 1.5,
+    topPlateCount: 2,
+  };
+}
+
 export function createBuildingStory(id: string, name: string): BuildingStory {
   return {
     ceilingFinish: defaultCeilingFinish(id),
@@ -312,6 +339,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     foundationWallTypes: [createDefaultFoundationWallType()],
     openingTypes,
     stories: [createBuildingStory("story-01", "First Floor")],
+    wallFraming: createDefaultWallFramingSettings(),
     wallTypes: [createDefaultWallType()],
   };
 }
@@ -345,7 +373,7 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), openingTypes: building.openingTypes.map(cloneWallOpeningType), stories: building.stories.map(cloneBuildingStory), wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), openingTypes: building.openingTypes.map(cloneWallOpeningType), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
 }
 
 export function foundationSillStackHeight(type: FoundationWallType): number {
@@ -378,6 +406,16 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     type.unitHeight <= type.roughHeight &&
     type.defaultHeaderBottomHeight >= type.roughHeight &&
     (type.kind !== "door" || type.defaultHeaderBottomHeight === type.roughHeight);
+}
+
+export function wallFramingSettingsAreValid(settings: WallFramingSettings): boolean {
+  const dimensions = [settings.headerHeight, settings.plateHeight, settings.studSpacing, settings.studWidth];
+  return typeof settings.enabled === "boolean" && typeof settings.showInModel === "boolean" &&
+    stringsAreValid([{ value: settings.material, limit: MATERIAL_NAME_LIMIT }]) &&
+    dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    settings.studSpacing >= settings.studWidth && settings.headerHeight >= settings.plateHeight &&
+    Number.isInteger(settings.bottomPlateCount) && settings.bottomPlateCount >= 0 && settings.bottomPlateCount <= 3 &&
+    Number.isInteger(settings.topPlateCount) && settings.topPlateCount >= 0 && settings.topPlateCount <= 4;
 }
 
 export function assemblyTotalThickness(assembly: LayeredAssembly): number {
@@ -480,7 +518,8 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.foundationWallTypes.length < 1 ||
     building.foundationWallTypes.length > MAXIMUM_FOUNDATION_WALL_TYPE_COUNT ||
     building.openingTypes.length < 2 ||
-    building.openingTypes.length > MAXIMUM_WALL_OPENING_TYPE_COUNT
+    building.openingTypes.length > MAXIMUM_WALL_OPENING_TYPE_COUNT ||
+    !wallFramingSettingsAreValid(building.wallFraming)
   ) {
     return false;
   }

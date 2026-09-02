@@ -10,6 +10,7 @@ import {
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
   wallOpeningTypeIsValid,
+  wallFramingSettingsAreValid,
   removeBuildingStory,
   wallLayerCenterOffsets,
   wallReferenceDistanceFromExterior,
@@ -113,6 +114,28 @@ test("defines reusable Door and Window component types for rough openings and fi
   const cloned = cloneBuildingStructure(building);
   cloned.openingTypes[0].roughWidth = 40;
   assert.equal(building.openingTypes[0].roughWidth, 38);
+});
+
+test("defines project Wall framing defaults independently from finish assemblies", () => {
+  const building = createDefaultBuildingStructure();
+  assert.deepEqual(building.wallFraming, {
+    bottomPlateCount: 1,
+    enabled: true,
+    headerHeight: 9.25,
+    material: "Lumber",
+    plateHeight: 1.5,
+    showInModel: false,
+    studSpacing: 16,
+    studWidth: 1.5,
+    topPlateCount: 2,
+  });
+  assert.equal(wallFramingSettingsAreValid(building.wallFraming), true);
+  const cloned = cloneBuildingStructure(building);
+  cloned.wallFraming.studSpacing = 24;
+  assert.equal(building.wallFraming.studSpacing, 16);
+  cloned.wallFraming.studWidth = 25;
+  assert.equal(wallFramingSettingsAreValid(cloned.wallFraming), false);
+  assert.equal(buildingStructureIsValid(cloned), false);
 });
 
 test("rejects invalid Foundation Wall support geometry and duplicate type names", () => {

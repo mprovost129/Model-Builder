@@ -512,6 +512,16 @@ button { color: inherit; }
 .opening-type-manager { width: min(1080px, calc(100vw - 48px)); height: min(700px, calc(100vh - 48px)); }
 .opening-type-manager .story-manager-body { grid-template-columns: 230px minmax(600px, 1fr); }
 .opening-type-note { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
+.framing-manager { width: min(980px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); }
+.framing-manager-body { display: grid; grid-template-columns: 230px minmax(560px, 1fr); min-height: 0; }
+.framing-status-card { display: grid; align-content: start; gap: 12px; padding: 15px 13px; border-right: 1px solid #3e4955; background: #1c242d; }
+.framing-status-card > strong { color: #e4e9ed; font-size: 11px; }
+.framing-status-card label { display: flex; align-items: flex-start; gap: 8px; color: #c8d1d7; font-size: 10px; line-height: 1.4; }
+.framing-status-card input { width: 14px; height: 14px; margin: 0; accent-color: #d3aa55; }
+.framing-status-card label:has(input:disabled) { color: #74818c; }
+.framing-status-card p { margin: 2px 0 0; color: #91a0ac; font-size: 9px; line-height: 1.55; }
+.framing-editor { min-height: 0; overflow-y: auto; padding: 10px; }
+.foundation-field-grid .story-field > select { width: 100%; min-height: 31px; height: 31px; padding: 0 8px; border: 1px solid #465462; border-radius: 2px; background: #141b22; color: #e4e9ed; font-size: 10px; }
 .foundation-section-preview { min-height: 0; overflow-y: auto; border-left: 1px solid #3e4955; background: #1c242d; }
 .foundation-section-preview > header { display: grid; gap: 3px; padding: 11px 12px; border-bottom: 1px solid #3a4651; background: #252f39; }
 .foundation-section-preview > header strong { font-size: 11px; }
@@ -2264,7 +2274,14 @@ button { color: inherit; }
 .theme-light .foundation-setting-section > header span,
 .theme-light .foundation-setting-section > header output,
 .theme-light .foundation-sill-settings > p { color: var(--muted); }
-.theme-light .foundation-field-grid .story-field > input { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
+.theme-light .foundation-field-grid .story-field > input,
+.theme-light .foundation-field-grid .story-field > select { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
+.theme-light .framing-status-card { border-color: var(--ui-border); background: #e9eff1; }
+.theme-light .framing-status-card > strong { color: #304d60; }
+.theme-light .framing-status-card label { color: #3d586a; }
+.theme-light .framing-status-card label:has(input:disabled),
+.theme-light .framing-status-card p { color: var(--muted); }
+.theme-light .framing-status-card input { accent-color: var(--ui-blue); }
 .theme-light :is(.story-editor-summary label > span, .story-field > span, .story-calculated-grid span, .story-assembly > header span, .story-layer-grid > span, .story-wall-group-heading span, .room-story-picker) { color: var(--muted); }
 .theme-light :is(.story-editor-summary input, .story-editor-summary select, .story-editor-summary output, .story-layer-grid input, .story-layer-grid select, .story-field-shell, .room-story-picker select, .room-output) {
   border-color: var(--ui-border-strong);

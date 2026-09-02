@@ -51,6 +51,7 @@ import {
   cloneBuildingStructure,
   createDefaultCeilingStructure,
   createDefaultBuildingStructure,
+  createDefaultWallFramingSettings,
   FOUNDATION_WALL_CONDITIONS,
   WALL_OPENING_KINDS,
   MAXIMUM_WALL_JOIN_PRIORITY,
@@ -71,12 +72,13 @@ import {
   type WallJoinMode,
   type WallOpeningKind,
   type WallOpeningType,
+  type WallFramingSettings,
   type WallLayerGroup,
   type WallReferenceLine,
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 30;
+export const PROJECT_FILE_VERSION = 31;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -264,6 +266,26 @@ function readWallOpeningType(value: unknown): WallOpeningType | null {
   };
 }
 
+function readWallFramingSettings(value: unknown): WallFramingSettings | null {
+  if (!isRecord(value) ||
+    typeof value.enabled !== "boolean" || typeof value.showInModel !== "boolean" || typeof value.material !== "string" ||
+    !isFiniteNumber(value.studSpacing) || !isFiniteNumber(value.studWidth) ||
+    !isFiniteNumber(value.plateHeight) || !isFiniteNumber(value.headerHeight) ||
+    !isFiniteNumber(value.bottomPlateCount) || !Number.isInteger(value.bottomPlateCount) ||
+    !isFiniteNumber(value.topPlateCount) || !Number.isInteger(value.topPlateCount)) return null;
+  return {
+    bottomPlateCount: value.bottomPlateCount as number,
+    enabled: value.enabled,
+    headerHeight: value.headerHeight,
+    material: value.material.trim(),
+    plateHeight: value.plateHeight,
+    showInModel: value.showInModel,
+    studSpacing: value.studSpacing,
+    studWidth: value.studWidth,
+    topPlateCount: value.topPlateCount as number,
+  };
+}
+
 function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): BuildingStory | null {
   if (
     !isRecord(value) ||
@@ -289,7 +311,7 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -321,6 +343,8 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   const activeDoorTypeId = supportsOpeningTypes ? value.activeDoorTypeId : defaults.activeDoorTypeId;
   const activeWindowTypeId = supportsOpeningTypes ? value.activeWindowTypeId : defaults.activeWindowTypeId;
   if (typeof activeDoorTypeId !== "string" || typeof activeWindowTypeId !== "string") return null;
+  const wallFraming = supportsWallFraming ? readWallFramingSettings(value.wallFraming) : createDefaultWallFramingSettings();
+  if (!wallFraming) return null;
   const building: BuildingStructure = {
     activeDoorTypeId,
     activeFoundationWallTypeId,
@@ -332,6 +356,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     foundationWallTypes: foundationWallTypes as FoundationWallType[],
     openingTypes: openingTypes as WallOpeningType[],
     stories: stories as BuildingStory[],
+    wallFraming,
     wallTypes: wallTypes as LayeredAssembly[],
   };
   return buildingStructureIsValid(building) ? building : null;
@@ -766,7 +791,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

@@ -305,6 +305,7 @@ import {
   MAXIMUM_WALL_OPENING_TYPE_COUNT,
   removeBuildingStory,
   wallLayerGroupThickness,
+  wallFramingSettingsAreValid,
   WALL_LAYER_GROUPS,
   type AssemblyKind,
   type AssemblyLayer,
@@ -317,6 +318,7 @@ import {
   type WallJoinMode,
   type WallLayerGroup,
   type WallOpeningType,
+  type WallFramingSettings,
   type WallReferenceLine,
 } from "@/lib/building-stories";
 import {
@@ -328,6 +330,7 @@ import {
   wallOpeningReturnSolids,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
+import { wallFramingSolids } from "@/lib/wall-framing";
 import {
   automaticFoundationWallJoinCount,
   buildAutomaticFoundationWallJoinPlan,
@@ -1509,12 +1512,15 @@ function updateWallView(
   linesById: ReadonlyMap<string, LineObject>,
   wallTypesById: ReadonlyMap<string, LayeredAssembly>,
   openingTypesById: ReadonlyMap<string, WallOpeningType>,
+  framing: WallFramingSettings,
+  showFraming: boolean,
 ) {
   clearWallView(view);
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const length = Math.hypot(dx, dy);
   if (length < 1 / 16) return;
+  const framingReveal = framing.enabled && framing.showInModel && showFraming;
   wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
     wallLayerSolidSegments(line, wallType, index, joinPlan, linesById, wallTypesById, vertical.height).forEach((segment) => {
@@ -1525,7 +1531,8 @@ function updateWallView(
       shape.lineTo(segment.endExterior.x, segment.endExterior.y);
       shape.closePath();
       const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: segment.height, steps: 1 });
-      const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
+      const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], depthWrite: !framingReveal, metalness: 0, opacity: framingReveal ? (layer.wallGroup === "main" ? 0.1 : 0.18) : 0.92, roughness: 0.84, transparent: true });
+      material.userData.baseOpacity = material.opacity;
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.z = vertical.baseElevation + segment.baseHeight;
       mesh.userData.lineId = line.id;
@@ -1544,7 +1551,8 @@ function updateWallView(
     shape.lineTo(footprint.endExterior.x, footprint.endExterior.y);
     shape.closePath();
     const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: vertical.height, steps: 1 });
-    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.92, roughness: 0.84, transparent: true });
+    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], depthWrite: !framingReveal, metalness: 0, opacity: framingReveal ? 0.18 : 0.92, roughness: 0.84, transparent: true });
+    material.userData.baseOpacity = material.opacity;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.z = vertical.baseElevation;
     mesh.userData.lineId = line.id;
@@ -1562,13 +1570,34 @@ function updateWallView(
     shape.lineTo(returnSolid.endExterior.x, returnSolid.endExterior.y);
     shape.closePath();
     const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: returnSolid.height, steps: 1 });
-    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], metalness: 0, opacity: 0.96, roughness: 0.82, transparent: true });
+    const material = new THREE.MeshStandardMaterial({ color: FLOOR_LAYER_COLORS[layer.role], depthWrite: !framingReveal, metalness: 0, opacity: framingReveal ? 0.28 : 0.96, roughness: 0.82, transparent: true });
+    material.userData.baseOpacity = material.opacity;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.z = vertical.baseElevation + returnSolid.baseHeight;
     mesh.userData.lineId = line.id;
     mesh.userData.wallLayer = `${layer.name} ${returnSolid.side} ${returnSolid.component}`;
     mesh.userData.wallOpeningId = returnSolid.openingId;
     mesh.userData.wallOpeningReturn = returnSolid.component;
+    view.group.add(mesh);
+    view.meshes.push(mesh);
+    view.materials.push(material);
+  });
+  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height).forEach((framingMember) => {
+    const shape = new THREE.Shape();
+    shape.moveTo(framingMember.startExterior.x, framingMember.startExterior.y);
+    shape.lineTo(framingMember.startInterior.x, framingMember.startInterior.y);
+    shape.lineTo(framingMember.endInterior.x, framingMember.endInterior.y);
+    shape.lineTo(framingMember.endExterior.x, framingMember.endExterior.y);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: framingMember.height, steps: 1 });
+    const material = new THREE.MeshStandardMaterial({ color: framingMember.kind === "header" ? 0xad7545 : 0xd2a36c, metalness: 0, opacity: 1, roughness: 0.78 });
+    material.userData.baseOpacity = material.opacity;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.z = vertical.baseElevation + framingMember.baseHeight;
+    mesh.userData.lineId = line.id;
+    mesh.userData.wallFramingMember = framingMember.kind;
+    mesh.userData.wallFramingMaterial = framingMember.material;
+    if (framingMember.openingId) mesh.userData.wallOpeningId = framingMember.openingId;
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
@@ -6549,7 +6578,7 @@ function Viewport({
       }
       const vertical = wallVerticalExtent(document, line);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById);
+      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById, document.building.wallFraming, viewTarget.id !== "top");
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
@@ -6772,7 +6801,7 @@ function Viewport({
       arcCountRef.current = document.arcs.length;
       if (!arcMode) fitViewRef.current?.();
     }
-  }, [arcMode, breakMode, chamferMode, circleMode, copyMode, document, extendMode, filletMode, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, scaleBaseKey, scaleMode, selectedArcId, selectedCircleId, selectedEntityKeys, selectedLineId, selectedObjectId, selectedObjectIds, selectedPolylineId, stretchMode, trimMode]);
+  }, [arcMode, breakMode, chamferMode, circleMode, copyMode, document, extendMode, filletMode, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, scaleBaseKey, scaleMode, selectedArcId, selectedCircleId, selectedEntityKeys, selectedLineId, selectedObjectId, selectedObjectIds, selectedPolylineId, stretchMode, trimMode, viewTarget.id]);
 
   useEffect(() => {
     const selectedIds = new Set(selectedEntityKeys
@@ -6816,7 +6845,8 @@ function Viewport({
       const hovered = hoveredEntityKey === cadEntityKey({ id: lineId, kind: "line" });
       view.materials.forEach((material) => {
         material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
-        material.opacity = selected || hovered ? 1 : 0.92;
+        const baseOpacity = typeof material.userData.baseOpacity === "number" ? material.userData.baseOpacity : 0.92;
+        material.opacity = selected || hovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity;
       });
     });
   }, [document, hoveredEntityKey, selectedEntityKeys]);
@@ -9162,6 +9192,85 @@ function OpeningTypeManagerDialog({
   );
 }
 
+function WallFramingManagerDialog({
+  building,
+  onCancel,
+  onSave,
+}: {
+  building: BuildingStructure;
+  onCancel: () => void;
+  onSave: (building: BuildingStructure) => void;
+}) {
+  const [draft, setDraft] = useState<WallFramingSettings>(() => ({ ...building.wallFraming }));
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+  const replace = (change: Partial<WallFramingSettings>) => {
+    setDraft((current) => ({ ...current, ...change }));
+    setError("");
+  };
+  const save = () => {
+    if (!wallFramingSettingsAreValid(draft)) {
+      setError("Check the member dimensions, spacing, plate counts, and material name.");
+      return;
+    }
+    const next = cloneBuildingStructure(building);
+    next.wallFraming = { ...draft };
+    onSave(next);
+  };
+  return (
+    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="story-manager framing-manager" role="dialog" aria-modal="true" aria-labelledby="framing-manager-title">
+        <header className="story-manager-header"><div><strong id="framing-manager-title">Wall Framing Defaults</strong><span>Generate conventional light-frame members from each Wall Main layer and its structural rough openings.</span></div><button type="button" onClick={onCancel} aria-label="Close Wall Framing Defaults">×</button></header>
+        <div className="framing-manager-body">
+          <section className="framing-status-card">
+            <strong>Framing Generation</strong>
+            <label><input type="checkbox" checked={draft.enabled} onChange={(event) => replace({ enabled: event.target.checked, ...(!event.target.checked ? { showInModel: false } : {}) })} /><span>Generate framing from Walls</span></label>
+            <label><input type="checkbox" checked={draft.showInModel} disabled={!draft.enabled} onChange={(event) => replace({ showInModel: event.target.checked })} /><span>Show framing in the 3D model</span></label>
+            <p>Framing remains derived from the host Wall and stays on that Wall&apos;s layer. The 3D framing view fades finish layers so structural members remain readable.</p>
+          </section>
+          <main className="story-editor framing-editor">
+            <section className="story-editor-summary foundation-editor-summary">
+              <label><span>Framing material</span><input value={draft.material} maxLength={120} onChange={(event) => replace({ material: event.target.value })} /></label>
+              <label><span>Layout</span><output className="room-output">{formatArchitectural(draft.studSpacing)} on center</output></label>
+              <label><span>Status</span><output className="room-output">{draft.enabled ? "Generated" : "Disabled"}</output></label>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Stud &amp; Plate Layout</strong><span>The Main-layer thickness supplies member depth.</span></div></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`spacing:${draft.studSpacing}`} label="Stud spacing" value={draft.studSpacing} onChange={(studSpacing) => replace({ studSpacing })} />
+                <StoryDimensionInput key={`stud:${draft.studWidth}`} label="Stud width" value={draft.studWidth} onChange={(studWidth) => replace({ studWidth })} />
+                <StoryDimensionInput key={`plate:${draft.plateHeight}`} label="Plate height" value={draft.plateHeight} onChange={(plateHeight) => replace({ plateHeight })} />
+                <label className="story-field"><span>Bottom plates</span><select value={draft.bottomPlateCount} onChange={(event) => replace({ bottomPlateCount: Number(event.target.value) })}>{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
+                <label className="story-field"><span>Top plates</span><select value={draft.topPlateCount} onChange={(event) => replace({ topPlateCount: Number(event.target.value) })}>{[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
+              </div>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Opening Framing</strong><span>Rough dimensions and bottom-of-header elevations remain authoritative.</span></div></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`header:${draft.headerHeight}`} label="Default header depth" value={draft.headerHeight} onChange={(headerHeight) => replace({ headerHeight })} />
+                <label className="story-field"><span>Generated members</span><output className="room-output">King + jack studs</output></label>
+                <label className="story-field"><span>Window support</span><output className="room-output">Rough sill + cripples</output></label>
+              </div>
+              <p className="opening-type-note">Header depth is an editable project default, not an engineered span calculation. Door bottom plates are cut at the rough opening; Window bottom plates remain continuous.</p>
+            </section>
+          </main>
+        </div>
+        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
+        <footer className="story-manager-footer"><span>Wall framing defaults · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Framing Defaults</button></div></footer>
+      </section>
+    </div>
+  );
+}
+
 type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" | "ceilingStructureOverride" | "ceilingFinishOverride";
 
 function RoomManagerDialog({
@@ -9430,6 +9539,7 @@ export function ModelBuilderApp() {
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
+  const [framingManagerOpen, setFramingManagerOpen] = useState(false);
   const [openingTypeManagerOpen, setOpeningTypeManagerOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
@@ -12435,6 +12545,17 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${activeDoor?.name ?? "Door"} and ${activeWindow?.name ?? "Window"} are active for new openings.`, tone: "success" });
   }, [editor.present]);
 
+  const applyWallFraming = useCallback((building: BuildingStructure) => {
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "Wall framing defaults contain an invalid member size, spacing, plate count, or material.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFramingManagerOpen(false);
+    setFileNotice({ text: building.wallFraming.showInModel ? "Wall framing is generated and visible in 3D." : "Wall framing defaults were saved with the project.", tone: "success" });
+  }, [editor.present]);
+
   const applyRoomSettings = useCallback((next: ModelDocument) => {
     dispatch({ type: "commit", next });
     setRoomManagerOpen(false);
@@ -13158,7 +13279,7 @@ export function ModelBuilderApp() {
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
                   {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
-                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
+                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
                   {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
                 </div>
               ) : null}
@@ -13366,7 +13487,7 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
                 <button type="button" onClick={() => setOpeningTypeManagerOpen(true)} title="Define reusable Door and Window unit sizes, rough openings, headers, and finish returns"><b>▣</b><span>Doors &amp;<br />Windows</span></button>
                 <button type="button" className="is-planned" disabled title="Roof standards will be added with roof modeling"><b>⌂</b><span>Roof</span><small>Planned</small></button>
-                <button type="button" className="is-planned" disabled title="Framing defaults will be added with framing generation"><b>╫</b><span>Framing</span><small>Planned</small></button>
+                <button type="button" onClick={() => setFramingManagerOpen(true)} title="Set generated Wall stud, plate, and opening-framing defaults"><b>╫</b><span>Framing</span></button>
                 <button type="button" className="is-planned" disabled title="Project material definitions are planned"><b>▧</b><span>Materials</span><small>Planned</small></button>
               </div>
               <small>Building standards · saved with project</small>
@@ -13992,11 +14113,15 @@ export function ModelBuilderApp() {
                 {editor.present.building.openingTypes.map((type) => <button type="button" className={type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? "building-browser-row is-active" : "building-browser-row"} key={type.id} onClick={() => setOpeningTypeManagerOpen(true)}><span className="building-browser-icon">▣</span><span><strong>{type.name}</strong><small>{type.kind === "door" ? "Door" : "Window"} · RO {formatArchitectural(type.roughWidth)} × {formatArchitectural(type.roughHeight)}</small></span>{type.id === (type.kind === "door" ? editor.present.building.activeDoorTypeId : editor.present.building.activeWindowTypeId) ? <b>ACTIVE</b> : null}</button>)}
               </section>
               <section className="building-browser-section">
+                <header><strong>Wall Framing</strong><span>{editor.present.building.wallFraming.enabled ? "ON" : "OFF"}</span></header>
+                <button type="button" className={editor.present.building.wallFraming.showInModel ? "building-browser-row is-active" : "building-browser-row"} onClick={() => setFramingManagerOpen(true)}><span className="building-browser-icon">╫</span><span><strong>{formatArchitectural(editor.present.building.wallFraming.studSpacing)} on center</strong><small>{editor.present.building.wallFraming.bottomPlateCount} bottom · {editor.present.building.wallFraming.topPlateCount} top plates · {formatArchitectural(editor.present.building.wallFraming.headerHeight)} header</small></span>{editor.present.building.wallFraming.showInModel ? <b>VISIBLE</b> : null}</button>
+              </section>
+              <section className="building-browser-section">
                 <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>
                 {editor.present.rooms.filter((room) => room.storyId === activeStory.id).map((room) => <button type="button" className="building-browser-row" key={room.id} onClick={() => setRoomManagerOpen(true)}><span className="building-browser-icon">▦</span><span><strong>{room.name}</strong><small>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {room.boundaryWallIds.length} Walls · {room.platformOpenings.length} Openings</small></span></button>)}
                 {!activeStoryRoomCount ? <div className="building-browser-empty"><span>No Rooms detected yet.</span><button type="button" onClick={() => setRoomManagerOpen(true)}>Open Room Manager</button></div> : null}
               </section>
-              <div className="building-browser-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
+              <div className="building-browser-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setFramingManagerOpen(true)}>Framing</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
             </section>
           )}
         </aside>
@@ -14027,6 +14152,7 @@ export function ModelBuilderApp() {
       </footer>
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
+      {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
       {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
