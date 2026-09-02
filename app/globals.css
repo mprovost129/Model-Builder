@@ -543,9 +543,13 @@ button { color: inherit; }
 .product-library-representations { display: grid; align-content: start; gap: 7px; min-height: 120px; padding: 9px; }
 .product-library-representations > strong { color: #aab6bf; font-size: 8px; text-transform: uppercase; }
 .product-library-representations > div { display: flex; flex-wrap: wrap; gap: 5px; }
-.product-library-representations span { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border: 1px solid #43505b; background: #242e37; color: #bfc9d0; font-size: 8px; }
-.product-library-representations span.is-reference { border-color: #3f6478; background: #20303a; color: #a8ccdd; }
-.product-library-representations span small { color: #758691; font: 6px var(--font-geist-mono), monospace; }
+.product-library-representations span,
+.product-library-representations button { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border: 1px solid #43505b; background: #242e37; color: #bfc9d0; font: inherit; font-size: 8px; }
+.product-library-representations button { cursor: pointer; }
+.product-library-representations button:hover { border-color: #658197; background: #293946; }
+.product-library-representations .is-reference { border-color: #3f6478; background: #20303a; color: #a8ccdd; }
+.product-library-representations span small,
+.product-library-representations button small { color: #758691; font: 6px var(--font-geist-mono), monospace; }
 .product-library-representations p { margin: 0; color: #84939e; font-size: 8px; line-height: 1.45; }
 .product-library-card > footer { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 9px; border-top: 1px solid #34404b; background: #202933; }
 .product-library-card > footer button { min-height: 30px; padding: 0 10px; border: 1px solid #4b5864; border-radius: 2px; background: #28333d; color: #d1dae0; font-size: 8px; cursor: pointer; }
@@ -579,6 +583,10 @@ button { color: inherit; }
 .product-asset-import > footer button { min-height: 30px; padding: 0 13px; border: 1px solid #4d5a67; border-radius: 2px; background: #27323c; color: #d8e0e6; font-size: 8px; cursor: pointer; }
 .product-asset-import > footer button.story-save { border-color: #806735; background: #3a3022; color: #f0cd86; }
 .product-asset-import > footer button:disabled { opacity: .45; cursor: default; }
+.product-asset-alignment { width: min(720px, calc(100vw - 48px)); }
+.product-asset-alignment-body { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.product-asset-alignment-body .story-field { display: grid; gap: 5px; }
+.product-asset-alignment-body .story-field input { min-width: 0; }
 .opening-type-manager { width: min(1320px, calc(100vw - 48px)); height: min(840px, calc(100vh - 48px)); }
 .opening-type-manager .story-manager-body { grid-template-columns: 220px minmax(540px, 1fr) minmax(320px, 370px); }
 .opening-type-note { margin: 0; padding: 0 12px 11px; color: #91a0ac; font-size: 9px; line-height: 1.55; }
@@ -873,6 +881,7 @@ button { color: inherit; }
   .opening-type-preview { display: none; }
   .story-section-preview { display: none; }
   .product-library-grid { grid-template-columns: 1fr; }
+  .product-asset-alignment-body { grid-template-columns: 1fr; }
 }
 
 .work-area { display: grid; grid-template-columns: 292px minmax(0, 1fr) 292px; min-height: 0; }
@@ -2427,8 +2436,10 @@ button { color: inherit; }
 .theme-light .product-library-card dd { color: #3d586a; }
 .theme-light .product-library-asset-preview { border-color: var(--ui-border); background: #fff; }
 .theme-light .product-library-representations > strong { color: #4e6878; }
-.theme-light .product-library-representations span { border-color: #bdcbd1; background: #edf2f3; color: #486374; }
-.theme-light .product-library-representations span.is-reference { border-color: #89aaba; background: #dfedf2; color: #32647d; }
+.theme-light .product-library-representations span,
+.theme-light .product-library-representations button { border-color: #bdcbd1; background: #edf2f3; color: #486374; }
+.theme-light .product-library-representations button:hover { border-color: #789aaa; background: #e0ebef; }
+.theme-light .product-library-representations .is-reference { border-color: #89aaba; background: #dfedf2; color: #32647d; }
 .theme-light .product-library-card > footer button { border-color: var(--ui-border-strong); background: #edf2f3; color: #3a586b; }
 .theme-light .product-library-card > footer button.story-save { border-color: #799aaa; background: #d5e6ed; color: #28526b; }
 .theme-light .product-library-empty { border-color: var(--ui-border-strong); color: var(--muted); }

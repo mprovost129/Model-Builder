@@ -312,6 +312,8 @@ import {
   OPENING_COMPONENT_DEPTH_ANCHORS,
   OPENING_COMPONENT_GEOMETRIES,
   OPENING_COMPONENT_ROLES,
+  PRODUCT_ASSET_ORIGINS,
+  PRODUCT_ASSET_SOURCE_UNITS,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
   FOUNDATION_WALL_CONDITIONS,
@@ -9388,6 +9390,7 @@ function ProductLibraryDialog({
   selectedWallName,
   onActivate,
   onAssetAttached,
+  onAssetUpdated,
   onCancel,
   onManageTypes,
   onPlace,
@@ -9396,6 +9399,7 @@ function ProductLibraryDialog({
   selectedWallName: string | null;
   onActivate: (typeId: string) => void;
   onAssetAttached: (typeId: string, asset: ProductAssetReference) => boolean;
+  onAssetUpdated: (typeId: string, asset: ProductAssetReference) => boolean;
   onCancel: () => void;
   onManageTypes: () => void;
   onPlace: (typeId: string) => void;
@@ -9406,20 +9410,25 @@ function ProductLibraryDialog({
   const [assetImport, setAssetImport] = useState<{ file: File; format: "glb" | "svg"; name: string; role: ProductAssetReference["role"] } | null>(null);
   const [assetImportError, setAssetImportError] = useState("");
   const [assetUploading, setAssetUploading] = useState(false);
+  const [assetEdit, setAssetEdit] = useState<{ asset: ProductAssetReference; typeId: string } | null>(null);
+  const [assetEditError, setAssetEditError] = useState("");
   const assetInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (assetImport) {
+      if (assetEdit) {
+        setAssetEdit(null);
+        setAssetEditError("");
+      } else if (assetImport) {
         setAssetImport(null);
         setAssetImportError("");
       } else onCancel();
     };
     window.addEventListener("keydown", closeWithEscape, true);
     return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [assetImport, onCancel]);
+  }, [assetEdit, assetImport, onCancel]);
   const requestAssetImport = (typeId: string) => {
     setAssetTargetId(typeId);
     setAssetImportError("");
@@ -9471,6 +9480,27 @@ function ProductLibraryDialog({
       setAssetUploading(false);
     }
   };
+  const editAsset = (typeId: string, asset: ProductAssetReference) => {
+    setAssetEdit({ asset: { ...asset, alignment: { ...asset.alignment } }, typeId });
+    setAssetEditError("");
+  };
+  const updateEditedAsset = (change: Partial<ProductAssetReference>) => {
+    setAssetEdit((current) => current ? { ...current, asset: { ...current.asset, ...change } } : current);
+    setAssetEditError("");
+  };
+  const updateEditedAlignment = (change: Partial<ProductAssetReference["alignment"]>) => {
+    setAssetEdit((current) => current ? { ...current, asset: { ...current.asset, alignment: { ...current.asset.alignment, ...change } } } : current);
+    setAssetEditError("");
+  };
+  const saveEditedAsset = () => {
+    if (!assetEdit) return;
+    if (!onAssetUpdated(assetEdit.typeId, assetEdit.asset)) {
+      setAssetEditError("Check the scale, rotation, offsets, purpose, and representation name.");
+      return;
+    }
+    setAssetEdit(null);
+    setAssetEditError("");
+  };
   const entries = filterProjectProductLibrary(createProjectProductLibrary(building), query, category);
   return (
     <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
@@ -9504,8 +9534,12 @@ function ProductLibraryDialog({
                   <img src={storedSvg.sourceUrl} alt={`${entry.name} ${storedSvg.name}`} />
                 </div> : null}
                 <section className="product-library-representations"><strong>Representations</strong><div>{entry.representations.map((representation) => {
-                  const stored = representation.source === "manufacturer-reference" && openingType.productAssets.some((asset) => asset.id === representation.id && asset.sourceUrl.startsWith("/api/product-assets/"));
-                  return <span key={representation.id} className={representation.source === "manufacturer-reference" ? "is-reference" : ""} title={stored ? "Validated and stored privately with this Site" : representation.source === "manufacturer-reference" ? "Validated reference manifest; binary content is not stored by this project" : "Generated from the editable native Type"}>{representation.label}<small>{stored ? `STORED ${representation.format.toUpperCase()}` : representation.format.toUpperCase()}</small></span>;
+                  const asset = representation.source === "manufacturer-reference" ? openingType.productAssets.find((candidate) => candidate.id === representation.id) : null;
+                  const stored = Boolean(asset?.sourceUrl.startsWith("/api/product-assets/"));
+                  const contents = <>{representation.label}<small>{asset?.usage === "preferred" ? `PREFERRED ${representation.format.toUpperCase()}` : stored ? `STORED ${representation.format.toUpperCase()}` : representation.format.toUpperCase()}</small></>;
+                  return asset
+                    ? <button type="button" key={representation.id} className="is-reference" onClick={() => editAsset(entry.openingTypeId, asset)} title="Edit alignment and representation use">{contents}</button>
+                    : <span key={representation.id} title="Generated from the editable native Type">{contents}</span>;
                 })}</div>{referencedCount ? <p>{referencedCount} manufacturer representation{referencedCount === 1 ? "" : "s"} recorded. Stored assets are private; external references remain manifests only.</p> : <p>Native plan, elevation, and 3D geometry are generated from editable components.</p>}</section>
                 <footer><button type="button" onClick={() => requestAssetImport(entry.openingTypeId)}>Add SVG / GLB</button><button type="button" disabled={entry.isActive} onClick={() => onActivate(entry.openingTypeId)}>{entry.isActive ? "Active for New" : "Use for New"}</button><button type="button" className="story-save" disabled={!selectedWallName} title={selectedWallName ? `Place in ${selectedWallName}` : "Select a Wall before placing a product"} onClick={() => onPlace(entry.openingTypeId)}>Place in Selected Wall</button></footer>
               </article>;
@@ -9524,6 +9558,28 @@ function ProductLibraryDialog({
               {assetImportError ? <p className="product-asset-import-error">{assetImportError}</p> : null}
             </div>
             <footer><button type="button" disabled={assetUploading} onClick={() => { setAssetImport(null); setAssetImportError(""); }}>Cancel</button><button type="button" className="story-save" disabled={assetUploading || !assetImport.name.trim()} onClick={uploadAsset}>{assetUploading ? "Storing…" : "Validate & Store"}</button></footer>
+          </section>
+        </div> : null}
+        {assetEdit ? <div className="product-asset-import-backdrop" role="presentation">
+          <section className="product-asset-import product-asset-alignment" role="dialog" aria-modal="true" aria-labelledby="product-asset-alignment-title">
+            <header><div><strong id="product-asset-alignment-title">Representation Alignment</strong><span>{building.openingTypes.find((type) => type.id === assetEdit.typeId)?.name} · native Type remains the fallback</span></div><button type="button" onClick={() => { setAssetEdit(null); setAssetEditError(""); }} aria-label="Close representation alignment">×</button></header>
+            <div className="product-asset-import-body product-asset-alignment-body">
+              <label><span>Representation name</span><input value={assetEdit.asset.name} maxLength={100} onChange={(event) => updateEditedAsset({ name: event.target.value })} /></label>
+              <label><span>Purpose</span><select value={assetEdit.asset.role} onChange={(event) => updateEditedAsset({ role: event.target.value as ProductAssetReference["role"] })}><option value="plan-symbol">Plan symbol</option><option value="elevation-symbol">Elevation symbol</option><option value="model-3d">3D model</option><option value="thumbnail">Thumbnail</option></select></label>
+              <label><span>Use</span><select value={assetEdit.asset.usage} onChange={(event) => updateEditedAsset({ usage: event.target.value as ProductAssetReference["usage"] })}><option value="reference">Reference only</option><option value="preferred">Preferred for this purpose</option></select></label>
+              <label><span>Source units</span><select value={assetEdit.asset.alignment.sourceUnits} onChange={(event) => updateEditedAlignment({ sourceUnits: event.target.value as ProductAssetReference["alignment"]["sourceUnits"] })}>{PRODUCT_ASSET_SOURCE_UNITS.map((unit) => <option key={unit} value={unit}>{unit === "fit-to-unit" ? "Fit to native unit" : titleCase(unit)}</option>)}</select></label>
+              <label><span>Insertion point</span><select value={assetEdit.asset.alignment.origin} onChange={(event) => updateEditedAlignment({ origin: event.target.value as ProductAssetReference["alignment"]["origin"] })}>{PRODUCT_ASSET_ORIGINS.map((origin) => <option key={origin} value={origin}>{titleCase(origin)}</option>)}</select></label>
+              <label><span>Scale multiplier</span><input type="number" min="0.0001" max="10000" step="0.01" value={assetEdit.asset.alignment.scaleMultiplier} onChange={(event) => updateEditedAlignment({ scaleMultiplier: Number(event.target.value) })} /></label>
+              <label><span>Rotate X (degrees)</span><input type="number" min="-360" max="360" step="1" value={assetEdit.asset.alignment.rotationX} onChange={(event) => updateEditedAlignment({ rotationX: Number(event.target.value) })} /></label>
+              <label><span>Rotate Y (degrees)</span><input type="number" min="-360" max="360" step="1" value={assetEdit.asset.alignment.rotationY} onChange={(event) => updateEditedAlignment({ rotationY: Number(event.target.value) })} /></label>
+              <label><span>Rotate Z (degrees)</span><input type="number" min="-360" max="360" step="1" value={assetEdit.asset.alignment.rotationZ} onChange={(event) => updateEditedAlignment({ rotationZ: Number(event.target.value) })} /></label>
+              <StoryDimensionInput signed allowZero key={`${assetEdit.asset.id}:ox:${assetEdit.asset.alignment.offsetX}`} label="Offset X" value={assetEdit.asset.alignment.offsetX} onChange={(offsetX) => updateEditedAlignment({ offsetX })} />
+              <StoryDimensionInput signed allowZero key={`${assetEdit.asset.id}:oy:${assetEdit.asset.alignment.offsetY}`} label="Offset Y" value={assetEdit.asset.alignment.offsetY} onChange={(offsetY) => updateEditedAlignment({ offsetY })} />
+              <StoryDimensionInput signed allowZero key={`${assetEdit.asset.id}:oz:${assetEdit.asset.alignment.offsetZ}`} label="Offset Z" value={assetEdit.asset.alignment.offsetZ} onChange={(offsetZ) => updateEditedAlignment({ offsetZ })} />
+              <p>“Preferred” selects this file for its purpose when that view supports it. The editable native Door or Window still controls unit size, rough opening, wall cut, headers, framing, schedules, and fallback display.</p>
+              {assetEditError ? <p className="product-asset-import-error">{assetEditError}</p> : null}
+            </div>
+            <footer><button type="button" onClick={() => { setAssetEdit(null); setAssetEditError(""); }}>Cancel</button><button type="button" className="story-save" disabled={!assetEdit.asset.name.trim()} onClick={saveEditedAsset}>Save Alignment</button></footer>
           </section>
         </div> : null}
       </section>
@@ -13263,6 +13319,28 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present]);
 
+  const updateLibraryProductAsset = useCallback((typeId: string, asset: ProductAssetReference) => {
+    const building = cloneBuildingStructure(editor.present.building);
+    const openingType = building.openingTypes.find((type) => type.id === typeId);
+    const assetIndex = openingType?.productAssets.findIndex((candidate) => candidate.id === asset.id) ?? -1;
+    if (!openingType || assetIndex < 0) {
+      setFileNotice({ text: "That product representation is no longer available.", tone: "error" });
+      return false;
+    }
+    openingType.productAssets = openingType.productAssets.map((candidate, index) => ({
+      ...(asset.usage === "preferred" && candidate.role === asset.role ? { ...candidate, usage: "reference" as const } : candidate),
+      ...(index === assetIndex ? { ...asset, alignment: { ...asset.alignment } } : {}),
+    }));
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "The representation alignment or usage is invalid.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${asset.name} alignment was saved. Native geometry remains available as the fallback.`, tone: "success" });
+    return true;
+  }, [editor.present]);
+
   const placeLibraryProduct = useCallback((typeId: string) => {
     if (!selectedLine || selectedLine.architecturalRole !== "wall") {
       setFileNotice({ text: "Select a Wall before placing a Door or Window product.", tone: "error" });
@@ -14902,7 +14980,7 @@ export function ModelBuilderApp() {
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
       {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
-      {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onManageTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
+      {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onAssetUpdated={updateLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onManageTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
     </main>

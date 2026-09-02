@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDefaultBuildingStructure, type ManufacturerProductSource } from "../lib/building-stories.ts";
+import { createDefaultBuildingStructure, createDefaultProductAssetAlignment, type ManufacturerProductSource } from "../lib/building-stories.ts";
 import {
   PRODUCT_PACKAGE_FORMAT,
   PRODUCT_PACKAGE_VERSION,
@@ -23,6 +23,7 @@ test("round-trips a native manufacturer product package", () => {
   const windowType = createDefaultBuildingStructure().openingTypes.find((type) => type.kind === "window")!;
   windowType.headerTypeId = "header-type-01";
   windowType.productAssets = [{
+    alignment: createDefaultProductAssetAlignment("glb"),
     byteLength: 24_576,
     checksumSha256: "a".repeat(64),
     fileName: "heritage-dh-3040.glb",
@@ -31,6 +32,7 @@ test("round-trips a native manufacturer product package", () => {
     name: "Manufacturer 3D Model",
     role: "model-3d",
     sourceUrl: "https://example.test/products/dh-3040.glb",
+    usage: "preferred",
   }];
   const parsed = parseProductPackage(serializeProductPackage(windowType, source));
   assert.equal(parsed.ok, true);
@@ -51,6 +53,27 @@ test("opens version-1 product packages without an asset manifest", () => {
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.deepEqual(parsed.openingType.productAssets, []);
+});
+
+test("upgrades version-2 product assets to conservative alignment defaults", () => {
+  const openingType = createDefaultBuildingStructure().openingTypes[1];
+  const current = JSON.parse(serializeProductPackage(openingType, source)) as Record<string, unknown>;
+  current.version = 2;
+  current.assets = [{
+    byteLength: 128,
+    checksumSha256: "b".repeat(64),
+    fileName: "window.glb",
+    format: "glb",
+    id: "asset-legacy-window",
+    name: "Legacy Model",
+    role: "model-3d",
+    sourceUrl: "https://example.test/window.glb",
+  }];
+  const parsed = parseProductPackage(JSON.stringify(current));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.openingType.productAssets[0].usage, "reference");
+  assert.deepEqual(parsed.openingType.productAssets[0].alignment, createDefaultProductAssetAlignment("glb"));
 });
 
 test("rejects packages without complete source provenance", () => {

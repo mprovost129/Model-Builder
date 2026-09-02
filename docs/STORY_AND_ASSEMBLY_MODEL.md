@@ -288,6 +288,16 @@ their coordinate system, insertion point, unit scale, host depth, material mappi
 and native-geometry fallback are explicitly reviewed; upload alone never replaces
 the construction-aware Door or Window assembly.
 
+Version-41 files add authored alignment to every manufacturer representation:
+source units (including fit-to-native-unit for drawings), insertion origin, scale
+multiplier, three-axis rotation, and project-inch X/Y/Z offsets. A representation
+can remain a reference or be marked preferred for its declared plan, elevation,
+3D, or thumbnail purpose. Only one asset can be preferred for each purpose on a
+Type. Version-40 projects and version-2 Product Packages upgrade conservatively as
+reference-only assets with format-aware defaults. Product Package version 3 carries
+the new fields. Native components always remain available and continue to control
+the rough opening, Wall cut, header, framing, schedules, and fallback display.
+
 The Door & Window Type Manager renders a live exterior-elevation preview from the
 same host-aware component solids used by placed openings. It shows the structural
 rough-opening boundary, unit boundary, generated component geometry, rough and unit
@@ -371,8 +381,8 @@ junction framing.
 
 ## Next Steps
 
-1. Add authored representation alignment and fallback rules so stored SVG plan/elevation
-   drawings and GLB models can safely supplement native Type geometry in model views.
+1. Apply preferred, reviewed SVG and GLB representations in their supported plan,
+   elevation, and 3D views, using the saved alignment and automatic native fallback.
 2. Generalize the Product Library registry for ordinary placed Objects, including unit
    normalization, independent layer assignment, thumbnails, and update tracking.
 3. Add asset removal and orphan cleanup without deleting representations still referenced

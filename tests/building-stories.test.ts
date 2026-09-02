@@ -10,9 +10,12 @@ import {
   configureWindowLitePattern,
   configureWindowSashArrangement,
   createDefaultBuildingStructure,
+  createDefaultProductAssetAlignment,
   doorPanelLayoutForType,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
+  productAssetReferencesAreValid,
+  productAssetSourceUnitScale,
   resolveWallHeaderType,
   wallOpeningTypeIsValid,
   wallFramingSettingsAreValid,
@@ -25,6 +28,26 @@ import {
   wallLayerCenterOffsets,
   wallReferenceDistanceFromExterior,
 } from "../lib/building-stories.ts";
+
+test("defines deterministic product representation units, alignment, and preferred fallback rules", () => {
+  const baseAsset = {
+    alignment: createDefaultProductAssetAlignment("glb"),
+    byteLength: 1_024,
+    checksumSha256: "a".repeat(64),
+    fileName: "window.glb",
+    format: "glb" as const,
+    id: "asset-window-primary",
+    name: "Window Model",
+    role: "model-3d" as const,
+    sourceUrl: "/api/product-assets/asset-window-primary",
+    usage: "preferred" as const,
+  };
+  assert.equal(productAssetSourceUnitScale("meters"), 100 / 2.54);
+  assert.equal(productAssetSourceUnitScale("fit-to-unit"), null);
+  assert.equal(productAssetReferencesAreValid([baseAsset]), true);
+  assert.equal(productAssetReferencesAreValid([baseAsset, { ...baseAsset, id: "asset-window-secondary" }]), false);
+  assert.equal(productAssetReferencesAreValid([baseAsset, { ...baseAsset, id: "asset-window-plan", role: "plan-symbol" }]), true);
+});
 
 test("uses rough framing rather than finishes to calculate the next Story datum", () => {
   const building = createDefaultBuildingStructure();

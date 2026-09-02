@@ -8,6 +8,7 @@ import {
   safeProductAssetFileName,
   validateProductAssetBytes,
 } from "../lib/product-assets";
+import { createDefaultProductAssetAlignment } from "../lib/building-stories";
 
 interface Env {
   ASSETS: Fetcher;
@@ -75,6 +76,7 @@ async function handleProductAssetRequest(request: Request, env: Env): Promise<Re
     });
     return jsonResponse({
       asset: {
+        alignment: createDefaultProductAssetAlignment(validation.format),
         byteLength: bytes.byteLength,
         checksumSha256,
         fileName,
@@ -83,6 +85,7 @@ async function handleProductAssetRequest(request: Request, env: Env): Promise<Re
         name,
         role,
         sourceUrl: `${PRODUCT_ASSET_PATH}${id}`,
+        usage: "reference",
       },
     }, 201);
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDefaultBuildingStructure } from "../lib/building-stories.ts";
+import { createDefaultBuildingStructure, createDefaultProductAssetAlignment } from "../lib/building-stories.ts";
 import { createProjectProductLibrary, filterProjectProductLibrary } from "../lib/product-library.ts";
 
 test("builds a searchable project library from reusable opening Types", () => {
@@ -10,8 +10,9 @@ test("builds a searchable project library from reusable opening Types", () => {
     sourceFileName: "dh-3040.dwg", sourceFormat: "dwg", sourceUrl: "", verifiedAt: "",
   };
   building.openingTypes[1].productAssets = [{
+    alignment: createDefaultProductAssetAlignment("glb"),
     byteLength: 24576, checksumSha256: "a".repeat(64), fileName: "dh-3040.glb", format: "glb",
-    id: "asset-dh-3040-model", name: "Manufacturer 3D Model", role: "model-3d", sourceUrl: "",
+    id: "asset-dh-3040-model", name: "Manufacturer 3D Model", role: "model-3d", sourceUrl: "", usage: "reference",
   }];
   const entries = createProjectProductLibrary(building);
   assert.equal(entries.length, 2);

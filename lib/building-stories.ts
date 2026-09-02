@@ -28,6 +28,12 @@ export const PRODUCT_ASSET_ROLES = ["plan-symbol", "elevation-symbol", "model-3d
 export type ProductAssetRole = (typeof PRODUCT_ASSET_ROLES)[number];
 export const PRODUCT_ASSET_FORMATS = ["svg", "glb", "gltf", "png", "jpeg"] as const;
 export type ProductAssetFormat = (typeof PRODUCT_ASSET_FORMATS)[number];
+export const PRODUCT_ASSET_SOURCE_UNITS = ["fit-to-unit", "inches", "feet", "millimeters", "centimeters", "meters"] as const;
+export type ProductAssetSourceUnit = (typeof PRODUCT_ASSET_SOURCE_UNITS)[number];
+export const PRODUCT_ASSET_ORIGINS = ["source-origin", "bounds-center", "bottom-center"] as const;
+export type ProductAssetOrigin = (typeof PRODUCT_ASSET_ORIGINS)[number];
+export const PRODUCT_ASSET_USAGE_MODES = ["reference", "preferred"] as const;
+export type ProductAssetUsageMode = (typeof PRODUCT_ASSET_USAGE_MODES)[number];
 export const WALL_HEADER_LAYOUTS = ["solid", "on-edge", "flat-stack"] as const;
 export type WallHeaderLayout = (typeof WALL_HEADER_LAYOUTS)[number];
 export const WALL_HEADER_FILL_METHODS = ["none", "interior-insulation", "between-plies"] as const;
@@ -186,6 +192,7 @@ export type ManufacturerProductSource = {
 };
 
 export type ProductAssetReference = {
+  alignment: ProductAssetAlignment;
   byteLength: number;
   checksumSha256: string;
   fileName: string;
@@ -194,7 +201,47 @@ export type ProductAssetReference = {
   name: string;
   role: ProductAssetRole;
   sourceUrl: string;
+  /** Preferred assets are eligible for their declared view; native parametric geometry remains the fallback. */
+  usage: ProductAssetUsageMode;
 };
+
+export type ProductAssetAlignment = {
+  /** Offsets are stored in the project's native inch coordinate system. */
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  origin: ProductAssetOrigin;
+  /** Euler rotations in degrees, applied after source-unit conversion. */
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+  scaleMultiplier: number;
+  sourceUnits: ProductAssetSourceUnit;
+};
+
+export function createDefaultProductAssetAlignment(format: ProductAssetFormat): ProductAssetAlignment {
+  return {
+    offsetX: 0,
+    offsetY: 0,
+    offsetZ: 0,
+    origin: format === "glb" || format === "gltf" ? "bottom-center" : "bounds-center",
+    rotationX: 0,
+    rotationY: 0,
+    rotationZ: 0,
+    scaleMultiplier: 1,
+    sourceUnits: format === "glb" || format === "gltf" ? "meters" : "fit-to-unit",
+  };
+}
+
+/** Returns source-unit-to-project-inch scale; fit-to-unit is resolved against the native unit bounds. */
+export function productAssetSourceUnitScale(sourceUnits: ProductAssetSourceUnit): number | null {
+  if (sourceUnits === "fit-to-unit") return null;
+  if (sourceUnits === "feet") return 12;
+  if (sourceUnits === "millimeters") return 1 / 25.4;
+  if (sourceUnits === "centimeters") return 1 / 2.54;
+  if (sourceUnits === "meters") return 100 / 2.54;
+  return 1;
+}
 
 export type WallOpeningType = {
   /** Joined parametric parts that generate the placed Door or Window model. */
@@ -704,7 +751,7 @@ export function cloneFoundationWallType(type: FoundationWallType): FoundationWal
 }
 
 export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
-  return { ...type, components: type.components.map((component) => ({ ...component })), productAssets: type.productAssets.map((asset) => ({ ...asset })), productSource: type.productSource === null ? null : { ...type.productSource } };
+  return { ...type, components: type.components.map((component) => ({ ...component })), productAssets: type.productAssets.map((asset) => ({ ...asset, alignment: { ...asset.alignment } })), productSource: type.productSource === null ? null : { ...type.productSource } };
 }
 
 export function cloneWallHeaderType(type: WallHeaderType): WallHeaderType {
@@ -843,15 +890,26 @@ export function manufacturerProductSourceIsValid(source: ManufacturerProductSour
 export function productAssetReferencesAreValid(assets: ProductAssetReference[]): boolean {
   if (!Array.isArray(assets) || assets.length > 16) return false;
   const ids = new Set<string>();
+  const preferredRoles = new Set<ProductAssetRole>();
   return assets.every((asset) => {
     if (typeof asset !== "object" || asset === null || ids.has(asset.id)) return false;
     ids.add(asset.id);
-    return IDENTIFIER_PATTERN.test(asset.id) && PRODUCT_ASSET_ROLES.includes(asset.role) && PRODUCT_ASSET_FORMATS.includes(asset.format) &&
+    if (asset.usage === "preferred") {
+      if (preferredRoles.has(asset.role)) return false;
+      preferredRoles.add(asset.role);
+    }
+    const alignment = asset.alignment;
+    return IDENTIFIER_PATTERN.test(asset.id) && PRODUCT_ASSET_ROLES.includes(asset.role) && PRODUCT_ASSET_FORMATS.includes(asset.format) && PRODUCT_ASSET_USAGE_MODES.includes(asset.usage) &&
       typeof asset.name === "string" && Boolean(asset.name.trim()) && asset.name.trim().length <= 100 &&
       typeof asset.fileName === "string" && Boolean(asset.fileName.trim()) && asset.fileName.trim().length <= 240 &&
       typeof asset.sourceUrl === "string" && asset.sourceUrl.trim().length <= 500 &&
       typeof asset.checksumSha256 === "string" && (asset.checksumSha256 === "" || /^[a-f0-9]{64}$/i.test(asset.checksumSha256)) &&
-      Number.isInteger(asset.byteLength) && asset.byteLength >= 0 && asset.byteLength <= 100_000_000;
+      Number.isInteger(asset.byteLength) && asset.byteLength >= 0 && asset.byteLength <= 100_000_000 &&
+      typeof alignment === "object" && alignment !== null &&
+      PRODUCT_ASSET_SOURCE_UNITS.includes(alignment.sourceUnits) && PRODUCT_ASSET_ORIGINS.includes(alignment.origin) &&
+      Number.isFinite(alignment.scaleMultiplier) && alignment.scaleMultiplier >= 0.0001 && alignment.scaleMultiplier <= 10_000 &&
+      [alignment.rotationX, alignment.rotationY, alignment.rotationZ].every((value) => Number.isFinite(value) && value >= -360 && value <= 360) &&
+      [alignment.offsetX, alignment.offsetY, alignment.offsetZ].every((value) => Number.isFinite(value) && Math.abs(value) <= 1_200 && isSixteenth(value));
   });
 }
 

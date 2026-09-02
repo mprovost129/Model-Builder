@@ -1,6 +1,7 @@
 import {
   PRODUCT_SOURCE_FORMATS,
   cloneWallOpeningType,
+  createDefaultProductAssetAlignment,
   manufacturerProductSourceIsValid,
   productAssetReferencesAreValid,
   wallOpeningTypeIsValid,
@@ -11,7 +12,7 @@ import {
 } from "./building-stories.ts";
 
 export const PRODUCT_PACKAGE_FORMAT = "model-builder-product";
-export const PRODUCT_PACKAGE_VERSION = 2;
+export const PRODUCT_PACKAGE_VERSION = 3;
 export const PRODUCT_PACKAGE_EXTENSION = ".mbproduct";
 export const MAXIMUM_PRODUCT_PACKAGE_BYTES = 2_000_000;
 
@@ -72,14 +73,18 @@ export function parseProductPackage(content: string): ProductPackageParseResult 
   if (!isRecord(value) || value.format !== PRODUCT_PACKAGE_FORMAT) {
     return { ok: false, error: "This is not a Model Builder Product Package." };
   }
-  if (value.version !== 1 && value.version !== PRODUCT_PACKAGE_VERSION) {
+  if (value.version !== 1 && value.version !== 2 && value.version !== PRODUCT_PACKAGE_VERSION) {
     return { ok: false, error: typeof value.version === "number" && value.version > PRODUCT_PACKAGE_VERSION
       ? "This product package was created by a newer version of Model Builder."
       : "This product package version is not supported." };
   }
   const product = readProductSource(value.product);
   if (!product) return { ok: false, error: "The manufacturer identity or source record is missing or invalid." };
-  const assets = value.version === 1 ? [] : value.assets;
+  const assets = value.version === 1 ? [] : value.version === 2 && Array.isArray(value.assets)
+    ? value.assets.map((asset) => isRecord(asset) && typeof asset.format === "string"
+      ? { ...asset, alignment: createDefaultProductAssetAlignment(asset.format as ProductAssetReference["format"]), usage: "reference" }
+      : asset)
+    : value.assets;
   if (!Array.isArray(assets) || !productAssetReferencesAreValid(assets as ProductAssetReference[])) {
     return { ok: false, error: "The product representation manifest is missing or invalid." };
   }
