@@ -72,7 +72,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 27;
+export const PROJECT_FILE_VERSION = 28;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -432,7 +432,7 @@ function readWallOpening(value: unknown): WallOpening | null {
   };
 }
 
-function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean, supportsWallOpenings: boolean, supportsFoundationWalls: boolean): LineObject | null {
+function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean, supportsWallOpenings: boolean, supportsFoundationWalls: boolean, supportsFoundationSupportLinks: boolean): LineObject | null {
   if (!isRecord(value) || value.type !== "line" || !isRecord(value.start) || !isRecord(value.end)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -454,6 +454,9 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
     : null;
   const foundationWallTypeId = supportsFoundationWalls
     ? value.foundationWallTypeId === null ? null : typeof value.foundationWallTypeId === "string" ? value.foundationWallTypeId : undefined
+    : null;
+  const foundationSupportWallId = supportsFoundationSupportLinks
+    ? value.foundationSupportWallId === null ? null : typeof value.foundationSupportWallId === "string" ? value.foundationSupportWallId : undefined
     : null;
   const wallExteriorSide = supportsWallPlacement
     ? value.wallExteriorSide === null ? null : typeof value.wallExteriorSide === "string" && WALL_EXTERIOR_SIDES.includes(value.wallExteriorSide as WallExteriorSide) ? value.wallExteriorSide as WallExteriorSide : undefined
@@ -478,10 +481,10 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
     wallExteriorSide === undefined ||
     wallReferenceLine === undefined ||
     wallJoinPriority === undefined || wallStartJoinMode === undefined || wallEndJoinMode === undefined || wallOpenings === null || wallOpenings.some((opening) => opening === null) ||
-    foundationWallTypeId === undefined ||
-    (architecturalRole === null && (wallTypeId !== null || foundationWallTypeId !== null || wallExteriorSide !== null || wallReferenceLine !== null || wallJoinPriority !== null || wallStartJoinMode !== null || wallEndJoinMode !== null)) ||
+    foundationWallTypeId === undefined || foundationSupportWallId === undefined ||
+    (architecturalRole === null && (wallTypeId !== null || foundationWallTypeId !== null || foundationSupportWallId !== null || wallExteriorSide !== null || wallReferenceLine !== null || wallJoinPriority !== null || wallStartJoinMode !== null || wallEndJoinMode !== null)) ||
     (architecturalRole === "wall" && (wallTypeId === null || foundationWallTypeId !== null || wallExteriorSide === null || wallReferenceLine === null || wallJoinPriority === null || wallStartJoinMode === null || wallEndJoinMode === null)) ||
-    (architecturalRole === "foundation-wall" && (foundationWallTypeId === null || wallTypeId !== null || wallExteriorSide === null || wallReferenceLine === null || wallJoinPriority === null || wallStartJoinMode === null || wallEndJoinMode === null))
+    (architecturalRole === "foundation-wall" && (foundationWallTypeId === null || foundationSupportWallId !== null || wallTypeId !== null || wallExteriorSide === null || wallReferenceLine === null || wallJoinPriority === null || wallStartJoinMode === null || wallEndJoinMode === null))
   ) return null;
   if (!isFiniteNumber(startX) || !isFiniteNumber(startY) || !isFiniteNumber(startZ) ||
       !isFiniteNumber(endX) || !isFiniteNumber(endY) || !isFiniteNumber(endZ)) return null;
@@ -491,6 +494,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   return {
     architecturalRole,
     end: { x: endX, y: endY, z: endZ },
+    foundationSupportWallId,
     foundationWallTypeId,
     id: value.id,
     layerId: value.layerId,
@@ -825,7 +829,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.lines) || value.lines.length > MAXIMUM_LINE_COUNT) {
       return { ok: false, error: "The project line collection is missing or invalid." };
     }
-    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20, version >= 23, version >= 27));
+    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20, version >= 23, version >= 27, version >= 28));
     if (parsedLines.some((line) => line === null)) {
       return { ok: false, error: "One or more drawing lines are invalid." };
     }
@@ -842,6 +846,12 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (lines.some((line) => line.wallTypeId !== null && !wallTypeIds.has(line.wallTypeId))) return { ok: false, error: "One or more Walls reference a missing Wall Type." };
     const foundationWallTypeIds = new Set(building.foundationWallTypes.map((type) => type.id));
     if (lines.some((line) => line.foundationWallTypeId !== null && !foundationWallTypeIds.has(line.foundationWallTypeId))) return { ok: false, error: "One or more Foundation Walls reference a missing Foundation Wall Type." };
+    const foundationWallsById = new Map(lines.filter((line) => line.architecturalRole === "foundation-wall").map((line) => [line.id, line]));
+    if (lines.some((line) => {
+      if (line.foundationSupportWallId === null) return false;
+      const support = foundationWallsById.get(line.foundationSupportWallId);
+      return line.architecturalRole !== "wall" || !support || support.storyId !== line.storyId;
+    })) return { ok: false, error: "One or more framed Walls reference an invalid Foundation Wall support." };
     const storiesById = new Map(building.stories.map((story) => [story.id, story]));
     if (lines.some((line) => !wallOpeningsAreValid(line, storiesById.get(line.storyId)?.roughCeilingHeight ?? 0))) {
       return { ok: false, error: "One or more Wall openings are invalid." };

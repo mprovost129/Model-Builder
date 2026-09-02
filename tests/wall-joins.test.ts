@@ -13,6 +13,12 @@ import {
   wallLayerFootprint,
   wallLayerSolidSegments,
 } from "../lib/wall-joins.ts";
+import {
+  automaticFoundationWallJoinCount,
+  buildAutomaticFoundationWallJoinPlan,
+  foundationBandFootprint,
+  unresolvedFoundationWallJunctionCount,
+} from "../lib/foundation-wall-joins.ts";
 
 function wall(
   id: string,
@@ -23,6 +29,7 @@ function wall(
   return {
     architecturalRole: "wall",
     end: { ...end, z: end.z ?? 0 },
+    foundationSupportWallId: null,
     foundationWallTypeId: null,
     id,
     layerId: "layer-01",
@@ -41,6 +48,69 @@ function wall(
     ...overrides,
   };
 }
+
+function foundationWall(
+  id: string,
+  start: { x: number; y: number; z?: number },
+  end: { x: number; y: number; z?: number },
+  overrides: Partial<LineObject> = {},
+): LineObject {
+  return wall(id, start, end, {
+    architecturalRole: "foundation-wall",
+    foundationWallTypeId: "foundation-wall-type-01",
+    wallTypeId: null,
+    ...overrides,
+  });
+}
+
+test("miters Foundation Wall stems, footings, and sill plates at automatic corners", () => {
+  const first = foundationWall("foundation-01", { x: 0, y: 0 }, { x: 120, y: 0 });
+  const second = foundationWall("foundation-02", { x: 120, y: 0 }, { x: 120, y: 120 });
+  const lines = [first, second];
+  const types = createDefaultBuildingStructure().foundationWallTypes;
+  const plan = buildAutomaticFoundationWallJoinPlan(lines, types);
+  const linesById = new Map(lines.map((line) => [line.id, line]));
+  const typesById = new Map(types.map((type) => [type.id, type]));
+  const stem = foundationBandFootprint(first, types[0], "stem", plan, linesById, typesById);
+  const footing = foundationBandFootprint(first, types[0], "footing", plan, linesById, typesById);
+  const sill = foundationBandFootprint(first, types[0], "sill", plan, linesById, typesById);
+
+  assert.deepEqual(stem?.endExterior, { x: 120, y: 0 });
+  assert.deepEqual(stem?.endInterior, { x: 128, y: -8 });
+  assert.deepEqual(footing?.endExterior, { x: 116, y: 4 });
+  assert.deepEqual(footing?.endInterior, { x: 132, y: -12 });
+  assert.deepEqual(sill?.endExterior, { x: 120, y: 0 });
+  assert.deepEqual(sill?.endInterior, { x: 125.5, y: -5.5 });
+  assert.equal(automaticFoundationWallJoinCount(first.id, plan), 1);
+  assert.equal(unresolvedFoundationWallJunctionCount(first.id, plan), 0);
+});
+
+test("trims a Foundation Wall T branch to each near host component face", () => {
+  const host = foundationWall("foundation-01", { x: 0, y: 0 }, { x: 240, y: 0 });
+  const branch = foundationWall("foundation-02", { x: 120, y: 0 }, { x: 120, y: -120 });
+  const lines = [host, branch];
+  const types = createDefaultBuildingStructure().foundationWallTypes;
+  const plan = buildAutomaticFoundationWallJoinPlan(lines, types);
+  const linesById = new Map(lines.map((line) => [line.id, line]));
+  const typesById = new Map(types.map((type) => [type.id, type]));
+  const stem = foundationBandFootprint(branch, types[0], "stem", plan, linesById, typesById);
+  const footing = foundationBandFootprint(branch, types[0], "footing", plan, linesById, typesById);
+
+  assert.equal(stem?.startExterior.y, -8);
+  assert.equal(stem?.startInterior.y, -8);
+  assert.equal(footing?.startExterior.y, -12);
+  assert.equal(footing?.startInterior.y, -12);
+  assert.equal(automaticFoundationWallJoinCount(host.id, plan), 1);
+  assert.equal(automaticFoundationWallJoinCount(branch.id, plan), 1);
+});
+
+test("keeps manually disconnected Foundation Wall ends square", () => {
+  const first = foundationWall("foundation-01", { x: 0, y: 0 }, { x: 120, y: 0 }, { wallEndJoinMode: "square" });
+  const second = foundationWall("foundation-02", { x: 120, y: 0 }, { x: 120, y: 120 });
+  const plan = buildAutomaticFoundationWallJoinPlan([first, second], createDefaultBuildingStructure().foundationWallTypes);
+  assert.equal(plan.endpointJoins.size, 0);
+  assert.equal(unresolvedFoundationWallJunctionCount(first.id, plan), 0);
+});
 
 test("cuts Door and Window rough openings through a Wall layer", () => {
   const source = wall("wall-01", { x: 0, y: 0 }, { x: 240, y: 0 }, {

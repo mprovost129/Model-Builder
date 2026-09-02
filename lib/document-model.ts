@@ -159,6 +159,8 @@ export type WallOpening = {
 
 export type LineObject = LineGeometry & {
   architecturalRole: "foundation-wall" | "wall" | null;
+  /** Saved Foundation Wall that physically supports this framed Wall. */
+  foundationSupportWallId: string | null;
   foundationWallTypeId: string | null;
   id: string;
   layerId: string;
@@ -411,6 +413,7 @@ export function cloneLineObject(line: LineObject): LineObject {
   return {
     ...cloneLineGeometry(line),
     architecturalRole: line.architecturalRole,
+    foundationSupportWallId: line.foundationSupportWallId,
     foundationWallTypeId: line.foundationWallTypeId,
     id: line.id,
     layerId: line.layerId,
@@ -682,9 +685,10 @@ export function foundationSillOffsetFromReference(line: LineObject, type: Founda
 }
 
 function hostedFoundationWallForSegment(
-  segment: ReturnType<typeof polylineSegments>[number],
+  segment: { end: PlanPoint; start: PlanPoint },
   walls: LineObject[],
   typesById: ReadonlyMap<string, FoundationWallType>,
+  preferredWallId: string | null = null,
 ): { line: LineObject; offsetFromReference: number; point: PlanPoint } | null {
   const segmentDx = segment.end.x - segment.start.x;
   const segmentDy = segment.end.y - segment.start.y;
@@ -693,6 +697,7 @@ function hostedFoundationWallForSegment(
   const segmentDirection = { x: segmentDx / segmentLength, y: segmentDy / segmentLength };
   const midpoint = { x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2 };
   const candidates = walls.flatMap((line) => {
+    if (preferredWallId !== null && line.id !== preferredWallId) return [];
     const type = typesById.get(line.foundationWallTypeId ?? "");
     if (!type) return [];
     const dx = line.end.x - line.start.x;
@@ -713,6 +718,13 @@ function hostedFoundationWallForSegment(
     return [{ line, normalDistance, offsetFromReference, point }];
   }).sort((first, second) => first.normalDistance - second.normalDistance);
   return candidates[0] ?? null;
+}
+
+/** Finds the closest aligned Foundation Wall suitable for a saved framed-wall support link. */
+export function automaticFoundationSupportWall(document: ModelDocument, wall: LineObject): LineObject | null {
+  const candidates = document.lines.filter((line) => line.architecturalRole === "foundation-wall" && line.storyId === wall.storyId);
+  const typesById = new Map(document.building.foundationWallTypes.map((type) => [type.id, type]));
+  return hostedFoundationWallForSegment(wall, candidates, typesById)?.line ?? null;
 }
 
 function roomBoundaryContainsPoint(room: RoomObject, point: PlanPoint): boolean {
@@ -796,7 +808,7 @@ export function roomFloorPlatformBoundary(
       direction,
       point: { x: wall.start.x, y: wall.start.y },
     };
-    const foundationSupport = hostedFoundationWallForSegment(segment, foundationWalls, foundationTypesById);
+    const foundationSupport = hostedFoundationWallForSegment(segment, foundationWalls, foundationTypesById, wall.foundationSupportWallId);
     if (foundationSupport) {
       const supportDx = foundationSupport.line.end.x - foundationSupport.line.start.x;
       const supportDy = foundationSupport.line.end.y - foundationSupport.line.start.y;
@@ -1153,7 +1165,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.lines.every((line, index) => {
       const other = b.lines[index];
       return other !== undefined && line.id === other.id && line.layerId === other.layerId &&
-        line.architecturalRole === other.architecturalRole && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
+        line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         line.wallOpenings.length === other.wallOpenings.length && line.wallOpenings.every((opening, openingIndex) => {
           const otherOpening = other.wallOpenings[openingIndex];
           return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth;
@@ -1279,11 +1291,23 @@ export function assignModelEntityToStory(
   const delta = (elevations.get(storyId) ?? 0) - (elevations.get(current.storyId) ?? 0);
   const next = cloneDocument(document);
   if (ref.kind === "box") next.objects = next.objects.map((object) => object.id === ref.id ? { ...object, position: { ...object.position, z: snapToSixteenth(object.position.z + delta) }, storyId } : object);
-  if (ref.kind === "line") next.lines = next.lines.map((line) => line.id === ref.id ? { ...line, start: { ...line.start, z: snapToSixteenth(line.start.z + delta) }, end: { ...line.end, z: snapToSixteenth(line.end.z + delta) }, storyId } : line);
+  if (ref.kind === "line") next.lines = next.lines.map((line) => line.id === ref.id ? {
+    ...line,
+    end: { ...line.end, z: snapToSixteenth(line.end.z + delta) },
+    foundationSupportWallId: line.architecturalRole === "wall" ? null : line.foundationSupportWallId,
+    start: { ...line.start, z: snapToSixteenth(line.start.z + delta) },
+    storyId,
+  } : line);
   if (ref.kind === "polyline") next.polylines = next.polylines.map((polyline) => polyline.id === ref.id ? { ...polyline, elevation: snapToSixteenth(polyline.elevation + delta), storyId } : polyline);
   if (ref.kind === "circle") next.circles = next.circles.map((circle) => circle.id === ref.id ? { ...circle, center: { ...circle.center, z: snapToSixteenth(circle.center.z + delta) }, storyId } : circle);
   if (ref.kind === "arc") next.arcs = next.arcs.map((arc) => arc.id === ref.id ? { ...arc, center: { ...arc.center, z: snapToSixteenth(arc.center.z + delta) }, storyId } : arc);
-  if (ref.kind === "line") next.rooms = next.rooms.filter((room) => !room.boundaryWallIds.includes(ref.id));
+  if (ref.kind === "line") {
+    const foundationWallStories = new Map(next.lines.filter((line) => line.architecturalRole === "foundation-wall").map((line) => [line.id, line.storyId]));
+    next.lines = next.lines.map((line) => line.foundationSupportWallId !== null && foundationWallStories.get(line.foundationSupportWallId) !== line.storyId
+      ? { ...line, foundationSupportWallId: null }
+      : line);
+    next.rooms = next.rooms.filter((room) => !room.boundaryWallIds.includes(ref.id));
+  }
   return next;
 }
 
@@ -1312,7 +1336,11 @@ function withObjects(document: ModelDocument, objects: BoxObject[]): ModelDocume
 }
 
 function withLines(document: ModelDocument, lines: LineObject[]): ModelDocument {
-  const roomWallKeys = new Set(lines.filter((line) => line.architecturalRole === "wall").map((line) => `${line.storyId}:${line.id}`));
+  const foundationWallStories = new Map(lines.filter((line) => line.architecturalRole === "foundation-wall").map((line) => [line.id, line.storyId]));
+  const normalizedLines = lines.map((line) => line.foundationSupportWallId !== null && (
+    line.architecturalRole !== "wall" || foundationWallStories.get(line.foundationSupportWallId) !== line.storyId
+  ) ? { ...line, foundationSupportWallId: null } : line);
+  const roomWallKeys = new Set(normalizedLines.filter((line) => line.architecturalRole === "wall").map((line) => `${line.storyId}:${line.id}`));
   return {
     activeLayerId: document.activeLayerId,
     arcs: document.arcs.map(cloneArcObject),
@@ -1320,7 +1348,7 @@ function withLines(document: ModelDocument, lines: LineObject[]): ModelDocument 
     circles: document.circles.map(cloneCircleObject),
     groups: document.groups.map(cloneGroup),
     layers: document.layers.map(cloneLayer),
-    lines: lines.map(cloneLineObject),
+    lines: normalizedLines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
     rooms: (document.rooms ?? []).filter((room) => room.boundaryWallIds.every((wallId) => roomWallKeys.has(`${room.storyId}:${wallId}`))).map(cloneRoomObject),
@@ -1731,6 +1759,7 @@ export function addLineObject(
   const line: LineObject = {
     ...geometry,
     architecturalRole: null,
+    foundationSupportWallId: null,
     foundationWallTypeId: null,
     id: `line-${String(number).padStart(2, "0")}`,
     layerId: document.activeLayerId,
@@ -1783,6 +1812,7 @@ export function createWallFromLine(document: ModelDocument, lineId: string): Mod
   return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? {
     ...cloneLineObject(candidate),
     architecturalRole: "wall",
+    foundationSupportWallId: automaticFoundationSupportWall(document, candidate)?.id ?? null,
     foundationWallTypeId: null,
     end: { ...candidate.end, z: roughFloor },
     name: candidate.name.startsWith("Wall ") ? candidate.name : uniqueObjectName(document, wallName),
@@ -1807,13 +1837,14 @@ export function createFoundationWallFromLine(document: ModelDocument, lineId: st
     ...cloneLineObject(candidate),
     architecturalRole: "foundation-wall",
     end: { ...candidate.end, z: roughFloor },
+    foundationSupportWallId: null,
     foundationWallTypeId: foundationType.id,
     name: candidate.name.startsWith("Foundation Wall ") ? candidate.name : uniqueObjectName(document, foundationName),
     start: { ...candidate.start, z: roughFloor },
     wallExteriorSide: "left",
     wallJoinPriority: 0,
-    wallStartJoinMode: "square",
-    wallEndJoinMode: "square",
+    wallStartJoinMode: "auto",
+    wallEndJoinMode: "auto",
     wallReferenceLine: "exterior-main",
     wallTypeId: null,
     wallOpenings: [],
@@ -1823,7 +1854,7 @@ export function createFoundationWallFromLine(document: ModelDocument, lineId: st
 export function removeWallRole(document: ModelDocument, lineId: string): ModelDocument | null {
   const line = findLineObject(document, lineId);
   if (!line || line.architecturalRole === null || !lineIsEditable(document, line)) return null;
-  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), architecturalRole: null, foundationWallTypeId: null, wallExteriorSide: null, wallJoinPriority: null, wallStartJoinMode: null, wallEndJoinMode: null, wallReferenceLine: null, wallTypeId: null, wallOpenings: [] } : candidate));
+  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), architecturalRole: null, foundationSupportWallId: null, foundationWallTypeId: null, wallExteriorSide: null, wallJoinPriority: null, wallStartJoinMode: null, wallEndJoinMode: null, wallReferenceLine: null, wallTypeId: null, wallOpenings: [] } : candidate));
 }
 
 function nextWallOpeningId(line: LineObject): string {
@@ -1912,6 +1943,18 @@ export function assignFoundationWallType(document: ModelDocument, lineId: string
   const line = findLineObject(document, lineId);
   if (!line || line.architecturalRole !== "foundation-wall" || !lineIsEditable(document, line) || !document.building.foundationWallTypes.some((type) => type.id === foundationWallTypeId)) return null;
   return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), foundationWallTypeId } : candidate));
+}
+
+export function assignWallFoundationSupport(document: ModelDocument, lineId: string, foundationSupportWallId: string | null): ModelDocument | null {
+  const line = findLineObject(document, lineId);
+  const support = foundationSupportWallId === null ? null : findLineObject(document, foundationSupportWallId);
+  if (
+    !line || line.architecturalRole !== "wall" || !lineIsEditable(document, line) ||
+    (foundationSupportWallId !== null && (!support || support.architecturalRole !== "foundation-wall" || support.storyId !== line.storyId))
+  ) return null;
+  return withLines(document, document.lines.map((candidate) => candidate.id === lineId
+    ? { ...cloneLineObject(candidate), foundationSupportWallId }
+    : candidate));
 }
 
 export function updateWallPlacement(
@@ -3294,6 +3337,7 @@ export function joinModelEntities(
     const line: LineObject = {
       ...joined.geometry,
       architecturalRole: preserve && primary.kind === "line" ? (primaryEntity as LineObject).architecturalRole : null,
+      foundationSupportWallId: preserve && primary.kind === "line" ? (primaryEntity as LineObject).foundationSupportWallId : null,
       foundationWallTypeId: preserve && primary.kind === "line" ? (primaryEntity as LineObject).foundationWallTypeId : null,
       id: preserve ? primary.id : `line-${String(number).padStart(2, "0")}`,
       layerId,
@@ -3398,6 +3442,7 @@ export function explodeModelEntities(
         const line: LineObject = {
           ...piece.geometry,
           architecturalRole: null,
+          foundationSupportWallId: null,
           foundationWallTypeId: null,
           id: `line-${String(number).padStart(2, "0")}`,
           layerId: polyline.layerId,
@@ -3624,6 +3669,7 @@ export function chamferLineObjects(
     const chamfer: LineObject = {
       ...cloneLineGeometry(geometry.chamfer),
       architecturalRole: null,
+      foundationSupportWallId: null,
       foundationWallTypeId: null,
       id: `line-${String(number).padStart(2, "0")}`,
       layerId: document.activeLayerId,
@@ -3810,6 +3856,7 @@ export function copyModelEntities(document: ModelDocument, refs: ModelEntityRef[
   if (document.arcs.length + counts.arc > MAXIMUM_ARC_COUNT || document.objects.length + counts.box > MAXIMUM_OBJECT_COUNT || document.circles.length + counts.circle > MAXIMUM_CIRCLE_COUNT || document.lines.length + counts.line > MAXIMUM_LINE_COUNT || document.polylines.length + counts.polyline > MAXIMUM_POLYLINE_COUNT) return null;
   const working = cloneDocument(document);
   const copiedRefs: ModelEntityRef[] = [];
+  const copiedLineIds = new Map<string, string>();
   for (const ref of selected) {
     if (ref.kind === "box") {
       const source = findBoxObject(working, ref.id)!;
@@ -3825,7 +3872,7 @@ export function copyModelEntities(document: ModelDocument, refs: ModelEntityRef[
       const copy = cloneLineObject(source); const number = nextLineNumber(working);
       copy.id = `line-${String(number).padStart(2, "0")}`; copy.name = uniqueObjectName(working, `${source.name.slice(0, 115).trimEnd()} Copy`); copy.locked = false;
       copy.start = { x: source.start.x + offset.x, y: source.start.y + offset.y, z: source.start.z + (source.architecturalRole !== null ? 0 : offset.z) }; copy.end = { x: source.end.x + offset.x, y: source.end.y + offset.y, z: source.end.z + (source.architecturalRole !== null ? 0 : offset.z) };
-      working.lines.push(copy); copiedRefs.push({ id: copy.id, kind: "line" });
+      working.lines.push(copy); copiedLineIds.set(source.id, copy.id); copiedRefs.push({ id: copy.id, kind: "line" });
     } else if (ref.kind === "polyline") {
       const source = findPolylineObject(working, ref.id)!;
       const copy = clonePolylineObject(source); const number = nextPolylineNumber(working);
@@ -3846,6 +3893,12 @@ export function copyModelEntities(document: ModelDocument, refs: ModelEntityRef[
       working.arcs.push(copy); copiedRefs.push({ id: copy.id, kind: "arc" });
     }
   }
+  copiedLineIds.forEach((copiedId, sourceId) => {
+    const source = findLineObject(document, sourceId);
+    const copy = findLineObject(working, copiedId);
+    const copiedSupportId = source?.foundationSupportWallId ? copiedLineIds.get(source.foundationSupportWallId) : null;
+    if (copy && copiedSupportId) copy.foundationSupportWallId = copiedSupportId;
+  });
   return documentCoordinatesWithinBounds(working)
     ? { document: working, refs: copiedRefs }
     : null;
@@ -3858,6 +3911,10 @@ export function deleteModelEntities(document: ModelDocument, refs: ModelEntityRe
   const next = cloneDocument(document);
   next.objects = next.objects.filter((object) => !keys.has(`box:${object.id}`));
   next.lines = next.lines.filter((line) => !keys.has(`line:${line.id}`));
+  const remainingFoundationWallIds = new Set(next.lines.filter((line) => line.architecturalRole === "foundation-wall").map((line) => line.id));
+  next.lines = next.lines.map((line) => line.foundationSupportWallId !== null && !remainingFoundationWallIds.has(line.foundationSupportWallId)
+    ? { ...line, foundationSupportWallId: null }
+    : line);
   next.rooms = next.rooms.filter((room) => room.boundaryWallIds.every((wallId) => next.lines.some((line) => line.id === wallId && line.storyId === room.storyId && line.architecturalRole === "wall")));
   next.polylines = next.polylines.filter((polyline) => !keys.has(`polyline:${polyline.id}`));
   next.circles = next.circles.filter((circle) => !keys.has(`circle:${circle.id}`));

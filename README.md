@@ -38,7 +38,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 26
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 27
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs
@@ -98,6 +98,10 @@ polylines, rectangles, Circles, and Arcs.
 - Reusable Foundation Wall Types with concrete height/width/material, continuous footing
   geometry, top offsets, hosted sill dimensions, exterior-edge setback, and explicit
   plate ownership for standard, interior mudsill, dropped, garage, and walk-out conditions
+- Foundation Wall stems, footings, and sill plates clean up independently at supported
+  corners and T-junctions while their editable reference paths remain unchanged
+- Framed Walls save an explicit supporting Foundation Wall relationship; new aligned
+  Walls are matched automatically and the assignment remains editable in Properties
 - Directed Walls with left/right exterior orientation and selectable Wall center,
   exterior-Main, center-Main, or interior-Main reference lines
 - Main-core-aware corner and T-junction cleanup across compatible mixed Wall
@@ -200,7 +204,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-26 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-27 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -295,9 +299,10 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   plate ownership for standard and special residential conditions. Foundation Walls
   can be drawn from the active type in plan, render their concrete stem, footing, and
   foundation-hosted sill plates in 3D, and supply the preferred sill edge to the Room
-  floor solver. The next engineering milestone is explicit foundation-to-framed-Wall
-  hosting and foundation corner cleanup, followed by vertical opening continuity
-  across adjacent Stories.
+  floor solver. Their stems, footings, and sill plates now clean up independently at
+  corners and T-junctions. Framed Walls save an editable supporting Foundation Wall
+  relationship, with automatic matching for newly aligned Walls. The next engineering
+  milestone is vertical opening continuity across adjacent Stories.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -308,7 +313,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, and assembly definitions, and format metadata. Version-1 through version-26 files open and upgrade
+Foundation Wall Type, and assembly definitions, and format metadata. Version-1 through version-27 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

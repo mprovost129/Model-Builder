@@ -109,7 +109,7 @@ nodes remain unwrapped so their junction logic stays authoritative.
   Floor, floor/ceiling assemblies, and active Wall Type remain available for
   project-specific editing before any geometry is drawn. Blank projects can be
   saved, reopened, and recovered normally.
-- Version-27 project files store the Building Datum, ordered Stories, active and
+- Version-28 project files store the Building Datum, ordered Stories, active and
   anchored Story identities, all floor and wall assembly layers, entity Story
   ownership, floor-platform footprints, Wall type assignments, and the
   Exterior/Main/Interior group of every wall layer. Each Wall also stores its
@@ -140,9 +140,13 @@ than hard-coded geometry.
 - `FW` or Model > Foundation Wall draws a straight Foundation Wall from the active
   Foundation Wall Type. Its plan reference and exterior side remain editable; its
   concrete stem, footing, and foundation-hosted sill plates render from the saved type.
-- A Room perimeter prefers the aligned Foundation Wall sill exterior edge and falls
-  back to the framed Wall Main-layer exterior when no Foundation Wall is present.
-- Each Wall stores a junction priority plus independent Start and End cleanup
+- Foundation Wall stems, footings, and sill plates derive their own cleanup geometry
+  at corners and T-junctions without moving the editable Foundation Wall reference paths.
+- A framed Wall stores its supporting Foundation Wall identity. New aligned Walls are
+  matched automatically, and the assignment can be changed or cleared in Properties.
+  A Room perimeter uses that support's sill exterior edge and falls back to geometric
+  matching, then to the framed Wall Main-layer exterior when no support is available.
+- Each framed or Foundation Wall stores a junction priority plus independent Start and End cleanup
   modes. Automatic is the default. Square / disconnected explicitly removes an
   endpoint from automatic cleanup without moving its reference path. A uniquely
   higher-priority aligned Wall pair can act as the through host at an otherwise

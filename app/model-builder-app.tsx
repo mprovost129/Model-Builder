@@ -164,6 +164,7 @@ import {
   assignModelEntityToStory,
   assignPolylineToLayer,
   assignFoundationWallType,
+  assignWallFoundationSupport,
   assignWallType,
   cloneDocument,
   arcIsEditable,
@@ -318,6 +319,13 @@ import {
   wallLayerSolidSegments,
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
+import {
+  automaticFoundationWallJoinCount,
+  buildAutomaticFoundationWallJoinPlan,
+  foundationBandFootprint,
+  unresolvedFoundationWallJunctionCount,
+  type AutomaticFoundationWallJoinPlan,
+} from "@/lib/foundation-wall-joins";
 import {
   createProjectDocument,
   parseProjectDocument,
@@ -1537,32 +1545,6 @@ function updateWallView(
   });
 }
 
-function foundationBandFootprint(
-  line: LineObject,
-  type: FoundationWallType,
-  width: number,
-  centerDistanceFromExterior: number,
-): [PlanPoint, PlanPoint, PlanPoint, PlanPoint] | null {
-  const dx = line.end.x - line.start.x;
-  const dy = line.end.y - line.start.y;
-  const length = Math.hypot(dx, dy);
-  if (length < 1 / 16) return null;
-  const direction = { x: dx / length, y: dy / length };
-  const leftNormal = { x: -direction.y, y: direction.x };
-  const referenceDistance = line.wallReferenceLine === "interior-main"
-    ? type.wallWidth
-    : line.wallReferenceLine === "center-main" || line.wallReferenceLine === "wall-center"
-      ? type.wallWidth / 2
-      : 0;
-  const inwardCenterOffset = centerDistanceFromExterior - referenceDistance;
-  const centerOffset = (line.wallExteriorSide ?? "left") === "left" ? -inwardCenterOffset : inwardCenterOffset;
-  const exteriorToInteriorSign = (line.wallExteriorSide ?? "left") === "left" ? -1 : 1;
-  const firstOffset = centerOffset - exteriorToInteriorSign * width / 2;
-  const secondOffset = centerOffset + exteriorToInteriorSign * width / 2;
-  const point = (base: PlanPoint, offset: number) => ({ x: base.x + leftNormal.x * offset, y: base.y + leftNormal.y * offset });
-  return [point(line.start, firstOffset), point(line.start, secondOffset), point(line.end, secondOffset), point(line.end, firstOffset)];
-}
-
 function addFoundationSolid(
   view: WallView,
   footprint: [PlanPoint, PlanPoint, PlanPoint, PlanPoint] | null,
@@ -1593,16 +1575,23 @@ function updateFoundationWallView(
   line: LineObject,
   vertical: FoundationWallVerticalExtent,
   type: FoundationWallType,
+  joinPlan: AutomaticFoundationWallJoinPlan,
+  linesById: ReadonlyMap<string, LineObject>,
+  typesById: ReadonlyMap<string, FoundationWallType>,
 ) {
   clearWallView(view);
-  addFoundationSolid(view, foundationBandFootprint(line, type, type.wallWidth, type.wallWidth / 2), type.wallHeight, vertical.baseElevation, 0x9ca5a8, line.id, "Concrete stem");
+  const footprintPoints = (component: "footing" | "sill" | "stem") => {
+    const footprint = foundationBandFootprint(line, type, component, joinPlan, linesById, typesById);
+    return footprint ? [footprint.startExterior, footprint.startInterior, footprint.endInterior, footprint.endExterior] as [PlanPoint, PlanPoint, PlanPoint, PlanPoint] : null;
+  };
+  addFoundationSolid(view, footprintPoints("stem"), type.wallHeight, vertical.baseElevation, 0x9ca5a8, line.id, "Concrete stem");
   if (type.footing.enabled) {
-    addFoundationSolid(view, foundationBandFootprint(line, type, type.footing.width, type.wallWidth / 2 + type.footing.centerOffset), type.footing.height, vertical.footingBottomElevation, 0x879194, line.id, "Continuous footing");
+    addFoundationSolid(view, footprintPoints("footing"), type.footing.height, vertical.footingBottomElevation, 0x879194, line.id, "Continuous footing");
   }
   for (let index = 0; index < type.sill.foundationPlateCount; index += 1) {
     addFoundationSolid(
       view,
-      foundationBandFootprint(line, type, type.sill.plateWidth, type.sill.exteriorSetback + type.sill.plateWidth / 2),
+      footprintPoints("sill"),
       type.sill.plateHeight,
       vertical.topElevation + index * type.sill.plateHeight,
       0xb8905f,
@@ -6532,7 +6521,11 @@ function Viewport({
       if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById);
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
-    document.lines.filter((line) => line.architecturalRole === "foundation-wall").forEach((line) => {
+    const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
+    const foundationWallJoinPlan = buildAutomaticFoundationWallJoinPlan(foundationWallLines, document.building.foundationWallTypes);
+    const foundationWallLinesById = new Map(foundationWallLines.map((line) => [line.id, line]));
+    const foundationWallTypesById = new Map(document.building.foundationWallTypes.map((type) => [type.id, type]));
+    foundationWallLines.forEach((line) => {
       let view = wallViewsRef.current.get(line.id);
       if (!view) {
         view = createWallView(scene);
@@ -6540,7 +6533,7 @@ function Viewport({
       }
       const vertical = foundationWallVerticalExtent(document, line);
       const foundationType = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
-      if (vertical && foundationType) updateFoundationWallView(view, line, vertical, foundationType);
+      if (vertical && foundationType) updateFoundationWallView(view, line, vertical, foundationType, foundationWallJoinPlan, foundationWallLinesById, foundationWallTypesById);
       view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
@@ -9359,15 +9352,18 @@ export function ModelBuilderApp() {
 
   const selectedBox = findBoxObject(editor.present, selectedObjectId);
   const selectedLine = findLineObject(editor.present, selectedLineId);
-  const selectedWallJoinPlan = selectedLine?.architecturalRole === "wall"
-    ? buildAutomaticWallJoinPlan(editor.present.lines, editor.present.building.wallTypes)
-    : { endpointJoins: new Map(), occupiedEndpoints: new Map(), passThroughCounts: new Map(), unresolvedCounts: new Map() };
-  const selectedWallJoinCount = selectedLine
-    ? automaticWallJoinCount(selectedLine.id, selectedWallJoinPlan)
-    : 0;
-  const selectedWallUnresolvedCount = selectedLine
-    ? unresolvedWallJunctionCount(selectedLine.id, selectedWallJoinPlan)
-    : 0;
+  const selectedWallJoinPlan = buildAutomaticWallJoinPlan(editor.present.lines, editor.present.building.wallTypes);
+  const selectedFoundationWallJoinPlan = buildAutomaticFoundationWallJoinPlan(editor.present.lines, editor.present.building.foundationWallTypes);
+  const selectedWallJoinCount = selectedLine?.architecturalRole === "foundation-wall"
+    ? automaticFoundationWallJoinCount(selectedLine.id, selectedFoundationWallJoinPlan)
+    : selectedLine?.architecturalRole === "wall"
+      ? automaticWallJoinCount(selectedLine.id, selectedWallJoinPlan)
+      : 0;
+  const selectedWallUnresolvedCount = selectedLine?.architecturalRole === "foundation-wall"
+    ? unresolvedFoundationWallJunctionCount(selectedLine.id, selectedFoundationWallJoinPlan)
+    : selectedLine?.architecturalRole === "wall"
+      ? unresolvedWallJunctionCount(selectedLine.id, selectedWallJoinPlan)
+      : 0;
   const selectedWallJunctionLabel = selectedWallJoinCount && selectedWallUnresolvedCount
     ? `${selectedWallJoinCount} automatic · ${selectedWallUnresolvedCount} unresolved`
     : selectedWallUnresolvedCount
@@ -11916,6 +11912,13 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next });
   }, [editor.present, selectedLine]);
 
+  const assignSelectedWallFoundationSupport = useCallback((foundationSupportWallId: string | null) => {
+    if (!selectedLine) return;
+    const next = assignWallFoundationSupport(editor.present, selectedLine.id, foundationSupportWallId);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+  }, [editor.present, selectedLine]);
+
   const assignSelectedFoundationWallType = useCallback((foundationWallTypeId: string) => {
     if (!selectedLine) return;
     const next = assignFoundationWallType(editor.present, selectedLine.id, foundationWallTypeId);
@@ -13283,6 +13286,7 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Thickness"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(editor.present.building.wallTypes.find((wallType) => wallType.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]))}</span></PropertyGridRow>
                 <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "wall-center"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
+                <PropertyGridRow label="Foundation support"><select className="property-cell-select" value={selectedLine.foundationSupportWallId ?? ""} onChange={(event) => assignSelectedWallFoundationSupport(event.target.value || null)} aria-label="Supporting Foundation Wall" disabled={!selectedLineIsEditable}><option value="">Not assigned</option>{editor.present.lines.filter((line) => line.architecturalRole === "foundation-wall" && line.storyId === selectedLine.storyId).map((line) => <option key={line.id} value={line.id}>{line.name}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Join priority"><select className="property-cell-select" value={selectedLine.wallJoinPriority ?? 0} onChange={(event) => setSelectedWallPlacement({ joinPriority: Number(event.target.value) })} aria-label="Wall join priority" disabled={!selectedLineIsEditable}><option value={-10}>Low</option><option value={0}>Normal</option><option value={10}>High</option><option value={20}>Primary</option></select></PropertyGridRow>
                 <PropertyGridRow label="Start cleanup"><select className="property-cell-select" value={selectedLine.wallStartJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ startJoinMode: event.target.value as WallJoinMode })} aria-label="Wall start junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
                 <PropertyGridRow label="End cleanup"><select className="property-cell-select" value={selectedLine.wallEndJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ endJoinMode: event.target.value as WallJoinMode })} aria-label="Wall end junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
@@ -13295,6 +13299,10 @@ export function ModelBuilderApp() {
                   <PropertyGridRow label="Concrete"><span className="property-readout">{formatArchitectural(foundationType.wallHeight)} high × {formatArchitectural(foundationType.wallWidth)} wide</span></PropertyGridRow>
                   <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "exterior-main"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Foundation Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
                   <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Foundation Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
+                  <PropertyGridRow label="Join priority"><select className="property-cell-select" value={selectedLine.wallJoinPriority ?? 0} onChange={(event) => setSelectedWallPlacement({ joinPriority: Number(event.target.value) })} aria-label="Foundation Wall join priority" disabled={!selectedLineIsEditable}><option value={-10}>Low</option><option value={0}>Normal</option><option value={10}>High</option><option value={20}>Primary</option></select></PropertyGridRow>
+                  <PropertyGridRow label="Start cleanup"><select className="property-cell-select" value={selectedLine.wallStartJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ startJoinMode: event.target.value as WallJoinMode })} aria-label="Foundation Wall start junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
+                  <PropertyGridRow label="End cleanup"><select className="property-cell-select" value={selectedLine.wallEndJoinMode ?? "auto"} onChange={(event) => setSelectedWallPlacement({ endJoinMode: event.target.value as WallJoinMode })} aria-label="Foundation Wall end junction cleanup" disabled={!selectedLineIsEditable}><option value="auto">Automatic</option><option value="square">Square / disconnected</option></select></PropertyGridRow>
+                  <PropertyGridRow label="Junctions"><span className="property-readout">{selectedWallJunctionLabel}</span></PropertyGridRow>
                   <PropertyGridRow label="Floor stop"><span className="property-readout">Sill exterior · {formatSignedArchitectural(foundationSillOffsetFromReference(selectedLine, foundationType))} from reference</span></PropertyGridRow>
                 </>;
               })() : null}

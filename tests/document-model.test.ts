@@ -15,6 +15,7 @@ import {
   alignBoxObjects,
   assignObjectToLayer,
   assignModelEntityToStory,
+  assignWallFoundationSupport,
   assignWallType,
   cloneDocument,
   copyBoxObjects,
@@ -26,6 +27,7 @@ import {
   DEFAULT_DOCUMENT,
   NEW_PROJECT_DOCUMENT,
   deleteLayer,
+  deleteLineObject,
   deleteBoxObject,
   deleteBoxObjects,
   deleteModelEntities,
@@ -1267,6 +1269,38 @@ test("creates a typed Foundation Wall with concrete, footing, and sill elevation
   const moved = moveModelEntities(foundation, [{ id: line.id, kind: "line" }], { x: 12, y: 12, z: 96 });
   assert.ok(moved);
   assert.equal(moved.lines[0].start.z, 0);
+});
+
+test("saves and maintains an explicit framed-Wall Foundation support relationship", () => {
+  const foundationLine = addLineObject(NEW_PROJECT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 192, y: 0, z: 0 });
+  assert.ok(foundationLine);
+  const foundation = createFoundationWallFromLine(foundationLine.document, foundationLine.line.id);
+  assert.ok(foundation);
+  const framedLine = addLineObject(foundation, { x: 0, y: 0, z: 0 }, { x: 192, y: 0, z: 0 });
+  assert.ok(framedLine);
+  const framed = createWallFromLine(framedLine.document, framedLine.line.id);
+  assert.ok(framed);
+  const framedWall = framed.lines.find((line) => line.id === framedLine.line.id);
+  assert.equal(framedWall?.foundationSupportWallId, foundationLine.line.id);
+
+  const copied = copyModelEntities(framed, [
+    { id: foundationLine.line.id, kind: "line" },
+    { id: framedLine.line.id, kind: "line" },
+  ], { x: 240, y: 0, z: 0 });
+  assert.ok(copied);
+  const copiedLines = copied.refs.map((ref) => copied.document.lines.find((line) => line.id === ref.id));
+  const copiedFoundation = copiedLines.find((line) => line?.architecturalRole === "foundation-wall");
+  const copiedFramedWall = copiedLines.find((line) => line?.architecturalRole === "wall");
+  assert.equal(copiedFramedWall?.foundationSupportWallId, copiedFoundation?.id);
+
+  const unassigned = assignWallFoundationSupport(framed, framedLine.line.id, null);
+  assert.ok(unassigned);
+  assert.equal(unassigned.lines.find((line) => line.id === framedLine.line.id)?.foundationSupportWallId, null);
+  const reassigned = assignWallFoundationSupport(unassigned, framedLine.line.id, foundationLine.line.id);
+  assert.ok(reassigned);
+  const removedSupport = deleteLineObject(reassigned, foundationLine.line.id);
+  assert.ok(removedSupport);
+  assert.equal(removedSupport.lines.find((line) => line.id === framedLine.line.id)?.foundationSupportWallId, null);
 });
 
 test("uses an aligned Foundation Wall sill edge as the Room floor perimeter stop", () => {
