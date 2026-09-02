@@ -275,7 +275,8 @@ node --test tests/rendered-html.test.mjs
 
 ## Current Architecture
 
-- `app/model-builder-app.tsx`: application shell, viewport, controls, and properties
+- `app/model-builder-app.tsx`: application composition, viewport orchestration, controls, and properties
+- `features/products/product-library-dialog.tsx`: Product Library search, import, representation preview, and alignment workflow
 - `lib/box-model.ts`: fixed-face geometry rules and parametric box state
 - `lib/cad-line.ts`: 3D line geometry, coordinate parsing, polar tracking, and grip rules
 - `lib/cad-circle.ts`: elevated Circle geometry, measurements, validation, and grip rules
@@ -303,6 +304,13 @@ node --test tests/rendered-html.test.mjs
 Application state is kept separate from formatted dimension text. The 3D view
 is derived from numeric dimensions measured in inches, with interface values
 normalized to architectural notation.
+
+The application is being decomposed progressively rather than through a disruptive
+rewrite. When a major subsystem is changed, its cohesive interface and workflow code
+should move under `features/` or shared `components/`, while model rules remain in
+testable `lib/` modules. The Product Library is the first extracted residential UI
+feature; future work should continue this boundary instead of adding new subsystem
+dialogs directly to the application-composition file.
 
 ## Current Milestone
 
