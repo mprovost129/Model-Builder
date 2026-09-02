@@ -42,8 +42,8 @@ test("generates plates and regularly spaced full-height studs in the Wall Main l
 test("frames Door and Window rough openings with structural member roles", () => {
   const building = createDefaultBuildingStructure();
   const line = framedWall([
-    { centerOffset: 60, headerBottomHeight: 82.5, id: "door-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
-    { centerOffset: 156, headerBottomHeight: 84, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
+    { centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "door-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+    { centerOffset: 156, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
   ]);
   const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
   const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, undefined, [line], openingTypes);
@@ -67,7 +67,7 @@ test("uses each reusable opening type's header and side-support package", () => 
   windowType.kingStudCountPerSide = 2;
   windowType.windowSillPlateCount = 2;
   const line = framedWall([
-    { centerOffset: 120, headerBottomHeight: 84, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
+    { centerOffset: 120, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
   ]);
   const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
   const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, undefined, [line], openingTypes);
@@ -85,7 +85,7 @@ test("models on-edge plies, interior insulation, between-ply spacers, and flat c
   wallType.layers.find((layer) => layer.wallGroup === "main")!.thickness = 5.5;
   const windowType = building.openingTypes.find((type) => type.kind === "window")!;
   const line = framedWall([
-    { centerOffset: 120, headerBottomHeight: 84, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
+    { centerOffset: 120, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
   ]);
   const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
   const headerTypes = new Map(building.headerTypes.map((type) => [type.id, type]));
@@ -107,6 +107,11 @@ test("models on-edge plies, interior insulation, between-ply spacers, and flat c
   windowType.headerTypeId = "header-type-02";
   const flat = wallFramingSolids(line, wallType, building.wallFraming, 109.125, undefined, [line], openingTypes, headerTypes);
   assert.deepEqual(flat.filter((solid) => solid.kind === "header").map((solid) => [solid.baseHeight, solid.height, solid.startInterior.y]), [[84, 1.5, -5.5], [85.5, 1.5, -5.5]]);
+
+  line.wallOpenings[0].headerTypeIdOverride = "header-type-01";
+  const overridden = wallFramingSolids(line, wallType, building.wallFraming, 109.125, undefined, [line], openingTypes, headerTypes);
+  assert.equal(overridden.filter((solid) => solid.kind === "header").length, 3);
+  assert.equal(overridden.filter((solid) => solid.kind === "header-filler").length, 1);
 });
 
 test("can disable derived framing without changing Wall or opening geometry", () => {

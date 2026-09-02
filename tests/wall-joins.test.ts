@@ -116,8 +116,8 @@ test("keeps manually disconnected Foundation Wall ends square", () => {
 test("cuts Door and Window rough openings through a Wall layer", () => {
   const source = wall("wall-01", { x: 0, y: 0 }, { x: 240, y: 0 }, {
     wallOpenings: [
-      { centerOffset: 60, headerBottomHeight: 82.5, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
-      { centerOffset: 156, headerBottomHeight: 84, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
+      { centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+      { centerOffset: 156, headerBottomHeight: 84, headerTypeIdOverride: null, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
     ],
   });
   const types = wallTypes();
@@ -140,8 +140,8 @@ test("cuts Door and Window rough openings through a Wall layer", () => {
 test("generates exterior and interior jamb, head, and Window sill finish returns", () => {
   const source = wall("wall-01", { x: 0, y: 0 }, { x: 240, y: 0 }, {
     wallOpenings: [
-      { centerOffset: 60, headerBottomHeight: 82.5, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
-      { centerOffset: 156, headerBottomHeight: 84, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
+      { centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+      { centerOffset: 156, headerBottomHeight: 84, headerTypeIdOverride: null, id: "opening-02", kind: "window", name: "Window 02", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
     ],
   });
   const building = createDefaultBuildingStructure();
@@ -173,7 +173,7 @@ test("generates exterior and interior jamb, head, and Window sill finish returns
 test("limits opposite finish returns to the Wall depth without overlap", () => {
   const source = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 }, {
     wallOpenings: [
-      { centerOffset: 60, headerBottomHeight: 82.5, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+      { centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "opening-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
     ],
   });
   const building = createDefaultBuildingStructure();

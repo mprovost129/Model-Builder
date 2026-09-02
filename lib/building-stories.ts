@@ -28,6 +28,10 @@ export const WALL_HEADER_FILL_METHODS = ["none", "interior-insulation", "between
 export type WallHeaderFillMethod = (typeof WALL_HEADER_FILL_METHODS)[number];
 export const WALL_HEADER_ALIGNMENTS = ["exterior", "center", "interior"] as const;
 export type WallHeaderAlignment = (typeof WALL_HEADER_ALIGNMENTS)[number];
+export const WALL_LOCATIONS = ["exterior", "interior"] as const;
+export type WallLocation = (typeof WALL_LOCATIONS)[number];
+export const WALL_STRUCTURAL_ROLES = ["bearing", "non-bearing"] as const;
+export type WallStructuralRole = (typeof WALL_STRUCTURAL_ROLES)[number];
 export const WALL_CORNER_FRAMING_STYLES = ["two-stud", "three-stud"] as const;
 export type WallCornerFramingStyle = (typeof WALL_CORNER_FRAMING_STYLES)[number];
 export const WALL_PARTITION_BACKING_STYLES = ["none", "three-stud", "ladder"] as const;
@@ -48,10 +52,16 @@ export type AssemblyLayer = {
 };
 
 export type LayeredAssembly = {
+  /** Wall-only reusable header default. */
+  defaultHeaderTypeId?: string;
   id: string;
   kind: AssemblyKind;
   layers: AssemblyLayer[];
   name: string;
+  /** Wall-only architectural location used by framing defaults. */
+  wallLocation?: WallLocation;
+  /** Wall-only load-path classification; this is not an engineered determination. */
+  wallStructuralRole?: WallStructuralRole;
   /** Wall-only ordered finish layers used to generate non-overlapping wraps at open ends. */
   wallEndCapLayerIds?: string[];
 };
@@ -96,6 +106,8 @@ export type FoundationWallType = {
 
 export type WallHeaderType = {
   alignment: WallHeaderAlignment;
+  /** Project flag indicating that final sizing requires engineering. */
+  engineeringRequired: boolean;
   fillMaterial: string;
   fillMethod: WallHeaderFillMethod;
   id: string;
@@ -103,6 +115,8 @@ export type WallHeaderType = {
   name: string;
   plyCount: number;
   plyMaterial: string;
+  /** Short identifier used in future schedules and plan callouts. */
+  scheduleMark: string;
   /** Across-wall thickness for on-edge plies; vertical thickness for flat courses. */
   plyThickness: number;
   /** Across-wall spacer thickness used only between on-edge plies. */
@@ -120,7 +134,8 @@ export type WallOpeningType = {
   kind: WallOpeningKind;
   /** Vertical header depth; structural sizing remains user-defined. */
   headerDepth: number;
-  headerTypeId: string;
+  /** Null resolves the assembly from the host Wall Type. */
+  headerTypeId: string | null;
   /** Full-height king studs generated at each side of the rough opening. */
   kingStudCountPerSide: number;
   name: string;
@@ -270,9 +285,12 @@ function defaultCeilingFinish(storyId: string): LayeredAssembly {
 
 export function createDefaultWallType(): LayeredAssembly {
   return {
+    defaultHeaderTypeId: "header-type-04",
     id: "wall-type-01",
     kind: "wall-structure",
     name: "2x4 Exterior Wall",
+    wallLocation: "exterior",
+    wallStructuralRole: "bearing",
     wallEndCapLayerIds: [],
     layers: [
       { id: "wall-type-01-01", material: "Exterior Cladding", name: "Exterior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
@@ -287,9 +305,12 @@ export function createDefaultWallTypes(): LayeredAssembly[] {
   return [
     createDefaultWallType(),
     {
+      defaultHeaderTypeId: "header-type-01",
       id: "wall-type-02",
       kind: "wall-structure",
       name: "2x6 Exterior Wall",
+      wallLocation: "exterior",
+      wallStructuralRole: "bearing",
       wallEndCapLayerIds: [],
       layers: [
         { id: "wall-type-02-01", material: "Exterior Cladding", name: "Exterior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
@@ -299,9 +320,12 @@ export function createDefaultWallTypes(): LayeredAssembly[] {
       ],
     },
     {
+      defaultHeaderTypeId: "header-type-02",
       id: "wall-type-03",
       kind: "wall-structure",
       name: "2x4 Interior Wall",
+      wallLocation: "interior",
+      wallStructuralRole: "non-bearing",
       wallEndCapLayerIds: [],
       layers: [
         { id: "wall-type-03-01", material: "Gypsum Board", name: "Side A Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
@@ -310,9 +334,12 @@ export function createDefaultWallTypes(): LayeredAssembly[] {
       ],
     },
     {
+      defaultHeaderTypeId: "header-type-02",
       id: "wall-type-04",
       kind: "wall-structure",
       name: "2x6 Interior Wall",
+      wallLocation: "interior",
+      wallStructuralRole: "non-bearing",
       wallEndCapLayerIds: [],
       layers: [
         { id: "wall-type-04-01", material: "Gypsum Board", name: "Side A Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
@@ -325,10 +352,12 @@ export function createDefaultWallTypes(): LayeredAssembly[] {
 
 export function createDefaultWallHeaderTypes(): WallHeaderType[] {
   return [
-    { alignment: "exterior", fillMaterial: "Rigid Insulation", fillMethod: "interior-insulation", id: "header-type-01", layout: "on-edge", name: "3-Ply Lumber + Interior Rigid", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
-    { alignment: "center", fillMaterial: "None", fillMethod: "none", id: "header-type-02", layout: "flat-stack", name: "2-Piece Flat Stack", plyCount: 2, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
-    { alignment: "center", fillMaterial: "OSB Sheathing", fillMethod: "between-plies", id: "header-type-03", layout: "on-edge", name: "3-Ply Lumber + Sheathing Spacers", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
-    { alignment: "center", fillMaterial: "None", fillMethod: "none", id: "header-type-04", layout: "solid", name: "Full Main Header", plyCount: 1, plyMaterial: "Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
+    { alignment: "exterior", engineeringRequired: false, fillMaterial: "Rigid Insulation", fillMethod: "interior-insulation", id: "header-type-01", layout: "on-edge", name: "3-Ply Lumber + Interior Rigid", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, scheduleMark: "H1", spacerThickness: 0.5 },
+    { alignment: "center", engineeringRequired: false, fillMaterial: "None", fillMethod: "none", id: "header-type-02", layout: "flat-stack", name: "2-Piece Flat Stack", plyCount: 2, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, scheduleMark: "H2", spacerThickness: 0.5 },
+    { alignment: "center", engineeringRequired: false, fillMaterial: "OSB Sheathing", fillMethod: "between-plies", id: "header-type-03", layout: "on-edge", name: "3-Ply Lumber + Sheathing Spacers", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, scheduleMark: "H3", spacerThickness: 0.5 },
+    { alignment: "center", engineeringRequired: true, fillMaterial: "None", fillMethod: "none", id: "header-type-04", layout: "solid", name: "Full Main Header", plyCount: 1, plyMaterial: "Lumber", plyThickness: 1.5, scheduleMark: "H4", spacerThickness: 0.5 },
+    { alignment: "center", engineeringRequired: true, fillMaterial: "None", fillMethod: "none", id: "header-type-05", layout: "on-edge", name: "2-Ply LVL", plyCount: 2, plyMaterial: "LVL", plyThickness: 1.75, scheduleMark: "H5", spacerThickness: 0.5 },
+    { alignment: "center", engineeringRequired: true, fillMaterial: "None", fillMethod: "none", id: "header-type-06", layout: "solid", name: "Steel Header · User Defined", plyCount: 1, plyMaterial: "Structural Steel", plyThickness: 1.5, scheduleMark: "H6", spacerThickness: 0.5 },
   ];
 }
 
@@ -365,7 +394,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       defaultHeaderBottomHeight: 82.5,
       exteriorReturnDepth: 0,
       headerDepth: 9.25,
-      headerTypeId: "header-type-04",
+      headerTypeId: null,
       id: "door-type-01",
       interiorReturnDepth: 0,
       jackStudCountPerSide: 1,
@@ -382,7 +411,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       defaultHeaderBottomHeight: 80,
       exteriorReturnDepth: 0,
       headerDepth: 9.25,
-      headerTypeId: "header-type-04",
+      headerTypeId: null,
       id: "window-type-01",
       interiorReturnDepth: 0,
       jackStudCountPerSide: 1,
@@ -503,7 +532,7 @@ export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
 export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
   const positiveDimensions = [type.unitWidth, type.unitHeight, type.roughWidth, type.roughHeight, type.defaultHeaderBottomHeight, type.headerDepth];
   const returnDepths = [type.exteriorReturnDepth, type.interiorReturnDepth];
-  return IDENTIFIER_PATTERN.test(type.id) && IDENTIFIER_PATTERN.test(type.headerTypeId) &&
+  return IDENTIFIER_PATTERN.test(type.id) && (type.headerTypeId === null || IDENTIFIER_PATTERN.test(type.headerTypeId)) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
     WALL_OPENING_KINDS.includes(type.kind) &&
     positiveDimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= 600 && isSixteenth(value)) &&
@@ -525,7 +554,8 @@ export function wallHeaderTypeRequiredMainThickness(type: WallHeaderType): numbe
 
 export function wallHeaderTypeIsValid(type: WallHeaderType): boolean {
   const dimensions = [type.plyThickness, type.spacerThickness];
-  return IDENTIFIER_PATTERN.test(type.id) &&
+  return IDENTIFIER_PATTERN.test(type.id) && typeof type.engineeringRequired === "boolean" &&
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/.test(type.scheduleMark) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }, { value: type.plyMaterial, limit: MATERIAL_NAME_LIMIT }, { value: type.fillMaterial, limit: MATERIAL_NAME_LIMIT }]) &&
     WALL_HEADER_LAYOUTS.includes(type.layout) && WALL_HEADER_FILL_METHODS.includes(type.fillMethod) && WALL_HEADER_ALIGNMENTS.includes(type.alignment) &&
     dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
@@ -558,6 +588,38 @@ export function wallLayerGroupThickness(assembly: LayeredAssembly, group: WallLa
   return snapToSixteenth(
     assembly.layers.reduce((total, layer) => total + (layer.wallGroup === group ? layer.thickness : 0), 0),
   );
+}
+
+/** Compatibility defaults are used only by in-memory legacy assemblies that predate wall classifications. */
+export function wallLocation(assembly: LayeredAssembly): WallLocation {
+  return assembly.wallLocation ?? "exterior";
+}
+
+export function wallStructuralRole(assembly: LayeredAssembly): WallStructuralRole {
+  return assembly.wallStructuralRole ?? "bearing";
+}
+
+export function recommendedWallHeaderTypeId(assembly: LayeredAssembly): string {
+  if (wallLocation(assembly) === "interior" && wallStructuralRole(assembly) === "non-bearing") return "header-type-02";
+  if (wallLocation(assembly) === "exterior" && wallLayerGroupThickness(assembly, "main") >= 5.5) return "header-type-01";
+  return "header-type-04";
+}
+
+export function wallDefaultHeaderTypeId(assembly: LayeredAssembly): string {
+  return assembly.defaultHeaderTypeId ?? recommendedWallHeaderTypeId(assembly);
+}
+
+/** Placed override wins, followed by the component type and then the host Wall Type. */
+export function resolveWallHeaderType(
+  building: BuildingStructure,
+  wallTypeId: string | null,
+  openingTypeId: string | null,
+  headerTypeIdOverride: string | null,
+): WallHeaderType | null {
+  const wallType = building.wallTypes.find((candidate) => candidate.id === wallTypeId);
+  const openingType = building.openingTypes.find((candidate) => candidate.id === openingTypeId);
+  const headerTypeId = headerTypeIdOverride ?? openingType?.headerTypeId ?? (wallType ? wallDefaultHeaderTypeId(wallType) : null);
+  return building.headerTypes.find((candidate) => candidate.id === headerTypeId) ?? null;
 }
 
 export function wallReferenceDistanceFromExterior(assembly: LayeredAssembly, referenceLine: WallReferenceLine): number {
@@ -618,6 +680,9 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
     ids.add(layer.id);
   }
   if (assembly.kind === "wall-structure") {
+    if ((assembly.wallLocation !== undefined && !WALL_LOCATIONS.includes(assembly.wallLocation)) ||
+      (assembly.wallStructuralRole !== undefined && !WALL_STRUCTURAL_ROLES.includes(assembly.wallStructuralRole)) ||
+      (assembly.defaultHeaderTypeId !== undefined && !IDENTIFIER_PATTERN.test(assembly.defaultHeaderTypeId))) return false;
     let previousGroupIndex = 0;
     let hasPositiveMainLayer = false;
     for (const layer of assembly.layers) {
@@ -630,7 +695,7 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
     if (!Array.isArray(assembly.wallEndCapLayerIds) || new Set(assembly.wallEndCapLayerIds).size !== assembly.wallEndCapLayerIds.length) return false;
     if (assembly.wallEndCapLayerIds.some((layerId) => !assembly.layers.some((layer) => layer.id === layerId && layer.role === "finish" && layer.thickness > 0))) return false;
     if (!hasPositiveMainLayer) return false;
-  } else if (assembly.wallEndCapLayerIds !== undefined || assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
+  } else if (assembly.defaultHeaderTypeId !== undefined || assembly.wallLocation !== undefined || assembly.wallStructuralRole !== undefined || assembly.wallEndCapLayerIds !== undefined || assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
     return false;
   }
   return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;
@@ -680,15 +745,24 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
   const openingTypeNames = new Set<string>();
   const headerTypeIds = new Set<string>();
   const headerTypeNames = new Set<string>();
+  const headerScheduleMarks = new Set<string>();
   for (const headerType of building.headerTypes) {
     const normalizedName = headerType.name.trim().toLowerCase();
-    if (headerTypeIds.has(headerType.id) || headerTypeNames.has(normalizedName) || !wallHeaderTypeIsValid(headerType)) return false;
+    const normalizedScheduleMark = headerType.scheduleMark.trim().toLowerCase();
+    if (headerTypeIds.has(headerType.id) || headerTypeNames.has(normalizedName) || headerScheduleMarks.has(normalizedScheduleMark) || !wallHeaderTypeIsValid(headerType)) return false;
     headerTypeIds.add(headerType.id);
     headerTypeNames.add(normalizedName);
+    headerScheduleMarks.add(normalizedScheduleMark);
   }
+  if (building.wallTypes.some((wallType) => {
+    const headerType = building.headerTypes.find((candidate) => candidate.id === wallDefaultHeaderTypeId(wallType));
+    if (!headerType) return true;
+    const requiredThickness = wallHeaderTypeRequiredMainThickness(headerType);
+    return requiredThickness > 0 && requiredThickness > wallLayerGroupThickness(wallType, "main") + 1e-8;
+  })) return false;
   for (const openingType of building.openingTypes) {
     const normalizedName = openingType.name.trim().toLowerCase();
-    if (openingTypeIds.has(openingType.id) || openingTypeNames.has(normalizedName) || !wallOpeningTypeIsValid(openingType) || !headerTypeIds.has(openingType.headerTypeId)) return false;
+    if (openingTypeIds.has(openingType.id) || openingTypeNames.has(normalizedName) || !wallOpeningTypeIsValid(openingType) || (openingType.headerTypeId !== null && !headerTypeIds.has(openingType.headerTypeId))) return false;
     openingTypeIds.add(openingType.id);
     openingTypeNames.add(normalizedName);
   }

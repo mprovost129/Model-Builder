@@ -306,6 +306,9 @@ import {
   MAXIMUM_WALL_OPENING_TYPE_COUNT,
   MAXIMUM_WALL_HEADER_TYPE_COUNT,
   removeBuildingStory,
+  recommendedWallHeaderTypeId,
+  resolveWallHeaderType,
+  wallDefaultHeaderTypeId,
   wallLayerGroupThickness,
   wallFramingSettingsAreValid,
   wallHeaderTypeRequiredMainThickness,
@@ -321,11 +324,13 @@ import {
   type WallJoinMode,
   type WallCornerFramingStyle,
   type WallLayerGroup,
+  type WallLocation,
   type WallOpeningType,
   type WallHeaderType,
   type WallFramingSettings,
   type WallPartitionBackingStyle,
   type WallReferenceLine,
+  type WallStructuralRole,
 } from "@/lib/building-stories";
 import {
   automaticWallJoinCount,
@@ -8371,6 +8376,12 @@ function WallOpeningsControl({
     return opening ? onUpdate(opening.id, { [field]: snapToSixteenth(value) }) : false;
   };
   const componentType = building.openingTypes.find((type) => type.id === opening?.wallOpeningTypeId) ?? null;
+  const wallType = building.wallTypes.find((type) => type.id === line.wallTypeId) ?? null;
+  const resolvedHeader = opening ? resolveWallHeaderType(building, line.wallTypeId, opening.wallOpeningTypeId, opening.headerTypeIdOverride) : null;
+  const compatibleHeaders = building.headerTypes.filter((headerType) => {
+    const required = wallHeaderTypeRequiredMainThickness(headerType);
+    return !wallType || required === 0 || required <= wallLayerGroupThickness(wallType, "main") + 1e-8;
+  });
   const compatibleTypes = building.openingTypes.filter((type) => type.kind === opening?.kind);
   return (
     <PropertyGridSection title="Openings" meta={`${line.wallOpenings.length} hosted`}>
@@ -8383,12 +8394,14 @@ function WallOpeningsControl({
         <PropertyGridRow label="Unit size"><span className="property-readout">{formatArchitectural(opening.unitWidth)} × {formatArchitectural(opening.unitHeight)}</span></PropertyGridRow>
         <PropertyGridRow label="Rough opening"><span className="property-readout">{formatArchitectural(opening.roughWidth)} × {formatArchitectural(opening.roughHeight)}</span></PropertyGridRow>
         {componentType ? <PropertyGridRow label="Finish returns"><span className="property-readout">Ext {formatArchitectural(componentType.exteriorReturnDepth)} · Int {formatArchitectural(componentType.interiorReturnDepth)}</span></PropertyGridRow> : null}
+        <PropertyGridRow label="Header override"><select className="property-cell-select" value={opening.headerTypeIdOverride ?? ""} onChange={(event) => onUpdate(opening.id, { headerTypeIdOverride: event.target.value || null })} aria-label="Placed opening header override"><option value="">Automatic · {resolvedHeader?.scheduleMark ?? "—"} {resolvedHeader?.name ?? "No compatible header"}</option>{compatibleHeaders.map((headerType) => <option key={headerType.id} value={headerType.id}>{headerType.scheduleMark} · {headerType.name}{headerType.engineeringRequired ? " · Engineering" : ""}</option>)}</select></PropertyGridRow>
+        {resolvedHeader ? <PropertyGridRow label="Resolved header"><span className="property-readout">{resolvedHeader.scheduleMark} · {opening.headerTypeIdOverride ? "Opening override" : componentType?.headerTypeId ? "Component override" : "Wall default"}{resolvedHeader.engineeringRequired ? " · Engineering required" : ""}</span></PropertyGridRow> : null}
         {opening.kind === "window" ? <>
           <LineCoordinateField label="Bottom of header" unsigned value={opening.headerBottomHeight} onCommit={(draft) => updateDimension("headerBottomHeight", draft)} />
           <PropertyGridRow label="Rough sill"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight - opening.roughHeight)}</span></PropertyGridRow>
         </> : <PropertyGridRow label="Bottom of header"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight)}</span></PropertyGridRow>}
         <div className="property-action-row single-action"><button type="button" onClick={() => onDelete(opening.id)}>Delete Opening</button></div>
-        <p className="property-grid-note">The reusable component type controls unit size, rough opening, and generated finish returns. Window header height remains an instance placement measured to the bottom of the structural header above the Story subfloor.</p>
+        <p className="property-grid-note">The reusable component type controls unit size, rough opening, and generated finish returns. Header priority is placed-opening override, component override, then host Wall default. Window header height remains measured to the bottom of the structural header above the Story subfloor.</p>
       </> : null}
     </PropertyGridSection>
   );
@@ -8744,6 +8757,11 @@ function WallTypeManagerDialog({
     return () => window.removeEventListener("keydown", closeWithEscape, true);
   }, [onCancel]);
   const selected = draft.wallTypes.find((wallType) => wallType.id === selectedId) ?? draft.wallTypes[0];
+  const selectedMainThickness = wallLayerGroupThickness(selected, "main");
+  const compatibleHeaders = draft.headerTypes.filter((headerType) => {
+    const required = wallHeaderTypeRequiredMainThickness(headerType);
+    return required === 0 || required <= selectedMainThickness + 1e-8;
+  });
   const replaceSelected = (assembly: LayeredAssembly) => {
     setDraft((current) => ({
       ...cloneBuildingStructure(current),
@@ -8775,7 +8793,7 @@ function WallTypeManagerDialog({
   const save = () => {
     const next = cloneBuildingStructure(draft);
     if (!buildingStructureIsValid(next)) {
-      setError("Wall types need unique names, ordered Exterior/Main/Interior groups, and at least one positive-thickness Main layer.");
+      setError("Wall types need unique names, ordered Exterior/Main/Interior groups, a positive-thickness Main layer, and a compatible default header assembly.");
       return;
     }
     onSave(next);
@@ -8795,6 +8813,15 @@ function WallTypeManagerDialog({
               <label><span>Type name</span><input value={selected.name} maxLength={80} onChange={(event) => replaceSelected({ ...selected, name: event.target.value })} /></label>
               <label><span>Open-end wrap</span><output>{selected.wallEndCapLayerIds?.length ? `${selected.wallEndCapLayerIds.length} finish layer${selected.wallEndCapLayerIds.length === 1 ? "" : "s"}` : "None"}</output></label>
               <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Wall Use &amp; Opening Framing</strong><span>The host Wall supplies the normal header assembly; a Door/Window Type or placed opening can override it.</span></div></header>
+              <div className="foundation-field-grid">
+                <label className="story-field"><span>Wall location</span><select value={selected.wallLocation ?? "exterior"} onChange={(event) => { const wallLocation = event.target.value as WallLocation; const next = { ...selected, wallLocation }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="exterior">Exterior</option><option value="interior">Interior</option></select></label>
+                <label className="story-field"><span>Structural role</span><select value={selected.wallStructuralRole ?? "bearing"} onChange={(event) => { const wallStructuralRole = event.target.value as WallStructuralRole; const next = { ...selected, wallStructuralRole }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="bearing">Bearing</option><option value="non-bearing">Non-bearing</option></select></label>
+                <label className="story-field"><span>Default header assembly</span><select value={wallDefaultHeaderTypeId(selected)} onChange={(event) => replaceSelected({ ...selected, defaultHeaderTypeId: event.target.value })}>{compatibleHeaders.map((headerType) => <option key={headerType.id} value={headerType.id}>{headerType.scheduleMark} · {headerType.name}{headerType.engineeringRequired ? " · Engineering" : ""}</option>)}</select></label>
+              </div>
+              <p className="opening-type-note">Changing the location or structural role applies the recommended residential default. The selected assembly remains an explicit project rule; loads, spans, species, grades, and code compliance are not calculated here.</p>
             </section>
             <StoryAssemblyEditor assembly={selected} onChange={replaceSelected} />
             <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core. Use End to stack one or more positive Finish layers across truly open or manually disconnected ends. Each wrap uses its material thickness, and body layers stop behind the complete stack so solids do not overlap. New walls use the active type; existing walls retain their assigned type until changed.</p>
@@ -9122,6 +9149,13 @@ function nextWallHeaderTypeName(building: BuildingStructure, sourceName: string)
   return `${baseName} ${number}`;
 }
 
+function nextWallHeaderScheduleMark(building: BuildingStructure): string {
+  const marks = new Set(building.headerTypes.map((type) => type.scheduleMark.toUpperCase()));
+  let number = 1;
+  while (marks.has(`H${number}`)) number += 1;
+  return `H${number}`;
+}
+
 function OpeningTypeManagerDialog({
   document,
   onCancel,
@@ -9145,9 +9179,12 @@ function OpeningTypeManagerDialog({
     return () => window.removeEventListener("keydown", closeWithEscape, true);
   }, [onCancel]);
   const selected = draft.openingTypes.find((type) => type.id === selectedId) ?? draft.openingTypes[0];
-  const selectedHeader = draft.headerTypes.find((type) => type.id === selected.headerTypeId) ?? draft.headerTypes[0];
+  const activeWallType = draft.wallTypes.find((type) => type.id === draft.activeWallTypeId) ?? draft.wallTypes[0];
+  const selectedHeader = draft.headerTypes.find((type) => type.id === (selected.headerTypeId ?? wallDefaultHeaderTypeId(activeWallType))) ?? draft.headerTypes[0];
   const usageCount = document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.wallOpeningTypeId === selected.id).length, 0);
-  const headerUsageCount = draft.openingTypes.filter((type) => type.headerTypeId === selectedHeader.id).length;
+  const headerUsageCount = draft.openingTypes.filter((type) => type.headerTypeId === selectedHeader.id).length +
+    draft.wallTypes.filter((type) => wallDefaultHeaderTypeId(type) === selectedHeader.id).length +
+    document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.headerTypeIdOverride === selectedHeader.id).length, 0);
   const kindCount = draft.openingTypes.filter((type) => type.kind === selected.kind).length;
   const replaceSelected = (change: Partial<WallOpeningType>) => {
     setDraft((current) => ({ ...cloneBuildingStructure(current), openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), ...change } : cloneWallOpeningType(type)) }));
@@ -9160,7 +9197,7 @@ function OpeningTypeManagerDialog({
   const duplicateHeaderType = () => {
     if (draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT) return;
     const id = nextWallHeaderTypeId(draft);
-    const copy = { ...cloneWallHeaderType(selectedHeader), id, name: nextWallHeaderTypeName(draft, selectedHeader.name) };
+    const copy = { ...cloneWallHeaderType(selectedHeader), id, name: nextWallHeaderTypeName(draft, selectedHeader.name), scheduleMark: nextWallHeaderScheduleMark(draft) };
     setDraft((current) => ({
       ...cloneBuildingStructure(current),
       headerTypes: [...current.headerTypes.map(cloneWallHeaderType), copy],
@@ -9192,7 +9229,7 @@ function OpeningTypeManagerDialog({
   const save = () => {
     const next = cloneBuildingStructure(draft);
     if (!buildingStructureIsValid(next)) {
-      setError("Check names, dimensions, and framing counts. Unit size must fit inside the rough opening, returns cannot be negative, and every project needs at least one Door and one Window type.");
+      setError("Check names, dimensions, framing counts, unique header schedule marks, and Wall compatibility. Unit size must fit inside the rough opening, and every project needs at least one Door and one Window type.");
       return;
     }
     if (!onSave(next)) {
@@ -9239,7 +9276,7 @@ function OpeningTypeManagerDialog({
             <section className="foundation-setting-section">
               <header><div><strong>Opening Framing</strong><span>Define the repeatable framing package generated with this component type.</span></div></header>
               <div className="foundation-field-grid">
-                <label className="story-field"><span>Header assembly</span><select value={selectedHeader.id} onChange={(event) => replaceSelected({ headerTypeId: event.target.value })}>{draft.headerTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
+                <label className="story-field"><span>Header source</span><select value={selected.headerTypeId ?? ""} onChange={(event) => replaceSelected({ headerTypeId: event.target.value || null })}><option value="">Automatic from host Wall Type</option>{draft.headerTypes.map((type) => <option key={type.id} value={type.id}>{type.scheduleMark} · {type.name}</option>)}</select></label>
                 {selectedHeader.layout === "flat-stack" ? <label className="story-field"><span>Generated header depth</span><output className="room-output">{formatArchitectural(selectedHeader.plyCount * selectedHeader.plyThickness)}</output></label> : <StoryDimensionInput key={`${selected.id}:hd:${selected.headerDepth}`} label="Header depth" value={selected.headerDepth} onChange={(headerDepth) => replaceSelected({ headerDepth })} />}
                 <label className="story-field"><span>King studs per side</span><select value={selected.kingStudCountPerSide} onChange={(event) => replaceSelected({ kingStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
                 <label className="story-field"><span>Jack studs per side</span><select value={selected.jackStudCountPerSide} onChange={(event) => replaceSelected({ jackStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
@@ -9248,9 +9285,10 @@ function OpeningTypeManagerDialog({
               <p className="opening-type-note">These are explicit drafting and modeling rules, not an engineered span calculation. Header depth is limited by the available space below the top plates; sizing and support counts must be selected for the project&apos;s loads, span, material, and code requirements.</p>
             </section>
             <section className="foundation-setting-section">
-              <header><div><strong>Header Assembly Definition</strong><span>Shared by {headerUsageCount} Door or Window type{headerUsageCount === 1 ? "" : "s"}; duplicate before making a type-specific variation.</span></div><button type="button" onClick={duplicateHeaderType} disabled={draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT}>Duplicate &amp; Assign</button></header>
+              <header><div><strong>Header Assembly Definition</strong><span>{selected.headerTypeId === null ? `Previewing the ${activeWallType.name} default; ` : ""}shared by {headerUsageCount} Wall or opening type{headerUsageCount === 1 ? "" : "s"}.</span></div><button type="button" onClick={duplicateHeaderType} disabled={draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT}>Duplicate &amp; Assign</button></header>
               <div className="foundation-field-grid">
                 <label className="story-field"><span>Assembly name</span><input value={selectedHeader.name} maxLength={100} onChange={(event) => replaceSelectedHeader({ name: event.target.value })} /></label>
+                <label className="story-field"><span>Schedule mark</span><input value={selectedHeader.scheduleMark} maxLength={16} onChange={(event) => replaceSelectedHeader({ scheduleMark: event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") })} /></label>
                 <label className="story-field"><span>Layout</span><select value={selectedHeader.layout} onChange={(event) => { const layout = event.target.value as WallHeaderType["layout"]; replaceSelectedHeader({ layout, ...(layout === "on-edge" ? {} : { alignment: "center", fillMethod: "none" }) }); }}><option value="on-edge">Built-up on edge</option><option value="flat-stack">Members on flat</option><option value="solid">Full Main depth</option></select></label>
                 <label className="story-field"><span>Structural material</span><input value={selectedHeader.plyMaterial} maxLength={120} onChange={(event) => replaceSelectedHeader({ plyMaterial: event.target.value })} /></label>
                 {selectedHeader.layout !== "solid" ? <label className="story-field"><span>{selectedHeader.layout === "flat-stack" ? "Flat courses" : "Structural plies"}</span><select value={selectedHeader.plyCount} onChange={(event) => replaceSelectedHeader({ plyCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
@@ -9260,6 +9298,7 @@ function OpeningTypeManagerDialog({
                 {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod === "between-plies" ? <StoryDimensionInput key={`${selectedHeader.id}:st:${selectedHeader.spacerThickness}`} label="Spacer thickness" value={selectedHeader.spacerThickness} onChange={(spacerThickness) => replaceSelectedHeader({ spacerThickness })} /> : null}
                 {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod !== "interior-insulation" ? <label className="story-field"><span>Across-wall alignment</span><select value={selectedHeader.alignment} onChange={(event) => replaceSelectedHeader({ alignment: event.target.value as WallHeaderType["alignment"] })}><option value="exterior">Exterior</option><option value="center">Centered</option><option value="interior">Interior</option></select></label> : null}
                 <label className="story-field"><span>Main thickness required</span><output className="room-output">{wallHeaderTypeRequiredMainThickness(selectedHeader) === 0 ? "Adapts to Wall" : formatArchitectural(wallHeaderTypeRequiredMainThickness(selectedHeader))}</output></label>
+                <label className="story-field"><span>Engineering review</span><span className="room-checkbox-field"><input type="checkbox" checked={selectedHeader.engineeringRequired} onChange={(event) => replaceSelectedHeader({ engineeringRequired: event.target.checked })} /> Required</span></label>
               </div>
               <p className="opening-type-note">On-edge plies and spacers are modeled across the Wall Main layer. Interior-rigid assemblies place the structural plies at the exterior and fill the remaining interior cavity. Flat members span the Main layer and stack vertically. Steel is supported as a user-defined rectangular material representation; detailed steel profiles can be added later.</p>
             </section>
@@ -13712,6 +13751,10 @@ export function ModelBuilderApp() {
               <PropertyGridRow label="Layer"><select className="property-cell-select" value={selectedLine.layerId} onChange={(event) => assignSelectedLineLayer(event.target.value)} aria-label="Line layer" disabled={!selectedLineIsEditable}>{editor.present.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}{layer.locked ? " (locked)" : ""}{!layer.visible ? " (hidden)" : ""}</option>)}</select></PropertyGridRow>
               {selectedLine.architecturalRole === "wall" ? <>
                 <PropertyGridRow label="Wall type"><select className="property-cell-select" value={selectedLine.wallTypeId ?? editor.present.building.activeWallTypeId} onChange={(event) => assignSelectedWallType(event.target.value)} aria-label="Wall type" disabled={!selectedLineIsEditable}>{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow>
+                {(() => { const wallType = editor.present.building.wallTypes.find((candidate) => candidate.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]; const header = editor.present.building.headerTypes.find((candidate) => candidate.id === wallDefaultHeaderTypeId(wallType)); return <>
+                  <PropertyGridRow label="Wall use"><span className="property-readout">{wallType.wallLocation === "interior" ? "Interior" : "Exterior"} · {wallType.wallStructuralRole === "non-bearing" ? "Non-bearing" : "Bearing"}</span></PropertyGridRow>
+                  <PropertyGridRow label="Default header"><span className="property-readout">{header ? `${header.scheduleMark} · ${header.name}` : "—"}</span></PropertyGridRow>
+                </>; })()}
                 <PropertyGridRow label="Thickness"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(editor.present.building.wallTypes.find((wallType) => wallType.id === selectedLine.wallTypeId) ?? editor.present.building.wallTypes[0]))}</span></PropertyGridRow>
                 <PropertyGridRow label="Reference"><select className="property-cell-select" value={selectedLine.wallReferenceLine ?? "wall-center"} onChange={(event) => setSelectedWallPlacement({ referenceLine: event.target.value as WallReferenceLine })} aria-label="Wall reference line" disabled={!selectedLineIsEditable}>{Object.entries(WALL_REFERENCE_LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Exterior side"><select className="property-cell-select" value={selectedLine.wallExteriorSide ?? "left"} onChange={(event) => setSelectedWallPlacement({ exteriorSide: event.target.value as WallExteriorSide })} aria-label="Wall exterior side" disabled={!selectedLineIsEditable}><option value="left">Left of Start → End</option><option value="right">Right of Start → End</option></select></PropertyGridRow>
@@ -14196,7 +14239,7 @@ export function ModelBuilderApp() {
               </section>
               <section className="building-browser-section">
                 <header><strong>Wall Types</strong><span>{editor.present.building.wallTypes.length}</span></header>
-                {editor.present.building.wallTypes.map((wallType) => <button type="button" className={wallType.id === activeWallType.id ? "building-browser-row is-active" : "building-browser-row"} key={wallType.id} onClick={() => setWallTypeManagerOpen(true)}><span className="building-browser-icon">▥</span><span><strong>{wallType.name}</strong><small>{formatArchitectural(assemblyTotalThickness(wallType))} · {wallType.layers.length} layers</small></span>{wallType.id === activeWallType.id ? <b>ACTIVE</b> : null}</button>)}
+                {editor.present.building.wallTypes.map((wallType) => <button type="button" className={wallType.id === activeWallType.id ? "building-browser-row is-active" : "building-browser-row"} key={wallType.id} onClick={() => setWallTypeManagerOpen(true)}><span className="building-browser-icon">▥</span><span><strong>{wallType.name}</strong><small>{wallType.wallLocation === "interior" ? "Interior" : "Exterior"} · {wallType.wallStructuralRole === "non-bearing" ? "Non-bearing" : "Bearing"} · {formatArchitectural(assemblyTotalThickness(wallType))}</small></span>{wallType.id === activeWallType.id ? <b>ACTIVE</b> : null}</button>)}
               </section>
               <section className="building-browser-section">
                 <header><strong>Door &amp; Window Types</strong><span>{editor.present.building.openingTypes.length}</span></header>

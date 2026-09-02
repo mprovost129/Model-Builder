@@ -9,6 +9,7 @@ import {
   createDefaultBuildingStructure,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
+  resolveWallHeaderType,
   wallOpeningTypeIsValid,
   wallFramingSettingsAreValid,
   wallHeaderTypeIsValid,
@@ -78,6 +79,12 @@ test("defines reusable exterior-to-interior layered wall types", () => {
   assert.deepEqual(building.wallTypes[0].wallEndCapLayerIds, []);
   assert.deepEqual(building.wallTypes[2].layers.map((layer) => layer.wallGroup), ["exterior", "main", "interior"]);
   assert.deepEqual(building.wallTypes[2].layers.map((layer) => layer.name), ["Side A Finish", "2x4 Stud Framing", "Side B Finish"]);
+  assert.deepEqual(building.wallTypes.map((type) => [type.wallLocation, type.wallStructuralRole, type.defaultHeaderTypeId]), [
+    ["exterior", "bearing", "header-type-04"],
+    ["exterior", "bearing", "header-type-01"],
+    ["interior", "non-bearing", "header-type-02"],
+    ["interior", "non-bearing", "header-type-02"],
+  ]);
 });
 
 test("defines reusable Foundation Wall types with condition-based sill ownership", () => {
@@ -116,7 +123,10 @@ test("defines reusable Door and Window component types for rough openings and fi
   assert.deepEqual([door.headerDepth, door.kingStudCountPerSide, door.jackStudCountPerSide, door.windowSillPlateCount], [9.25, 1, 1, 0]);
   assert.deepEqual([window.headerDepth, window.kingStudCountPerSide, window.jackStudCountPerSide, window.windowSillPlateCount], [9.25, 1, 1, 1]);
   assert.equal(wallOpeningTypeIsValid(door), true);
-  assert.equal(building.headerTypes.some((type) => type.id === door.headerTypeId), true);
+  assert.equal(door.headerTypeId, null);
+  assert.equal(resolveWallHeaderType(building, "wall-type-02", door.id, null)?.id, "header-type-01");
+  assert.equal(resolveWallHeaderType(building, "wall-type-03", door.id, null)?.id, "header-type-02");
+  assert.equal(resolveWallHeaderType(building, "wall-type-02", door.id, "header-type-05")?.id, "header-type-05");
 
   const invalid = { ...window, interiorReturnDepth: -0.5 };
   assert.equal(wallOpeningTypeIsValid(invalid), false);
@@ -128,13 +138,21 @@ test("defines reusable Door and Window component types for rough openings and fi
   assert.equal(building.openingTypes[0].roughWidth, 38);
 });
 
-test("defines reusable solid, flat, insulated, and spaced header assemblies", () => {
+test("defines reusable lumber, LVL, steel, insulated, flat, and spaced header assemblies", () => {
   const building = createDefaultBuildingStructure();
-  assert.deepEqual(building.headerTypes.map((type) => type.layout), ["on-edge", "flat-stack", "on-edge", "solid"]);
-  assert.deepEqual(building.headerTypes.map(wallHeaderTypeRequiredMainThickness), [4.5, 0, 5.5, 0]);
+  assert.deepEqual(building.headerTypes.map((type) => type.layout), ["on-edge", "flat-stack", "on-edge", "solid", "on-edge", "solid"]);
+  assert.deepEqual(building.headerTypes.map(wallHeaderTypeRequiredMainThickness), [4.5, 0, 5.5, 0, 3.5, 0]);
+  assert.deepEqual(building.headerTypes.map((type) => type.scheduleMark), ["H1", "H2", "H3", "H4", "H5", "H6"]);
+  assert.deepEqual(building.headerTypes.map((type) => type.engineeringRequired), [false, false, false, true, true, true]);
   assert.equal(building.headerTypes.every(wallHeaderTypeIsValid), true);
   assert.equal(wallHeaderTypeIsValid({ ...building.headerTypes[0], alignment: "center" }), false);
   assert.equal(wallHeaderTypeIsValid({ ...building.headerTypes[2], spacerThickness: 0 }), false);
+  const duplicateScheduleMark = cloneBuildingStructure(building);
+  duplicateScheduleMark.headerTypes[1].scheduleMark = duplicateScheduleMark.headerTypes[0].scheduleMark;
+  assert.equal(buildingStructureIsValid(duplicateScheduleMark), false);
+  const incompatibleWallDefault = cloneBuildingStructure(building);
+  incompatibleWallDefault.wallTypes[0].defaultHeaderTypeId = "header-type-03";
+  assert.equal(buildingStructureIsValid(incompatibleWallDefault), false);
 });
 
 test("defines project Wall framing defaults independently from finish assemblies", () => {

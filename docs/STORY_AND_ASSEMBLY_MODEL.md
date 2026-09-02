@@ -254,6 +254,16 @@ calculation. Span tables, loads, species, grades, and built-up header
 construction must be modeled separately before framing can be treated as a
 structural design result.
 
+Each Wall Type now classifies exterior/interior location and bearing/non-bearing
+use and owns a compatible default header assembly. Header resolution is explicit:
+a placed-opening override wins, followed by a Door/Window Type override, then the
+host Wall Type default. New 2x6 exterior Walls use the three-ply lumber assembly
+with an interior rigid-insulation filler; new non-bearing interior Walls use two
+flat members matching the Main layer depth. Reusable assemblies include schedule
+marks and an engineering-review flag. These fields and placed overrides are stored
+in version-35 project files; version-34 and earlier files upgrade without changing
+their prior fixed header behavior.
+
 Resolved two-Wall corners begin with one end stud from each participating Wall.
 The three-stud option adds one deterministic shared-corner member; the two-stud
 advanced-framing option leaves the insulated corner open for a separate gypsum
@@ -264,10 +274,10 @@ junction framing.
 
 ## Next Steps
 
-1. Add opening-specific header construction, jack/king-stud counts, and manual
-   per-junction overrides without making unsafe engineering assumptions.
-2. Develop Door/Window product-unit and casing geometry independently of framing.
-3. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-4. Add manual per-edge platform overrides for exceptional support details.
-5. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+1. Develop Door/Window product-unit and casing geometry independently of framing.
+2. Add manual per-junction framing overrides without making unsafe engineering assumptions.
+3. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
+4. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+5. Add manual per-edge platform overrides for exceptional support details.
+6. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

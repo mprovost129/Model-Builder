@@ -112,6 +112,7 @@ import {
   cloneBuildingStructure,
   cloneLayeredAssembly,
   createDefaultBuildingStructure,
+  resolveWallHeaderType,
   wallHeaderTypeRequiredMainThickness,
   wallLayerGroupThickness,
   wallReferenceDistanceFromExterior,
@@ -151,6 +152,8 @@ export type WallOpening = {
   centerOffset: number;
   /** Bottom of the structural header above the Story rough floor/subfloor. */
   headerBottomHeight: number;
+  /** Null uses the component or host Wall default; otherwise overrides the resolved assembly. */
+  headerTypeIdOverride: string | null;
   id: string;
   kind: WallOpeningKind;
   name: string;
@@ -470,6 +473,7 @@ export function wallOpeningsAreValid(line: LineObject, roughCeilingHeight: numbe
       opening.name.trim().length > 120 ||
       names.has(opening.name.trim().toLowerCase()) ||
       (opening.kind !== "door" && opening.kind !== "window") ||
+      (opening.headerTypeIdOverride !== null && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.headerTypeIdOverride)) ||
       (opening.wallOpeningTypeId !== null && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.wallOpeningTypeId)) ||
       !Number.isFinite(opening.centerOffset) || opening.centerOffset < 0 || opening.centerOffset > MAXIMUM_COORDINATE || Math.abs(opening.centerOffset * 16 - Math.round(opening.centerOffset * 16)) >= 1e-8 ||
       !openingDimensionIsValid(opening.unitWidth) ||
@@ -1083,10 +1087,10 @@ function documentWallOpeningsAreValid(document: ModelDocument): boolean {
   });
 }
 
-function wallOpeningTypeFitsWall(building: BuildingStructure, line: LineObject, openingType: WallOpeningType): boolean {
+function wallOpeningTypeFitsWall(building: BuildingStructure, line: LineObject, openingType: WallOpeningType, headerTypeIdOverride: string | null = null): boolean {
   if (line.architecturalRole !== "wall") return false;
   const wallType = building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-  const headerType = building.headerTypes.find((candidate) => candidate.id === openingType.headerTypeId);
+  const headerType = resolveWallHeaderType(building, line.wallTypeId, openingType.id, headerTypeIdOverride);
   if (!wallType || !headerType) return false;
   const requiredThickness = wallHeaderTypeRequiredMainThickness(headerType);
   return requiredThickness === 0 || requiredThickness <= wallLayerGroupThickness(wallType, "main") + 1e-8;
@@ -1095,9 +1099,16 @@ function wallOpeningTypeFitsWall(building: BuildingStructure, line: LineObject, 
 function documentWallHeaderAssembliesFit(document: ModelDocument): boolean {
   const openingTypesById = new Map(document.building.openingTypes.map((type) => [type.id, type]));
   return document.lines.every((line) => line.wallOpenings.every((opening) => {
-    if (opening.wallOpeningTypeId === null) return true;
+    if (opening.wallOpeningTypeId === null) {
+      if (opening.headerTypeIdOverride === null) return true;
+      const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
+      const headerType = resolveWallHeaderType(document.building, line.wallTypeId, null, opening.headerTypeIdOverride);
+      if (!wallType || !headerType) return false;
+      const requiredThickness = wallHeaderTypeRequiredMainThickness(headerType);
+      return requiredThickness === 0 || requiredThickness <= wallLayerGroupThickness(wallType, "main") + 1e-8;
+    }
     const openingType = openingTypesById.get(opening.wallOpeningTypeId);
-    return openingType !== undefined && wallOpeningTypeFitsWall(document.building, line, openingType);
+    return openingType !== undefined && wallOpeningTypeFitsWall(document.building, line, openingType, opening.headerTypeIdOverride);
   }));
 }
 
@@ -1394,7 +1405,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         line.wallOpenings.length === other.wallOpenings.length && line.wallOpenings.every((opening, openingIndex) => {
           const otherOpening = other.wallOpenings[openingIndex];
-          return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId;
+          return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId;
         }) &&
         lineGeometriesEqual(line, other);
     }) &&
@@ -2158,6 +2169,7 @@ export function addWallOpening(
   const opening: WallOpening = {
     ...defaults,
     centerOffset: snapToSixteenth((gap.start + gap.end) / 2),
+    headerTypeIdOverride: null,
     id,
     kind,
     name: nextWallOpeningName(line, kind),
@@ -2172,19 +2184,20 @@ export function updateWallOpening(
   document: ModelDocument,
   lineId: string,
   openingId: string,
-  change: Partial<Pick<WallOpening, "centerOffset" | "headerBottomHeight" | "name" | "roughHeight" | "roughWidth" | "unitHeight" | "unitWidth">>,
+  change: Partial<Pick<WallOpening, "centerOffset" | "headerBottomHeight" | "headerTypeIdOverride" | "name" | "roughHeight" | "roughWidth" | "unitHeight" | "unitWidth">>,
 ): ModelDocument | null {
   const line = findLineObject(document, lineId);
   const story = document.building.stories.find((candidate) => candidate.id === line?.storyId);
   const opening = line?.wallOpenings.find((candidate) => candidate.id === openingId);
-  if (!line || line.architecturalRole !== "wall" || !story || !opening || !lineIsEditable(document, line)) return null;
+  if (!line || line.architecturalRole !== "wall" || !story || !opening || !lineIsEditable(document, line) || (change.headerTypeIdOverride !== undefined && change.headerTypeIdOverride !== null && !document.building.headerTypes.some((type) => type.id === change.headerTypeIdOverride))) return null;
   const wallHeight = wallVerticalExtent(document, line)?.height ?? story.roughCeilingHeight;
   const updated = { ...opening, ...change };
   updated.name = updated.name.trim();
   if (updated.kind === "door") updated.headerBottomHeight = updated.roughHeight;
   const nextLine = { ...cloneLineObject(line), wallOpenings: line.wallOpenings.map((candidate) => candidate.id === openingId ? updated : { ...candidate }).sort((first, second) => first.centerOffset - second.centerOffset) };
   if (!wallOpeningsAreValid(nextLine, wallHeight)) return null;
-  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? nextLine : candidate));
+  const next = withLines(document, document.lines.map((candidate) => candidate.id === lineId ? nextLine : candidate));
+  return documentWallHeaderAssembliesFit(next) ? next : null;
 }
 
 export function deleteWallOpening(document: ModelDocument, lineId: string, openingId: string): ModelDocument | null {
@@ -2198,7 +2211,7 @@ export function assignWallOpeningType(document: ModelDocument, lineId: string, o
   const story = document.building.stories.find((candidate) => candidate.id === line?.storyId);
   const opening = line?.wallOpenings.find((candidate) => candidate.id === openingId);
   const type = document.building.openingTypes.find((candidate) => candidate.id === typeId);
-  if (!line || line.architecturalRole !== "wall" || !story || !opening || !type || type.kind !== opening.kind || !lineIsEditable(document, line) || !wallOpeningTypeFitsWall(document.building, line, type)) return null;
+  if (!line || line.architecturalRole !== "wall" || !story || !opening || !type || type.kind !== opening.kind || !lineIsEditable(document, line) || !wallOpeningTypeFitsWall(document.building, line, type, opening.headerTypeIdOverride)) return null;
   const wallHeight = wallVerticalExtent(document, line)?.height ?? story.roughCeilingHeight;
   const updated: WallOpening = {
     ...opening,

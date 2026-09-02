@@ -1385,6 +1385,14 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   assert.equal(reassignedWindow?.wallOpeningTypeId, "window-type-02");
   assert.equal(reassignedWindow?.roughWidth, 48.5);
 
+  const headerOverridden = updateWallOpening(windowResult.document, added.line.id, windowOpening.id, { headerTypeIdOverride: "header-type-03" });
+  assert.ok(headerOverridden);
+  assert.equal(headerOverridden.lines[0].wallOpenings.find((opening) => opening.id === windowOpening.id)?.headerTypeIdOverride, "header-type-03");
+  assert.equal(assignWallType(headerOverridden, added.line.id, "wall-type-01"), null);
+  const restoredAutomaticHeader = updateWallOpening(headerOverridden, added.line.id, windowOpening.id, { headerTypeIdOverride: null });
+  assert.ok(restoredAutomaticHeader);
+  assert.ok(assignWallType(restoredAutomaticHeader, added.line.id, "wall-type-01"));
+
   const editedTypes = cloneBuildingStructure(windowResult.document.building);
   const linkedWindowType = editedTypes.openingTypes.find((type) => type.id === windowOpening.wallOpeningTypeId);
   assert.ok(linkedWindowType);

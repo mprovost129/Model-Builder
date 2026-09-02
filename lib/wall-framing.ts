@@ -1,6 +1,7 @@
 import { wallOpeningRoughBottom, type LineObject } from "./document-model.ts";
 import {
   wallLayerGroupThickness,
+  wallDefaultHeaderTypeId,
   wallReferenceDistanceFromExterior,
   type LayeredAssembly,
   type WallFramingSettings,
@@ -145,7 +146,8 @@ export function wallFramingSolids(
   const fullStudHeight = studTop - bottomStackHeight;
   const openingFraming = (opening: LineObject["wallOpenings"][number]) => {
     const type = opening.wallOpeningTypeId === null ? null : openingTypesById.get(opening.wallOpeningTypeId) ?? null;
-    const headerType = type ? headerTypesById.get(type.headerTypeId) ?? null : null;
+    const headerTypeId = opening.headerTypeIdOverride ?? type?.headerTypeId ?? wallDefaultHeaderTypeId(wallType);
+    const headerType = headerTypesById.get(headerTypeId) ?? null;
     return type?.kind === opening.kind ? {
       headerDepth: type.headerDepth,
       headerType,
