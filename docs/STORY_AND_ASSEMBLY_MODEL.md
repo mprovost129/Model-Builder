@@ -277,6 +277,17 @@ does not claim that referenced binary content has been fetched, stored, or rende
 That boundary keeps project files compact and makes the later asset-storage layer
 explicit.
 
+The first storage layer uses the Site's private product-asset bucket rather than
+embedding binary content in `.mbproj` files. The Product Library accepts SVG and GLB
+files up to 25 MB, records a SHA-256 checksum, and attaches the returned manifest to
+the selected Type. SVG validation rejects scripts, event attributes, embedded
+documents, entities, and externally loaded resources; GLB validation requires the
+binary glTF signature, version 2, and a matching declared byte length. Stored SVGs
+can be previewed in the library. Stored GLBs remain catalog representations until
+their coordinate system, insertion point, unit scale, host depth, material mapping,
+and native-geometry fallback are explicitly reviewed; upload alone never replaces
+the construction-aware Door or Window assembly.
+
 The Door & Window Type Manager renders a live exterior-elevation preview from the
 same host-aware component solids used by placed openings. It shows the structural
 rough-opening boundary, unit boundary, generated component geometry, rough and unit
@@ -360,13 +371,15 @@ junction framing.
 
 ## Next Steps
 
-1. Add reviewed binary ingestion, project asset storage, and rendering for the SVG/GLB
-   references already carried by Product Package version 2.
+1. Add authored representation alignment and fallback rules so stored SVG plan/elevation
+   drawings and GLB models can safely supplement native Type geometry in model views.
 2. Generalize the Product Library registry for ordinary placed Objects, including unit
    normalization, independent layer assignment, thumbnails, and update tracking.
-3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
-4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
-5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-6. Add manual per-edge platform overrides for exceptional support details.
-7. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+3. Add asset removal and orphan cleanup without deleting representations still referenced
+   by another project or catalog record.
+4. Add manual per-junction framing overrides without making unsafe engineering assumptions.
+5. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
+6. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+7. Add manual per-edge platform overrides for exceptional support details.
+8. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

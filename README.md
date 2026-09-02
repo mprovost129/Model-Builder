@@ -353,9 +353,12 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   plan/elevation/3D representations, and validated manufacturer asset manifests. It can
   set the active Door or Window and place that product directly into a selected Wall.
   Version-2 product packages carry referenced SVG/GLB representation metadata while
-  preserving source provenance and editable opening/framing data. Binary asset storage
-  and rendering remain a separate import step; proprietary CAD/BIM formats require
-  conversion or dedicated adapters.
+  preserving source provenance and editable opening/framing data. The Product Library
+  can now validate and store SVG drawings and GLB version-2 models in private project
+  object storage, attach their checksummed manifests to a Type, and preview safe stored
+  SVGs. Placed openings continue to use native parametric geometry until authored
+  alignment and fallback rules connect those stored representations to the model.
+  Proprietary CAD/BIM formats require conversion or dedicated adapters.
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing
   visibility. Wall Types now classify exterior/interior and bearing/non-bearing use
