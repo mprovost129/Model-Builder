@@ -205,6 +205,11 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /RoomManagerDialog/);
   assert.match(component, /OpeningTypeManagerDialog/);
   assert.match(component, /Door &amp; Window Type Manager/);
+  assert.match(component, /Header Assembly Definition/);
+  assert.match(component, /Duplicate &amp; Assign/);
+  assert.match(component, /Rigid insulation at interior/);
+  assert.match(component, /Spacers between plies/);
+  assert.match(component, /Main thickness required/);
   assert.match(component, /assignWallOpeningType/);
   assert.match(component, /wallOpeningTypeId/);
   assert.match(component, /WallFramingManagerDialog/);

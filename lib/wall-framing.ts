@@ -4,6 +4,7 @@ import {
   wallReferenceDistanceFromExterior,
   type LayeredAssembly,
   type WallFramingSettings,
+  type WallHeaderType,
   type WallOpeningType,
 } from "./building-stories.ts";
 import type { AutomaticWallJoinPlan, WallEndpoint } from "./wall-joins.ts";
@@ -16,6 +17,7 @@ export type WallFramingMemberKind =
   | "corner-stud"
   | "cripple-stud"
   | "header"
+  | "header-filler"
   | "jack-stud"
   | "king-stud"
   | "rough-sill"
@@ -103,36 +105,37 @@ export function wallFramingSolids(
   joinPlan?: AutomaticWallJoinPlan,
   wallLines: LineObject[] = [line],
   openingTypesById: ReadonlyMap<string, WallOpeningType> = new Map(),
+  headerTypesById: ReadonlyMap<string, WallHeaderType> = new Map(),
 ): WallFramingSolid[] {
   if (!settings.enabled || line.architecturalRole !== "wall") return [];
   const direction = lineDirection(line);
   const exteriorThickness = wallLayerGroupThickness(wallType, "exterior");
   const mainThickness = wallLayerGroupThickness(wallType, "main");
   if (!direction || mainThickness < TOLERANCE || wallHeight < TOLERANCE) return [];
-  const mainExteriorOffset = offsetFromExteriorDistance(wallType, line, exteriorThickness);
-  const mainInteriorOffset = offsetFromExteriorDistance(wallType, line, exteriorThickness + mainThickness);
   const pointAt = (distance: number) => ({ x: line.start.x + direction.x * distance, y: line.start.y + direction.y * distance });
   const result: WallFramingSolid[] = [];
   const keys = new Set<string>();
-  const add = (kind: WallFramingMemberKind, start: number, end: number, baseHeight: number, height: number, openingId: string | null = null) => {
+  const add = (kind: WallFramingMemberKind, start: number, end: number, baseHeight: number, height: number, openingId: string | null = null, depthStart = 0, depthEnd = mainThickness, material = settings.material) => {
     const clippedStart = Math.max(0, start);
     const clippedEnd = Math.min(direction.length, end);
-    if (clippedEnd - clippedStart < TOLERANCE || height < TOLERANCE || baseHeight < -TOLERANCE || baseHeight + height > wallHeight + TOLERANCE) return;
-    const key = [kind, clippedStart, clippedEnd, baseHeight, height, openingId ?? ""].join(":");
+    const clippedDepthStart = Math.max(0, Math.min(mainThickness, depthStart));
+    const clippedDepthEnd = Math.max(0, Math.min(mainThickness, depthEnd));
+    if (clippedEnd - clippedStart < TOLERANCE || clippedDepthEnd - clippedDepthStart < TOLERANCE || height < TOLERANCE || baseHeight < -TOLERANCE || baseHeight + height > wallHeight + TOLERANCE) return;
+    const key = [kind, clippedStart, clippedEnd, baseHeight, height, openingId ?? "", clippedDepthStart, clippedDepthEnd, material].join(":");
     if (keys.has(key)) return;
     keys.add(key);
     const startPoint = pointAt(clippedStart);
     const endPoint = pointAt(clippedEnd);
     result.push({
       baseHeight,
-      endExterior: offsetPoint(endPoint, direction, mainExteriorOffset),
-      endInterior: offsetPoint(endPoint, direction, mainInteriorOffset),
+      endExterior: offsetPoint(endPoint, direction, offsetFromExteriorDistance(wallType, line, exteriorThickness + clippedDepthStart)),
+      endInterior: offsetPoint(endPoint, direction, offsetFromExteriorDistance(wallType, line, exteriorThickness + clippedDepthEnd)),
       height,
       kind,
-      material: settings.material,
+      material,
       openingId,
-      startExterior: offsetPoint(startPoint, direction, mainExteriorOffset),
-      startInterior: offsetPoint(startPoint, direction, mainInteriorOffset),
+      startExterior: offsetPoint(startPoint, direction, offsetFromExteriorDistance(wallType, line, exteriorThickness + clippedDepthStart)),
+      startInterior: offsetPoint(startPoint, direction, offsetFromExteriorDistance(wallType, line, exteriorThickness + clippedDepthEnd)),
     });
   };
 
@@ -142,13 +145,16 @@ export function wallFramingSolids(
   const fullStudHeight = studTop - bottomStackHeight;
   const openingFraming = (opening: LineObject["wallOpenings"][number]) => {
     const type = opening.wallOpeningTypeId === null ? null : openingTypesById.get(opening.wallOpeningTypeId) ?? null;
+    const headerType = type ? headerTypesById.get(type.headerTypeId) ?? null : null;
     return type?.kind === opening.kind ? {
       headerDepth: type.headerDepth,
+      headerType,
       jackStudCountPerSide: type.jackStudCountPerSide,
       kingStudCountPerSide: type.kingStudCountPerSide,
       windowSillPlateCount: type.windowSillPlateCount,
     } : {
       headerDepth: settings.headerHeight,
+      headerType: null,
       jackStudCountPerSide: 1,
       kingStudCountPerSide: 1,
       windowSillPlateCount: opening.kind === "window" ? 1 : 0,
@@ -223,9 +229,41 @@ export function wallFramingSolids(
       add("king-stud", openingStart - settings.studWidth * (memberIndex + 1), openingStart - settings.studWidth * memberIndex, bottomStackHeight, fullStudHeight, opening.id);
       add("king-stud", openingEnd + settings.studWidth * memberIndex, openingEnd + settings.studWidth * (memberIndex + 1), bottomStackHeight, fullStudHeight, opening.id);
     }
-    const headerHeight = Math.min(framing.headerDepth, Math.max(0, studTop - opening.headerBottomHeight));
+    const availableHeaderHeight = Math.max(0, studTop - opening.headerBottomHeight);
+    const requestedHeaderHeight = framing.headerType?.layout === "flat-stack"
+      ? framing.headerType.plyCount * framing.headerType.plyThickness
+      : framing.headerDepth;
+    const headerHeight = Math.min(requestedHeaderHeight, availableHeaderHeight);
     const jackBearingWidth = framing.jackStudCountPerSide * settings.studWidth;
-    add("header", openingStart - jackBearingWidth, openingEnd + jackBearingWidth, opening.headerBottomHeight, headerHeight, opening.id);
+    const headerStart = openingStart - jackBearingWidth;
+    const headerEnd = openingEnd + jackBearingWidth;
+    const headerType = framing.headerType;
+    if (!headerType || headerType.layout === "solid") {
+      add("header", headerStart, headerEnd, opening.headerBottomHeight, headerHeight, opening.id, 0, mainThickness, headerType?.plyMaterial ?? settings.material);
+    } else if (headerType.layout === "flat-stack") {
+      for (let index = 0; index < headerType.plyCount; index += 1) {
+        const courseBase = index * headerType.plyThickness;
+        const courseHeight = Math.min(headerType.plyThickness, headerHeight - courseBase);
+        add("header", headerStart, headerEnd, opening.headerBottomHeight + courseBase, courseHeight, opening.id, 0, mainThickness, headerType.plyMaterial);
+      }
+    } else {
+      const structuralThickness = headerType.plyCount * headerType.plyThickness;
+      const spacerCount = headerType.fillMethod === "between-plies" ? Math.max(0, headerType.plyCount - 1) : 0;
+      const assemblyThickness = structuralThickness + spacerCount * headerType.spacerThickness;
+      const assemblyStart = headerType.alignment === "exterior" ? 0 : headerType.alignment === "interior" ? mainThickness - assemblyThickness : (mainThickness - assemblyThickness) / 2;
+      let depthCursor = assemblyStart;
+      for (let index = 0; index < headerType.plyCount; index += 1) {
+        add("header", headerStart, headerEnd, opening.headerBottomHeight, headerHeight, opening.id, depthCursor, depthCursor + headerType.plyThickness, headerType.plyMaterial);
+        depthCursor += headerType.plyThickness;
+        if (headerType.fillMethod === "between-plies" && index < headerType.plyCount - 1) {
+          add("header-filler", headerStart, headerEnd, opening.headerBottomHeight, headerHeight, opening.id, depthCursor, depthCursor + headerType.spacerThickness, headerType.fillMaterial);
+          depthCursor += headerType.spacerThickness;
+        }
+      }
+      if (headerType.fillMethod === "interior-insulation" && structuralThickness < mainThickness) {
+        add("header-filler", headerStart, headerEnd, opening.headerBottomHeight, headerHeight, opening.id, structuralThickness, mainThickness, headerType.fillMaterial);
+      }
+    }
     const sillStackHeight = opening.kind === "window" ? framing.windowSillPlateCount * settings.plateHeight : 0;
     if (opening.kind === "window") for (let index = 0; index < framing.windowSillPlateCount; index += 1) {
       add("rough-sill", openingStart, openingEnd, roughBottom - (index + 1) * settings.plateHeight, settings.plateHeight, opening.id);

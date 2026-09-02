@@ -79,6 +79,36 @@ test("uses each reusable opening type's header and side-support package", () => 
   assert.deepEqual(solids.filter((solid) => solid.kind === "rough-sill").map((solid) => solid.baseHeight), [34, 32.5]);
 });
 
+test("models on-edge plies, interior insulation, between-ply spacers, and flat courses", () => {
+  const building = createDefaultBuildingStructure();
+  const wallType = structuredClone(building.wallTypes[0]);
+  wallType.layers.find((layer) => layer.wallGroup === "main")!.thickness = 5.5;
+  const windowType = building.openingTypes.find((type) => type.kind === "window")!;
+  const line = framedWall([
+    { centerOffset: 120, headerBottomHeight: 84, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
+  ]);
+  const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
+  const headerTypes = new Map(building.headerTypes.map((type) => [type.id, type]));
+
+  windowType.headerTypeId = "header-type-01";
+  const insulated = wallFramingSolids(line, wallType, building.wallFraming, 109.125, undefined, [line], openingTypes, headerTypes);
+  assert.equal(insulated.filter((solid) => solid.kind === "header").length, 3);
+  assert.equal(insulated.filter((solid) => solid.kind === "header-filler").length, 1);
+  assert.deepEqual(insulated.filter((solid) => solid.kind === "header").map((solid) => [solid.startExterior.y, solid.startInterior.y]), [[0, -1.5], [-1.5, -3], [-3, -4.5]]);
+  const insulation = insulated.find((solid) => solid.kind === "header-filler");
+  assert.ok(insulation);
+  assert.deepEqual([insulation.startExterior.y, insulation.startInterior.y], [-4.5, -5.5]);
+
+  windowType.headerTypeId = "header-type-03";
+  const spaced = wallFramingSolids(line, wallType, building.wallFraming, 109.125, undefined, [line], openingTypes, headerTypes);
+  assert.equal(spaced.filter((solid) => solid.kind === "header").length, 3);
+  assert.equal(spaced.filter((solid) => solid.kind === "header-filler").length, 2);
+
+  windowType.headerTypeId = "header-type-02";
+  const flat = wallFramingSolids(line, wallType, building.wallFraming, 109.125, undefined, [line], openingTypes, headerTypes);
+  assert.deepEqual(flat.filter((solid) => solid.kind === "header").map((solid) => [solid.baseHeight, solid.height, solid.startInterior.y]), [[84, 1.5, -5.5], [85.5, 1.5, -5.5]]);
+});
+
 test("can disable derived framing without changing Wall or opening geometry", () => {
   const building = createDefaultBuildingStructure();
   building.wallFraming.enabled = false;

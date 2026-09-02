@@ -1402,6 +1402,43 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
   assert.deepEqual(draftingLine.lines[0].wallOpenings, []);
 });
 
+test("prevents header assemblies from being clipped by a thinner Wall Main layer", () => {
+  const building = structuredClone(DEFAULT_DOCUMENT.building);
+  const mainLayer = building.wallTypes[0].layers.find((layer) => layer.wallGroup === "main");
+  assert.ok(mainLayer);
+  mainLayer.thickness = 5.5;
+  const activeWindowType = building.openingTypes.find((type) => type.id === building.activeWindowTypeId);
+  assert.ok(activeWindowType);
+  activeWindowType.headerTypeId = "header-type-01";
+
+  const configured = updateDocumentBuilding(DEFAULT_DOCUMENT, building);
+  assert.ok(configured);
+  const added = addLineObject(configured, { x: 0, y: 0, z: 0 }, { x: 192, y: 0, z: 0 });
+  assert.ok(added);
+  const wall = createWallFromLine(added.document, added.line.id);
+  assert.ok(wall);
+  const placed = addWallOpening(wall, added.line.id, "window");
+  assert.ok(placed);
+
+  const thinnerBuilding = structuredClone(placed.document.building);
+  const thinnerMainLayer = thinnerBuilding.wallTypes[0].layers.find((layer) => layer.wallGroup === "main");
+  assert.ok(thinnerMainLayer);
+  thinnerMainLayer.thickness = 3.5;
+  assert.equal(updateDocumentBuilding(placed.document, thinnerBuilding), null);
+
+  const freshThinBuilding = structuredClone(DEFAULT_DOCUMENT.building);
+  const freshThinWindowType = freshThinBuilding.openingTypes.find((type) => type.id === freshThinBuilding.activeWindowTypeId);
+  assert.ok(freshThinWindowType);
+  freshThinWindowType.headerTypeId = "header-type-01";
+  const freshThinDocument = updateDocumentBuilding(DEFAULT_DOCUMENT, freshThinBuilding);
+  assert.ok(freshThinDocument);
+  const freshThinLine = addLineObject(freshThinDocument, { x: 0, y: 0, z: 0 }, { x: 192, y: 0, z: 0 });
+  assert.ok(freshThinLine);
+  const freshThinWall = createWallFromLine(freshThinLine.document, freshThinLine.line.id);
+  assert.ok(freshThinWall);
+  assert.equal(addWallOpening(freshThinWall, freshThinLine.line.id, "window"), null);
+});
+
 test("detects enclosed Rooms and preserves Story-default overrides across topology refreshes", () => {
   let document = cloneDocument(NEW_PROJECT_DOCUMENT);
   const addWall = (start: { x: number; y: number; z: number }, end: { x: number; y: number; z: number }) => {

@@ -297,15 +297,18 @@ import {
   calculateStoryElevations,
   cloneBuildingStructure,
   cloneFoundationWallType,
+  cloneWallHeaderType,
   cloneLayeredAssembly,
   cloneWallOpeningType,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
   FOUNDATION_WALL_CONDITIONS,
   MAXIMUM_WALL_OPENING_TYPE_COUNT,
+  MAXIMUM_WALL_HEADER_TYPE_COUNT,
   removeBuildingStory,
   wallLayerGroupThickness,
   wallFramingSettingsAreValid,
+  wallHeaderTypeRequiredMainThickness,
   WALL_LAYER_GROUPS,
   type AssemblyKind,
   type AssemblyLayer,
@@ -319,6 +322,7 @@ import {
   type WallCornerFramingStyle,
   type WallLayerGroup,
   type WallOpeningType,
+  type WallHeaderType,
   type WallFramingSettings,
   type WallPartitionBackingStyle,
   type WallReferenceLine,
@@ -1514,6 +1518,7 @@ function updateWallView(
   linesById: ReadonlyMap<string, LineObject>,
   wallTypesById: ReadonlyMap<string, LayeredAssembly>,
   openingTypesById: ReadonlyMap<string, WallOpeningType>,
+  headerTypesById: ReadonlyMap<string, WallHeaderType>,
   framing: WallFramingSettings,
   showFraming: boolean,
 ) {
@@ -1584,7 +1589,7 @@ function updateWallView(
     view.meshes.push(mesh);
     view.materials.push(material);
   });
-  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height, joinPlan, [...linesById.values()], openingTypesById).forEach((framingMember) => {
+  if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height, joinPlan, [...linesById.values()], openingTypesById, headerTypesById).forEach((framingMember) => {
     const shape = new THREE.Shape();
     shape.moveTo(framingMember.startExterior.x, framingMember.startExterior.y);
     shape.lineTo(framingMember.startInterior.x, framingMember.startInterior.y);
@@ -1592,7 +1597,16 @@ function updateWallView(
     shape.lineTo(framingMember.endExterior.x, framingMember.endExterior.y);
     shape.closePath();
     const geometry = new THREE.ExtrudeGeometry(shape, { bevelEnabled: false, depth: framingMember.height, steps: 1 });
-    const framingColor = framingMember.kind === "header" ? 0xad7545 : framingMember.kind === "backing-block" || framingMember.kind === "backing-stud" ? 0xb98751 : framingMember.kind === "corner-stud" ? 0xc8945c : 0xd2a36c;
+    const materialName = framingMember.material.toLocaleLowerCase();
+    const framingColor = materialName.includes("steel")
+      ? 0x7b8790
+      : framingMember.kind === "header-filler"
+        ? materialName.includes("insulation") ? 0x7fa9b9 : 0xc59b62
+        : framingMember.kind === "header"
+          ? 0xad7545
+          : framingMember.kind === "backing-block" || framingMember.kind === "backing-stud"
+            ? 0xb98751
+            : framingMember.kind === "corner-stud" ? 0xc8945c : 0xd2a36c;
     const material = new THREE.MeshStandardMaterial({ color: framingColor, metalness: 0, opacity: 1, roughness: 0.78 });
     material.userData.baseOpacity = material.opacity;
     const mesh = new THREE.Mesh(geometry, material);
@@ -6573,6 +6587,7 @@ function Viewport({
     const wallLinesById = new Map(wallLines.map((line) => [line.id, line]));
     const wallTypesById = new Map(document.building.wallTypes.map((wallType) => [wallType.id, wallType]));
     const openingTypesById = new Map(document.building.openingTypes.map((openingType) => [openingType.id, openingType]));
+    const headerTypesById = new Map(document.building.headerTypes.map((headerType) => [headerType.id, headerType]));
     wallLines.forEach((line) => {
       let view = wallViewsRef.current.get(line.id);
       if (!view) {
@@ -6581,7 +6596,7 @@ function Viewport({
       }
       const vertical = wallVerticalExtent(document, line);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById, document.building.wallFraming, viewTarget.id !== "top");
+      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById, headerTypesById, document.building.wallFraming, viewTarget.id !== "top");
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
@@ -9091,6 +9106,22 @@ function nextWallOpeningTypeName(building: BuildingStructure, sourceName: string
   return `${baseName} ${number}`;
 }
 
+function nextWallHeaderTypeId(building: BuildingStructure): string {
+  const ids = new Set(building.headerTypes.map((type) => type.id));
+  let number = 1;
+  while (ids.has(`header-type-${String(number).padStart(2, "0")}`)) number += 1;
+  return `header-type-${String(number).padStart(2, "0")}`;
+}
+
+function nextWallHeaderTypeName(building: BuildingStructure, sourceName: string): string {
+  const names = new Set(building.headerTypes.map((type) => type.name.trim().toLocaleLowerCase()));
+  const baseName = `${sourceName.trim()} Copy`;
+  if (!names.has(baseName.toLocaleLowerCase())) return baseName;
+  let number = 2;
+  while (names.has(`${baseName} ${number}`.toLocaleLowerCase())) number += 1;
+  return `${baseName} ${number}`;
+}
+
 function OpeningTypeManagerDialog({
   document,
   onCancel,
@@ -9098,7 +9129,7 @@ function OpeningTypeManagerDialog({
 }: {
   document: ModelDocument;
   onCancel: () => void;
-  onSave: (building: BuildingStructure) => void;
+  onSave: (building: BuildingStructure) => boolean;
 }) {
   const [draft, setDraft] = useState(() => cloneBuildingStructure(document.building));
   const [selectedId, setSelectedId] = useState(document.building.activeDoorTypeId);
@@ -9114,10 +9145,27 @@ function OpeningTypeManagerDialog({
     return () => window.removeEventListener("keydown", closeWithEscape, true);
   }, [onCancel]);
   const selected = draft.openingTypes.find((type) => type.id === selectedId) ?? draft.openingTypes[0];
+  const selectedHeader = draft.headerTypes.find((type) => type.id === selected.headerTypeId) ?? draft.headerTypes[0];
   const usageCount = document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.wallOpeningTypeId === selected.id).length, 0);
+  const headerUsageCount = draft.openingTypes.filter((type) => type.headerTypeId === selectedHeader.id).length;
   const kindCount = draft.openingTypes.filter((type) => type.kind === selected.kind).length;
   const replaceSelected = (change: Partial<WallOpeningType>) => {
     setDraft((current) => ({ ...cloneBuildingStructure(current), openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), ...change } : cloneWallOpeningType(type)) }));
+    setError("");
+  };
+  const replaceSelectedHeader = (change: Partial<WallHeaderType>) => {
+    setDraft((current) => ({ ...cloneBuildingStructure(current), headerTypes: current.headerTypes.map((type) => type.id === selectedHeader.id ? { ...cloneWallHeaderType(type), ...change } : cloneWallHeaderType(type)) }));
+    setError("");
+  };
+  const duplicateHeaderType = () => {
+    if (draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT) return;
+    const id = nextWallHeaderTypeId(draft);
+    const copy = { ...cloneWallHeaderType(selectedHeader), id, name: nextWallHeaderTypeName(draft, selectedHeader.name) };
+    setDraft((current) => ({
+      ...cloneBuildingStructure(current),
+      headerTypes: [...current.headerTypes.map(cloneWallHeaderType), copy],
+      openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), headerTypeId: id } : cloneWallOpeningType(type)),
+    }));
     setError("");
   };
   const duplicateType = () => {
@@ -9147,12 +9195,14 @@ function OpeningTypeManagerDialog({
       setError("Check names, dimensions, and framing counts. Unit size must fit inside the rough opening, returns cannot be negative, and every project needs at least one Door and one Window type.");
       return;
     }
-    onSave(next);
+    if (!onSave(next)) {
+      setError("This header assembly is wider than the Main layer of at least one Wall where the Door or Window type is already placed. Choose a thinner assembly, duplicate the opening type, or use a thicker host Wall.");
+    }
   };
   return (
     <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <section className="story-manager wall-type-manager opening-type-manager" role="dialog" aria-modal="true" aria-labelledby="opening-type-manager-title">
-        <header className="story-manager-header"><div><strong id="opening-type-manager-title">Door &amp; Window Type Manager</strong><span>Reusable unit sizes, rough openings, header defaults, and finish-return depths.</span></div><button type="button" onClick={onCancel} aria-label="Close Door and Window Type Manager">×</button></header>
+        <header className="story-manager-header"><div><strong id="opening-type-manager-title">Door &amp; Window Type Manager</strong><span>Reusable units, rough openings, finish returns, and shared structural header assemblies.</span></div><button type="button" onClick={onCancel} aria-label="Close Door and Window Type Manager">×</button></header>
         <div className="story-manager-body">
           <aside className="story-list">
             <header><strong>Component Types</strong><span>{draft.openingTypes.length} defined</span></header>
@@ -9189,18 +9239,34 @@ function OpeningTypeManagerDialog({
             <section className="foundation-setting-section">
               <header><div><strong>Opening Framing</strong><span>Define the repeatable framing package generated with this component type.</span></div></header>
               <div className="foundation-field-grid">
-                <StoryDimensionInput key={`${selected.id}:hd:${selected.headerDepth}`} label="Header depth" value={selected.headerDepth} onChange={(headerDepth) => replaceSelected({ headerDepth })} />
+                <label className="story-field"><span>Header assembly</span><select value={selectedHeader.id} onChange={(event) => replaceSelected({ headerTypeId: event.target.value })}>{draft.headerTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
+                {selectedHeader.layout === "flat-stack" ? <label className="story-field"><span>Generated header depth</span><output className="room-output">{formatArchitectural(selectedHeader.plyCount * selectedHeader.plyThickness)}</output></label> : <StoryDimensionInput key={`${selected.id}:hd:${selected.headerDepth}`} label="Header depth" value={selected.headerDepth} onChange={(headerDepth) => replaceSelected({ headerDepth })} />}
                 <label className="story-field"><span>King studs per side</span><select value={selected.kingStudCountPerSide} onChange={(event) => replaceSelected({ kingStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
                 <label className="story-field"><span>Jack studs per side</span><select value={selected.jackStudCountPerSide} onChange={(event) => replaceSelected({ jackStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
                 {selected.kind === "window" ? <label className="story-field"><span>Rough-sill plates</span><select value={selected.windowSillPlateCount} onChange={(event) => replaceSelected({ windowSillPlateCount: Number(event.target.value) })}>{[0, 1, 2].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : <label className="story-field"><span>Rough sill</span><output className="room-output">Not used for Doors</output></label>}
-                <label className="story-field"><span>Header thickness</span><output className="room-output">Full Wall Main layer</output></label>
               </div>
               <p className="opening-type-note">These are explicit drafting and modeling rules, not an engineered span calculation. Header depth is limited by the available space below the top plates; sizing and support counts must be selected for the project&apos;s loads, span, material, and code requirements.</p>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Header Assembly Definition</strong><span>Shared by {headerUsageCount} Door or Window type{headerUsageCount === 1 ? "" : "s"}; duplicate before making a type-specific variation.</span></div><button type="button" onClick={duplicateHeaderType} disabled={draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT}>Duplicate &amp; Assign</button></header>
+              <div className="foundation-field-grid">
+                <label className="story-field"><span>Assembly name</span><input value={selectedHeader.name} maxLength={100} onChange={(event) => replaceSelectedHeader({ name: event.target.value })} /></label>
+                <label className="story-field"><span>Layout</span><select value={selectedHeader.layout} onChange={(event) => { const layout = event.target.value as WallHeaderType["layout"]; replaceSelectedHeader({ layout, ...(layout === "on-edge" ? {} : { alignment: "center", fillMethod: "none" }) }); }}><option value="on-edge">Built-up on edge</option><option value="flat-stack">Members on flat</option><option value="solid">Full Main depth</option></select></label>
+                <label className="story-field"><span>Structural material</span><input value={selectedHeader.plyMaterial} maxLength={120} onChange={(event) => replaceSelectedHeader({ plyMaterial: event.target.value })} /></label>
+                {selectedHeader.layout !== "solid" ? <label className="story-field"><span>{selectedHeader.layout === "flat-stack" ? "Flat courses" : "Structural plies"}</span><select value={selectedHeader.plyCount} onChange={(event) => replaceSelectedHeader({ plyCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
+                {selectedHeader.layout !== "solid" ? <StoryDimensionInput key={`${selectedHeader.id}:pt:${selectedHeader.plyThickness}`} label={selectedHeader.layout === "flat-stack" ? "Course thickness" : "Ply thickness"} value={selectedHeader.plyThickness} onChange={(plyThickness) => replaceSelectedHeader({ plyThickness })} /> : null}
+                {selectedHeader.layout === "on-edge" ? <label className="story-field"><span>Fill method</span><select value={selectedHeader.fillMethod} onChange={(event) => { const fillMethod = event.target.value as WallHeaderType["fillMethod"]; replaceSelectedHeader({ fillMethod, ...(fillMethod === "interior-insulation" ? { alignment: "exterior" } : {}) }); }}><option value="none">None</option><option value="interior-insulation">Rigid insulation at interior</option><option value="between-plies">Spacers between plies</option></select></label> : null}
+                {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod !== "none" ? <label className="story-field"><span>{selectedHeader.fillMethod === "interior-insulation" ? "Insulation material" : "Spacer material"}</span><input value={selectedHeader.fillMaterial} maxLength={120} onChange={(event) => replaceSelectedHeader({ fillMaterial: event.target.value })} /></label> : null}
+                {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod === "between-plies" ? <StoryDimensionInput key={`${selectedHeader.id}:st:${selectedHeader.spacerThickness}`} label="Spacer thickness" value={selectedHeader.spacerThickness} onChange={(spacerThickness) => replaceSelectedHeader({ spacerThickness })} /> : null}
+                {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod !== "interior-insulation" ? <label className="story-field"><span>Across-wall alignment</span><select value={selectedHeader.alignment} onChange={(event) => replaceSelectedHeader({ alignment: event.target.value as WallHeaderType["alignment"] })}><option value="exterior">Exterior</option><option value="center">Centered</option><option value="interior">Interior</option></select></label> : null}
+                <label className="story-field"><span>Main thickness required</span><output className="room-output">{wallHeaderTypeRequiredMainThickness(selectedHeader) === 0 ? "Adapts to Wall" : formatArchitectural(wallHeaderTypeRequiredMainThickness(selectedHeader))}</output></label>
+              </div>
+              <p className="opening-type-note">On-edge plies and spacers are modeled across the Wall Main layer. Interior-rigid assemblies place the structural plies at the exterior and fill the remaining interior cavity. Flat members span the Main layer and stack vertically. Steel is supported as a user-defined rectangular material representation; detailed steel profiles can be added later.</p>
             </section>
           </main>
         </div>
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>{draft.openingTypes.length} reusable Door and Window types · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Opening Types</button></div></footer>
+        <footer className="story-manager-footer"><span>{draft.openingTypes.length} opening types · {draft.headerTypes.length} reusable header assemblies · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Opening Types</button></div></footer>
       </section>
     </div>
   );
@@ -12558,14 +12624,15 @@ export function ModelBuilderApp() {
   const applyOpeningTypes = useCallback((building: BuildingStructure) => {
     const next = updateDocumentBuilding(editor.present, building);
     if (!next) {
-      setFileNotice({ text: "A changed Door or Window type no longer fits one of its placed Wall openings.", tone: "error" });
-      return;
+      setFileNotice({ text: "A changed Door, Window, or header assembly no longer fits one of its placed Walls.", tone: "error" });
+      return false;
     }
     dispatch({ type: "commit", next });
     setOpeningTypeManagerOpen(false);
     const activeDoor = building.openingTypes.find((type) => type.id === building.activeDoorTypeId);
     const activeWindow = building.openingTypes.find((type) => type.id === building.activeWindowTypeId);
     setFileNotice({ text: `${activeDoor?.name ?? "Door"} and ${activeWindow?.name ?? "Window"} are active for new openings.`, tone: "success" });
+    return true;
   }, [editor.present]);
 
   const applyWallFraming = useCallback((building: BuildingStructure) => {

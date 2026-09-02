@@ -112,6 +112,7 @@ import {
   cloneBuildingStructure,
   cloneLayeredAssembly,
   createDefaultBuildingStructure,
+  wallHeaderTypeRequiredMainThickness,
   wallLayerGroupThickness,
   wallReferenceDistanceFromExterior,
   MAXIMUM_WALL_JOIN_PRIORITY,
@@ -127,6 +128,7 @@ import {
   type FoundationWallType,
   type LayeredAssembly,
   type WallOpeningKind,
+  type WallOpeningType,
   type WallExteriorSide,
   type WallJoinMode,
   type WallReferenceLine,
@@ -1081,6 +1083,24 @@ function documentWallOpeningsAreValid(document: ModelDocument): boolean {
   });
 }
 
+function wallOpeningTypeFitsWall(building: BuildingStructure, line: LineObject, openingType: WallOpeningType): boolean {
+  if (line.architecturalRole !== "wall") return false;
+  const wallType = building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
+  const headerType = building.headerTypes.find((candidate) => candidate.id === openingType.headerTypeId);
+  if (!wallType || !headerType) return false;
+  const requiredThickness = wallHeaderTypeRequiredMainThickness(headerType);
+  return requiredThickness === 0 || requiredThickness <= wallLayerGroupThickness(wallType, "main") + 1e-8;
+}
+
+function documentWallHeaderAssembliesFit(document: ModelDocument): boolean {
+  const openingTypesById = new Map(document.building.openingTypes.map((type) => [type.id, type]));
+  return document.lines.every((line) => line.wallOpenings.every((opening) => {
+    if (opening.wallOpeningTypeId === null) return true;
+    const openingType = openingTypesById.get(opening.wallOpeningTypeId);
+    return openingType !== undefined && wallOpeningTypeFitsWall(document.building, line, openingType);
+  }));
+}
+
 function roomBoundaryWallIds(boundary: PolylineGeometry, walls: LineObject[]): string[] {
   const tolerance = 1e-5;
   const ids = new Set<string>();
@@ -1493,6 +1513,7 @@ export function updateDocumentBuilding(
   });
   next.building = cloneBuildingStructure(building);
   const normalized = clearInvalidPlatformOpeningContinuity(next);
+  if (!documentWallHeaderAssembliesFit(normalized)) return null;
   if (!documentWallOpeningsAreValid(normalized)) return null;
   if (normalized.rooms.some((room) => !roomObjectIsValid(room, normalized))) return null;
   return normalized;
@@ -2114,7 +2135,7 @@ export function addWallOpening(
   const wallType = document.building.wallTypes.find((candidate) => candidate.id === line?.wallTypeId);
   const activeOpeningTypeId = kind === "door" ? document.building.activeDoorTypeId : document.building.activeWindowTypeId;
   const openingType = document.building.openingTypes.find((candidate) => candidate.id === activeOpeningTypeId && candidate.kind === kind);
-  if (!line || line.architecturalRole !== "wall" || !story || !wallType || !openingType || !lineIsEditable(document, line) || line.wallOpenings.length >= MAXIMUM_WALL_OPENING_COUNT) return null;
+  if (!line || line.architecturalRole !== "wall" || !story || !wallType || !openingType || !lineIsEditable(document, line) || line.wallOpenings.length >= MAXIMUM_WALL_OPENING_COUNT || !wallOpeningTypeFitsWall(document.building, line, openingType)) return null;
   const wallHeight = wallVerticalExtent(document, line)?.height ?? story.roughCeilingHeight;
   const defaults = {
     headerBottomHeight: kind === "door" ? openingType.roughHeight : Math.min(openingType.defaultHeaderBottomHeight, wallHeight),
@@ -2177,7 +2198,7 @@ export function assignWallOpeningType(document: ModelDocument, lineId: string, o
   const story = document.building.stories.find((candidate) => candidate.id === line?.storyId);
   const opening = line?.wallOpenings.find((candidate) => candidate.id === openingId);
   const type = document.building.openingTypes.find((candidate) => candidate.id === typeId);
-  if (!line || line.architecturalRole !== "wall" || !story || !opening || !type || type.kind !== opening.kind || !lineIsEditable(document, line)) return null;
+  if (!line || line.architecturalRole !== "wall" || !story || !opening || !type || type.kind !== opening.kind || !lineIsEditable(document, line) || !wallOpeningTypeFitsWall(document.building, line, type)) return null;
   const wallHeight = wallVerticalExtent(document, line)?.height ?? story.roughCeilingHeight;
   const updated: WallOpening = {
     ...opening,
@@ -2196,7 +2217,8 @@ export function assignWallOpeningType(document: ModelDocument, lineId: string, o
 export function assignWallType(document: ModelDocument, lineId: string, wallTypeId: string): ModelDocument | null {
   const line = findLineObject(document, lineId);
   if (!line || line.architecturalRole !== "wall" || !lineIsEditable(document, line) || !document.building.wallTypes.some((wallType) => wallType.id === wallTypeId)) return null;
-  return withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), wallTypeId } : candidate));
+  const next = withLines(document, document.lines.map((candidate) => candidate.id === lineId ? { ...cloneLineObject(candidate), wallTypeId } : candidate));
+  return documentWallHeaderAssembliesFit(next) ? next : null;
 }
 
 export function assignFoundationWallType(document: ModelDocument, lineId: string, foundationWallTypeId: string): ModelDocument | null {

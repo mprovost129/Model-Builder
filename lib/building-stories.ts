@@ -22,6 +22,12 @@ export const FOUNDATION_WALL_CONDITIONS = ["standard-bearing", "interior-mudsill
 export type FoundationWallCondition = (typeof FOUNDATION_WALL_CONDITIONS)[number];
 export const WALL_OPENING_KINDS = ["door", "window"] as const;
 export type WallOpeningKind = (typeof WALL_OPENING_KINDS)[number];
+export const WALL_HEADER_LAYOUTS = ["solid", "on-edge", "flat-stack"] as const;
+export type WallHeaderLayout = (typeof WALL_HEADER_LAYOUTS)[number];
+export const WALL_HEADER_FILL_METHODS = ["none", "interior-insulation", "between-plies"] as const;
+export type WallHeaderFillMethod = (typeof WALL_HEADER_FILL_METHODS)[number];
+export const WALL_HEADER_ALIGNMENTS = ["exterior", "center", "interior"] as const;
+export type WallHeaderAlignment = (typeof WALL_HEADER_ALIGNMENTS)[number];
 export const WALL_CORNER_FRAMING_STYLES = ["two-stud", "three-stud"] as const;
 export type WallCornerFramingStyle = (typeof WALL_CORNER_FRAMING_STYLES)[number];
 export const WALL_PARTITION_BACKING_STYLES = ["none", "three-stud", "ladder"] as const;
@@ -88,6 +94,21 @@ export type FoundationWallType = {
   wallWidth: number;
 };
 
+export type WallHeaderType = {
+  alignment: WallHeaderAlignment;
+  fillMaterial: string;
+  fillMethod: WallHeaderFillMethod;
+  id: string;
+  layout: WallHeaderLayout;
+  name: string;
+  plyCount: number;
+  plyMaterial: string;
+  /** Across-wall thickness for on-edge plies; vertical thickness for flat courses. */
+  plyThickness: number;
+  /** Across-wall spacer thickness used only between on-edge plies. */
+  spacerThickness: number;
+};
+
 export type WallOpeningType = {
   /** Default bottom of the structural header above the Story rough floor. */
   defaultHeaderBottomHeight: number;
@@ -97,8 +118,9 @@ export type WallOpeningType = {
   /** Finish-return depth measured from the interior face into the rough opening. */
   interiorReturnDepth: number;
   kind: WallOpeningKind;
-  /** Full Main-layer header depth; structural sizing remains user-defined. */
+  /** Vertical header depth; structural sizing remains user-defined. */
   headerDepth: number;
+  headerTypeId: string;
   /** Full-height king studs generated at each side of the rough opening. */
   kingStudCountPerSide: number;
   name: string;
@@ -136,6 +158,7 @@ export type BuildingStructure = {
   anchorStoryId: string;
   datumElevation: number;
   foundationWallTypes: FoundationWallType[];
+  headerTypes: WallHeaderType[];
   openingTypes: WallOpeningType[];
   stories: BuildingStory[];
   wallFraming: WallFramingSettings;
@@ -161,6 +184,7 @@ export const MAXIMUM_STORY_COUNT = 12;
 export const MAXIMUM_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_FOUNDATION_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_WALL_OPENING_TYPE_COUNT = 64;
+export const MAXIMUM_WALL_HEADER_TYPE_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_THICKNESS = 240;
 export const MINIMUM_ROUGH_CEILING_HEIGHT = 12;
@@ -259,6 +283,15 @@ export function createDefaultWallType(): LayeredAssembly {
   };
 }
 
+export function createDefaultWallHeaderTypes(): WallHeaderType[] {
+  return [
+    { alignment: "exterior", fillMaterial: "Rigid Insulation", fillMethod: "interior-insulation", id: "header-type-01", layout: "on-edge", name: "3-Ply Lumber + Interior Rigid", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
+    { alignment: "center", fillMaterial: "None", fillMethod: "none", id: "header-type-02", layout: "flat-stack", name: "2-Piece Flat Stack", plyCount: 2, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
+    { alignment: "center", fillMaterial: "OSB Sheathing", fillMethod: "between-plies", id: "header-type-03", layout: "on-edge", name: "3-Ply Lumber + Sheathing Spacers", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
+    { alignment: "center", fillMaterial: "None", fillMethod: "none", id: "header-type-04", layout: "solid", name: "Full Main Header", plyCount: 1, plyMaterial: "Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
+  ];
+}
+
 export function foundationConditionPlateDefaults(condition: FoundationWallCondition) {
   const foundationPlateCount = condition === "standard-bearing" || condition === "interior-mudsill" ? 2 : 1;
   return {
@@ -292,6 +325,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       defaultHeaderBottomHeight: 82.5,
       exteriorReturnDepth: 0,
       headerDepth: 9.25,
+      headerTypeId: "header-type-04",
       id: "door-type-01",
       interiorReturnDepth: 0,
       jackStudCountPerSide: 1,
@@ -308,6 +342,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       defaultHeaderBottomHeight: 80,
       exteriorReturnDepth: 0,
       headerDepth: 9.25,
+      headerTypeId: "header-type-04",
       id: "window-type-01",
       interiorReturnDepth: 0,
       jackStudCountPerSide: 1,
@@ -363,6 +398,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     anchorStoryId: "story-01",
     datumElevation: 0,
     foundationWallTypes: [createDefaultFoundationWallType()],
+    headerTypes: createDefaultWallHeaderTypes(),
     openingTypes,
     stories: [createBuildingStory("story-01", "First Floor")],
     wallFraming: createDefaultWallFramingSettings(),
@@ -375,6 +411,10 @@ export function cloneFoundationWallType(type: FoundationWallType): FoundationWal
 }
 
 export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
+  return { ...type };
+}
+
+export function cloneWallHeaderType(type: WallHeaderType): WallHeaderType {
   return { ...type };
 }
 
@@ -399,7 +439,7 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), openingTypes: building.openingTypes.map(cloneWallOpeningType), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
 }
 
 export function foundationSillStackHeight(type: FoundationWallType): number {
@@ -423,7 +463,7 @@ export function foundationWallTypeIsValid(type: FoundationWallType): boolean {
 export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
   const positiveDimensions = [type.unitWidth, type.unitHeight, type.roughWidth, type.roughHeight, type.defaultHeaderBottomHeight, type.headerDepth];
   const returnDepths = [type.exteriorReturnDepth, type.interiorReturnDepth];
-  return IDENTIFIER_PATTERN.test(type.id) &&
+  return IDENTIFIER_PATTERN.test(type.id) && IDENTIFIER_PATTERN.test(type.headerTypeId) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
     WALL_OPENING_KINDS.includes(type.kind) &&
     positiveDimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= 600 && isSixteenth(value)) &&
@@ -435,6 +475,25 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     Number.isInteger(type.jackStudCountPerSide) && type.jackStudCountPerSide >= 0 && type.jackStudCountPerSide <= 4 &&
     Number.isInteger(type.windowSillPlateCount) && type.windowSillPlateCount >= 0 && type.windowSillPlateCount <= 2 &&
     (type.kind !== "door" || (type.defaultHeaderBottomHeight === type.roughHeight && type.windowSillPlateCount === 0));
+}
+
+export function wallHeaderTypeRequiredMainThickness(type: WallHeaderType): number {
+  if (type.layout === "solid" || type.layout === "flat-stack") return 0;
+  const spacers = type.fillMethod === "between-plies" ? Math.max(0, type.plyCount - 1) * type.spacerThickness : 0;
+  return snapToSixteenth(type.plyCount * type.plyThickness + spacers);
+}
+
+export function wallHeaderTypeIsValid(type: WallHeaderType): boolean {
+  const dimensions = [type.plyThickness, type.spacerThickness];
+  return IDENTIFIER_PATTERN.test(type.id) &&
+    stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }, { value: type.plyMaterial, limit: MATERIAL_NAME_LIMIT }, { value: type.fillMaterial, limit: MATERIAL_NAME_LIMIT }]) &&
+    WALL_HEADER_LAYOUTS.includes(type.layout) && WALL_HEADER_FILL_METHODS.includes(type.fillMethod) && WALL_HEADER_ALIGNMENTS.includes(type.alignment) &&
+    dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    Number.isInteger(type.plyCount) && type.plyCount >= 1 && type.plyCount <= 6 &&
+    (type.layout === "on-edge" || type.fillMethod === "none") &&
+    (type.fillMethod !== "interior-insulation" || type.alignment === "exterior") &&
+    (type.fillMethod !== "between-plies" || type.plyCount >= 2) &&
+    wallHeaderTypeRequiredMainThickness(type) <= MAXIMUM_ASSEMBLY_THICKNESS;
 }
 
 export function wallFramingSettingsAreValid(settings: WallFramingSettings): boolean {
@@ -550,6 +609,8 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.foundationWallTypes.length > MAXIMUM_FOUNDATION_WALL_TYPE_COUNT ||
     building.openingTypes.length < 2 ||
     building.openingTypes.length > MAXIMUM_WALL_OPENING_TYPE_COUNT ||
+    building.headerTypes.length < 1 ||
+    building.headerTypes.length > MAXIMUM_WALL_HEADER_TYPE_COUNT ||
     !wallFramingSettingsAreValid(building.wallFraming)
   ) {
     return false;
@@ -577,9 +638,17 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
   }
   const openingTypeIds = new Set<string>();
   const openingTypeNames = new Set<string>();
+  const headerTypeIds = new Set<string>();
+  const headerTypeNames = new Set<string>();
+  for (const headerType of building.headerTypes) {
+    const normalizedName = headerType.name.trim().toLowerCase();
+    if (headerTypeIds.has(headerType.id) || headerTypeNames.has(normalizedName) || !wallHeaderTypeIsValid(headerType)) return false;
+    headerTypeIds.add(headerType.id);
+    headerTypeNames.add(normalizedName);
+  }
   for (const openingType of building.openingTypes) {
     const normalizedName = openingType.name.trim().toLowerCase();
-    if (openingTypeIds.has(openingType.id) || openingTypeNames.has(normalizedName) || !wallOpeningTypeIsValid(openingType)) return false;
+    if (openingTypeIds.has(openingType.id) || openingTypeNames.has(normalizedName) || !wallOpeningTypeIsValid(openingType) || !headerTypeIds.has(openingType.headerTypeId)) return false;
     openingTypeIds.add(openingType.id);
     openingTypeNames.add(normalizedName);
   }
