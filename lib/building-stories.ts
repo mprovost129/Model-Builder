@@ -22,6 +22,8 @@ export const FOUNDATION_WALL_CONDITIONS = ["standard-bearing", "interior-mudsill
 export type FoundationWallCondition = (typeof FOUNDATION_WALL_CONDITIONS)[number];
 export const WALL_OPENING_KINDS = ["door", "window"] as const;
 export type WallOpeningKind = (typeof WALL_OPENING_KINDS)[number];
+export const PRODUCT_SOURCE_FORMATS = ["mbproduct", "svg", "glb", "gltf", "dxf", "dwg", "rfa", "ifc", "skp", "other"] as const;
+export type ProductSourceFormat = (typeof PRODUCT_SOURCE_FORMATS)[number];
 export const WALL_HEADER_LAYOUTS = ["solid", "on-edge", "flat-stack"] as const;
 export type WallHeaderLayout = (typeof WALL_HEADER_LAYOUTS)[number];
 export const WALL_HEADER_FILL_METHODS = ["none", "interior-insulation", "between-plies"] as const;
@@ -168,6 +170,17 @@ export type OpeningAssemblyComponent = {
   visible: boolean;
 };
 
+export type ManufacturerProductSource = {
+  manufacturer: string;
+  modelNumber: string;
+  productLine: string;
+  revision: string;
+  sourceFileName: string;
+  sourceFormat: ProductSourceFormat;
+  sourceUrl: string;
+  verifiedAt: string;
+};
+
 export type WallOpeningType = {
   /** Joined parametric parts that generate the placed Door or Window model. */
   components: OpeningAssemblyComponent[];
@@ -186,6 +199,8 @@ export type WallOpeningType = {
   /** Full-height king studs generated at each side of the rough opening. */
   kingStudCountPerSide: number;
   name: string;
+  /** Manufacturer identity and source provenance; null denotes a native generic Type. */
+  productSource: ManufacturerProductSource | null;
   /** Header-bearing jack studs generated at each side of the rough opening. */
   jackStudCountPerSide: number;
   roughHeight: number;
@@ -454,6 +469,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       kingStudCountPerSide: 1,
       kind: "door",
       name: "3-0 x 6-8 Door",
+      productSource: null,
       roughHeight: 82.5,
       roughWidth: 38,
       unitHeight: 80,
@@ -474,6 +490,7 @@ export function createDefaultWallOpeningTypes(): WallOpeningType[] {
       kingStudCountPerSide: 1,
       kind: "window",
       name: "3-0 x 4-0 Window",
+      productSource: null,
       roughHeight: 48.5,
       roughWidth: 36.5,
       unitHeight: 48,
@@ -668,7 +685,7 @@ export function cloneFoundationWallType(type: FoundationWallType): FoundationWal
 }
 
 export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
-  return { ...type, components: type.components.map((component) => ({ ...component })) };
+  return { ...type, components: type.components.map((component) => ({ ...component })), productSource: type.productSource === null ? null : { ...type.productSource } };
 }
 
 export function cloneWallHeaderType(type: WallHeaderType): WallHeaderType {
@@ -775,6 +792,7 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
   };
   if (type.components.some((component) => resolveBounds(component) === null)) return false;
   return IDENTIFIER_PATTERN.test(type.id) && (type.headerTypeId === null || IDENTIFIER_PATTERN.test(type.headerTypeId)) &&
+    manufacturerProductSourceIsValid(type.productSource) &&
     stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
     WALL_OPENING_KINDS.includes(type.kind) &&
     positiveDimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= 600 && isSixteenth(value)) &&
@@ -790,6 +808,16 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     Number.isInteger(type.jackStudCountPerSide) && type.jackStudCountPerSide >= 0 && type.jackStudCountPerSide <= 4 &&
     Number.isInteger(type.windowSillPlateCount) && type.windowSillPlateCount >= 0 && type.windowSillPlateCount <= 2 &&
     (type.kind !== "door" || (type.defaultHeaderBottomHeight === type.roughHeight && type.windowSillPlateCount === 0));
+}
+
+export function manufacturerProductSourceIsValid(source: ManufacturerProductSource | null): boolean {
+  if (source === null) return true;
+  if (typeof source !== "object" || source === null || !PRODUCT_SOURCE_FORMATS.includes(source.sourceFormat)) return false;
+  const required = [source.manufacturer, source.modelNumber, source.sourceFileName];
+  const optional = [source.productLine, source.revision, source.sourceUrl];
+  return required.every((value) => typeof value === "string" && Boolean(value.trim()) && value.trim().length <= 240) &&
+    optional.every((value) => typeof value === "string" && value.trim().length <= 500) &&
+    typeof source.verifiedAt === "string" && (source.verifiedAt === "" || Number.isFinite(Date.parse(source.verifiedAt)));
 }
 
 export function wallHeaderTypeRequiredMainThickness(type: WallHeaderType): number {

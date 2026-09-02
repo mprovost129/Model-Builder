@@ -537,6 +537,36 @@ button { color: inherit; }
 .opening-import-readiness strong { color: #d9e4ea; font-size: 9px; }
 .opening-import-readiness p { margin: 0; color: #94a6b2; font-size: 8px; line-height: 1.5; }
 .opening-import-readiness span { padding-top: 7px; border-top: 1px solid #3a4b57; color: #9fc4d7; font: 7px var(--font-geist-mono), monospace; line-height: 1.45; text-transform: uppercase; }
+.manufacturer-product-record { padding: 8px 12px 11px; }
+.manufacturer-product-record dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border: 1px solid #3b4752; }
+.manufacturer-product-record dl > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; min-height: 31px; padding: 7px 8px; border-right: 1px solid #34404b; border-bottom: 1px solid #34404b; }
+.manufacturer-product-record dl > div:nth-child(2n) { border-right: 0; }
+.manufacturer-product-record dt { color: #84919d; font-size: 8px; text-transform: uppercase; }
+.manufacturer-product-record dd { overflow-wrap: anywhere; margin: 0; color: #d9e0e5; font-size: 9px; }
+.manufacturer-product-record p { margin: 8px 0 0; color: #91a0ac; font-size: 8px; line-height: 1.5; }
+.manufacturer-product-empty { padding-top: 11px; }
+.product-import-backdrop { position: fixed; z-index: 220; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(9 14 18 / 72%); }
+.product-import-review { width: min(680px, calc(100vw - 48px)); overflow: hidden; border: 1px solid #536270; border-radius: 3px; background: #1c242d; box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+.product-import-review > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 9px 12px; border-bottom: 1px solid #3b4752; background: #252f39; }
+.product-import-review > header > div { display: grid; gap: 3px; }
+.product-import-review > header strong { color: #e4e9ed; font-size: 12px; }
+.product-import-review > header span { color: #91a0ac; font-size: 9px; }
+.product-import-review > header button { width: 28px; height: 28px; border: 0; background: transparent; color: #aeb9c1; font-size: 18px; cursor: pointer; }
+.product-import-review-body { display: grid; gap: 10px; padding: 12px; }
+.product-import-review-body dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border: 1px solid #3b4752; }
+.product-import-review-body dl > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 8px; min-height: 34px; padding: 8px; border-right: 1px solid #34404b; border-bottom: 1px solid #34404b; }
+.product-import-review-body dl > div:nth-child(2n) { border-right: 0; }
+.product-import-review-body dt { color: #84919d; font-size: 8px; text-transform: uppercase; }
+.product-import-review-body dd { overflow-wrap: anywhere; margin: 0; color: #d9e0e5; font-size: 9px; }
+.product-import-note,
+.product-import-warning,
+.product-import-boundary { margin: 0; padding: 10px; border: 1px solid #3f5665; background: #202c35; color: #9dacb6; font-size: 9px; line-height: 1.55; }
+.product-import-warning { border-color: #866a38; background: #332c20; color: #d8bd84; }
+.product-import-warning strong,
+.product-import-boundary strong { color: #e2c17d; }
+.product-import-review > footer { display: flex; justify-content: flex-end; gap: 7px; padding: 9px 12px; border-top: 1px solid #3b4752; background: #202933; }
+.product-import-review > footer button { min-height: 30px; padding: 0 13px; border: 1px solid #4d5a67; border-radius: 2px; background: #27323c; color: #d8e0e6; font-size: 8px; cursor: pointer; }
+.product-import-review > footer button.story-save { border-color: #806735; background: #3a3022; color: #f0cd86; }
 .framing-manager { width: min(980px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); }
 .framing-manager-body { display: grid; grid-template-columns: 230px minmax(560px, 1fr); min-height: 0; }
 .framing-status-card { display: grid; align-content: start; gap: 12px; padding: 15px 13px; border-right: 1px solid #3e4955; background: #1c242d; }
@@ -2323,6 +2353,32 @@ button { color: inherit; }
 .theme-light .opening-import-readiness strong { color: #304d60; }
 .theme-light .opening-import-readiness p { color: #627a88; }
 .theme-light .opening-import-readiness span { border-color: #c5d1d6; color: #41738d; }
+.theme-light .manufacturer-product-record dl,
+.theme-light .manufacturer-product-record dl > div,
+.theme-light .product-import-review,
+.theme-light .product-import-review > header,
+.theme-light .product-import-review-body dl,
+.theme-light .product-import-review-body dl > div,
+.theme-light .product-import-review > footer { border-color: var(--ui-border); }
+.theme-light .manufacturer-product-record dt,
+.theme-light .manufacturer-product-record p,
+.theme-light .product-import-review > header span,
+.theme-light .product-import-review-body dt { color: var(--muted); }
+.theme-light .manufacturer-product-record dd,
+.theme-light .product-import-review-body dd { color: #3d586a; }
+.theme-light .product-import-backdrop { background: rgb(59 76 86 / 42%); }
+.theme-light .product-import-review { background: #f1f5f5; box-shadow: 0 24px 70px rgb(46 63 73 / 28%); }
+.theme-light .product-import-review > header,
+.theme-light .product-import-review > footer { background: #e1e9ec; }
+.theme-light .product-import-review > header strong { color: #304d60; }
+.theme-light .product-import-review > header button { color: #526c7c; }
+.theme-light .product-import-note,
+.theme-light .product-import-boundary { border-color: #9cb1bc; background: #eef4f5; color: #627a88; }
+.theme-light .product-import-warning { border-color: #c8aa70; background: #f5eedf; color: #79643e; }
+.theme-light .product-import-warning strong,
+.theme-light .product-import-boundary strong { color: #765820; }
+.theme-light .product-import-review > footer button { border-color: var(--ui-border-strong); background: #edf2f3; color: #3a586b; }
+.theme-light .product-import-review > footer button.story-save { border-color: #799aaa; background: #d5e6ed; color: #28526b; }
 .theme-light .framing-status-card { border-color: var(--ui-border); background: #e9eff1; }
 .theme-light .framing-status-card > strong { color: #304d60; }
 .theme-light .framing-status-card label { color: #3d586a; }

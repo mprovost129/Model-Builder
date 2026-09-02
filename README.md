@@ -381,7 +381,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-37 files open and upgrade
+Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, manufacturer product provenance, assembly definitions, and format metadata. Version-1 through version-38 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

@@ -28,6 +28,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ChangeEvent,
   type ReactNode,
 } from "react";
 import * as THREE from "three";
@@ -337,6 +338,7 @@ import {
   type FoundationWallType,
   type LayeredAssembly,
   type OpeningAssemblyComponent,
+  type ManufacturerProductSource,
   type WindowLitePattern,
   type WindowSashArrangement,
   type WallExteriorSide,
@@ -376,6 +378,11 @@ import {
   projectToDocument,
   serializeProjectDocument,
 } from "@/lib/project-file";
+import {
+  MAXIMUM_PRODUCT_PACKAGE_BYTES,
+  PRODUCT_PACKAGE_EXTENSION,
+  parseProductPackage,
+} from "@/lib/product-package";
 import {
   createRecoverySnapshot,
   parseRecoverySnapshot,
@@ -9236,6 +9243,15 @@ function nextWallOpeningTypeName(building: BuildingStructure, sourceName: string
   return `${baseName} ${number}`;
 }
 
+function availableWallOpeningTypeName(building: BuildingStructure, sourceName: string): string {
+  const names = new Set(building.openingTypes.map((type) => type.name.trim().toLocaleLowerCase()));
+  const baseName = sourceName.trim();
+  if (!names.has(baseName.toLocaleLowerCase())) return baseName;
+  let number = 2;
+  while (names.has(`${baseName} ${number}`.toLocaleLowerCase())) number += 1;
+  return `${baseName} ${number}`;
+}
+
 function nextOpeningComponentId(type: WallOpeningType): string {
   const ids = new Set(type.components.map((component) => component.id));
   let number = 1;
@@ -9353,12 +9369,12 @@ function OpeningTypePreview({ openingType, wallType }: { openingType: WallOpenin
         <div><dt>Family</dt><dd>{openingType.kind === "door" ? "Door" : "Window"}</dd></div>
         <div><dt>Header bottom</dt><dd>{formatArchitectural(headerBottomHeight)}</dd></div>
         <div><dt>Assembly</dt><dd>{openingType.components.length} editable parts</dd></div>
-        <div><dt>Source</dt><dd>Model Builder parametric</dd></div>
+        <div><dt>Source</dt><dd>{openingType.productSource ? `${openingType.productSource.manufacturer} · ${openingType.productSource.modelNumber}` : "Model Builder parametric"}</dd></div>
       </dl>
       <section className="opening-import-readiness">
-        <strong>Manufacturer Import Boundary</strong>
-        <p>Catalog imports will preserve the original source, a web-ready 2D/3D representation, and editable Model Builder opening and framing data as separate records.</p>
-        <span>Recommended first package: SVG elevation + GLB model + product metadata</span>
+        <strong>Manufacturer Product Package</strong>
+        <p>Native catalog packages preserve the original source record and editable Model Builder opening and framing data. Reviewed SVG and GLB assets are the next package extension.</p>
+        <span>Current: validated metadata + native parametric components</span>
       </section>
     </aside>
   );
@@ -9377,16 +9393,22 @@ function OpeningTypeManagerDialog({
   const [selectedId, setSelectedId] = useState(document.building.activeDoorTypeId);
   const [selectedComponentId, setSelectedComponentId] = useState(document.building.openingTypes.find((type) => type.id === document.building.activeDoorTypeId)?.components[0]?.id ?? "");
   const [error, setError] = useState("");
+  const [productImport, setProductImport] = useState<{ fileName: string; openingType: WallOpeningType; product: ManufacturerProductSource } | null>(null);
+  const productFileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (productImport) {
+        setProductImport(null);
+        return;
+      }
       onCancel();
     };
     window.addEventListener("keydown", closeWithEscape, true);
     return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
+  }, [onCancel, productImport]);
   const selected = draft.openingTypes.find((type) => type.id === selectedId) ?? draft.openingTypes[0];
   const selectedComponent = selected.components.find((component) => component.id === selectedComponentId) ?? selected.components[0];
   const activeWallType = draft.wallTypes.find((type) => type.id === draft.activeWallTypeId) ?? draft.wallTypes[0];
@@ -9487,6 +9509,47 @@ function OpeningTypeManagerDialog({
     setDraft((current) => ({ ...cloneBuildingStructure(current), [activeKey]: nextActive, openingTypes: remaining }));
     setSelectedId(nextActive);
   };
+  const importProductFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > MAXIMUM_PRODUCT_PACKAGE_BYTES) {
+      setError("This product package is larger than the supported 2 MB native-package limit.");
+      return;
+    }
+    try {
+      const result = parseProductPackage(await file.text());
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setProductImport({ fileName: file.name, openingType: result.openingType, product: result.product });
+      setError("");
+    } catch {
+      setError("Model Builder could not read this product package.");
+    }
+  };
+  const confirmProductImport = () => {
+    if (!productImport || draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT) return;
+    const id = nextWallOpeningTypeId(draft, productImport.openingType.kind);
+    const imported = {
+      ...cloneWallOpeningType(productImport.openingType),
+      headerTypeId: null,
+      id,
+      name: availableWallOpeningTypeName(draft, productImport.openingType.name),
+      productSource: { ...productImport.product },
+    };
+    const activeKey = imported.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId";
+    setDraft((current) => ({
+      ...cloneBuildingStructure(current),
+      [activeKey]: id,
+      openingTypes: [...current.openingTypes.map(cloneWallOpeningType), imported],
+    }));
+    setSelectedId(id);
+    setSelectedComponentId(imported.components[0]?.id ?? "");
+    setProductImport(null);
+    setError("");
+  };
   const makeActive = () => setDraft((current) => ({ ...cloneBuildingStructure(current), [selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId"]: selected.id }));
   const activeId = selected.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId;
   const doorPanelLayout = doorPanelLayoutForType(selected);
@@ -9513,7 +9576,8 @@ function OpeningTypeManagerDialog({
               const isActive = type.id === (type.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId);
               return <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => { setSelectedId(type.id); setSelectedComponentId(type.components[0]?.id ?? ""); }}><strong>{type.name}</strong><span>{type.kind === "door" ? "Door" : "Window"} · {formatArchitectural(type.unitWidth)} × {formatArchitectural(type.unitHeight)} · {type.components.length} parts</span>{isActive ? <small>ACTIVE {type.kind.toUpperCase()}</small> : null}</button>;
             })}
-            <div className="story-list-actions"><button type="button" onClick={duplicateType} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={kindCount <= 1 || usageCount > 0}>Delete</button></div>
+            <div className="story-list-actions opening-type-list-actions"><button type="button" onClick={() => productFileInputRef.current?.click()} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>Import Product…</button><button type="button" onClick={duplicateType} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={kindCount <= 1 || usageCount > 0}>Delete</button></div>
+            <input ref={productFileInputRef} className="project-file-input" type="file" accept={`${PRODUCT_PACKAGE_EXTENSION},application/json`} onChange={importProductFile} />
           </aside>
           <main className="story-editor opening-type-editor">
             <section className="story-editor-summary foundation-editor-summary">
@@ -9532,6 +9596,22 @@ function OpeningTypeManagerDialog({
                 <StoryDimensionInput allowZero key={`${selected.id}:uoz:${selected.unitOffsetZ}`} label="Unit bottom above rough" value={selected.unitOffsetZ} onChange={(unitOffsetZ) => replaceSelected({ unitOffsetZ })} />
                 {selected.kind === "window" ? <StoryDimensionInput key={`${selected.id}:hh:${selected.defaultHeaderBottomHeight}`} label="Default header bottom" value={selected.defaultHeaderBottomHeight} onChange={(defaultHeaderBottomHeight) => replaceSelected({ defaultHeaderBottomHeight })} /> : <label className="story-field"><span>Header bottom</span><output className="room-output">Matches rough height</output></label>}
               </div>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Manufacturer Product</strong><span>Identity and source provenance stay attached to this reusable Type.</span></div><output>{selected.productSource ? "Catalog product" : "Native generic"}</output></header>
+              {selected.productSource ? <div className="manufacturer-product-record">
+                <dl>
+                  <div><dt>Manufacturer</dt><dd>{selected.productSource.manufacturer}</dd></div>
+                  <div><dt>Product line</dt><dd>{selected.productSource.productLine || "Not supplied"}</dd></div>
+                  <div><dt>Model number</dt><dd>{selected.productSource.modelNumber}</dd></div>
+                  <div><dt>Revision</dt><dd>{selected.productSource.revision || "Not supplied"}</dd></div>
+                  <div><dt>Original source</dt><dd>{selected.productSource.sourceFileName}</dd></div>
+                  <div><dt>Source format</dt><dd>{selected.productSource.sourceFormat.toUpperCase()}</dd></div>
+                  <div><dt>Source URL</dt><dd>{selected.productSource.sourceUrl || "Not supplied"}</dd></div>
+                  <div><dt>Verified</dt><dd>{selected.productSource.verifiedAt ? new Date(selected.productSource.verifiedAt).toLocaleDateString() : "Not supplied"}</dd></div>
+                </dl>
+                <p>The imported source record is preserved while unit, rough-opening, and native component settings remain editable.</p>
+              </div> : <p className="opening-type-note manufacturer-product-empty">This Type was created in Model Builder and does not claim a manufacturer identity. Use Import Product to add a validated catalog package.</p>}
             </section>
             <section className="foundation-setting-section">
               <header><div><strong>Product Layout Generator</strong><span>Build familiar residential product geometry from editable components.</span></div><output>Parametric</output></header>
@@ -9610,6 +9690,27 @@ function OpeningTypeManagerDialog({
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
         <footer className="story-manager-footer"><span>{draft.openingTypes.length} opening types · {draft.headerTypes.length} reusable header assemblies · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Opening Types</button></div></footer>
       </section>
+      {productImport ? <div className="product-import-backdrop" role="presentation" onMouseDown={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) setProductImport(null); }}>
+        <section className="product-import-review" role="dialog" aria-modal="true" aria-labelledby="product-import-review-title">
+          <header><div><strong id="product-import-review-title">Review Manufacturer Product</strong><span>Nothing is added until you confirm this package.</span></div><button type="button" onClick={() => setProductImport(null)} aria-label="Close product import review">×</button></header>
+          <div className="product-import-review-body">
+            <dl>
+              <div><dt>Package</dt><dd>{productImport.fileName}</dd></div>
+              <div><dt>Manufacturer</dt><dd>{productImport.product.manufacturer}</dd></div>
+              <div><dt>Product</dt><dd>{[productImport.product.productLine, productImport.product.modelNumber].filter(Boolean).join(" · ")}</dd></div>
+              <div><dt>Revision</dt><dd>{productImport.product.revision || "Not supplied"}</dd></div>
+              <div><dt>Original source</dt><dd>{productImport.product.sourceFileName} · {productImport.product.sourceFormat.toUpperCase()}</dd></div>
+              <div><dt>Family</dt><dd>{productImport.openingType.kind === "door" ? "Door" : "Window"}</dd></div>
+              <div><dt>Unit size</dt><dd>{formatArchitectural(productImport.openingType.unitWidth)} × {formatArchitectural(productImport.openingType.unitHeight)}</dd></div>
+              <div><dt>Rough opening</dt><dd>{formatArchitectural(productImport.openingType.roughWidth)} × {formatArchitectural(productImport.openingType.roughHeight)}</dd></div>
+              <div><dt>Native components</dt><dd>{productImport.openingType.components.length}</dd></div>
+            </dl>
+            {draft.openingTypes.some((type) => type.productSource?.manufacturer.toLocaleLowerCase() === productImport.product.manufacturer.toLocaleLowerCase() && type.productSource.modelNumber.toLocaleLowerCase() === productImport.product.modelNumber.toLocaleLowerCase() && type.productSource.revision.toLocaleLowerCase() === productImport.product.revision.toLocaleLowerCase()) ? <p className="product-import-warning"><strong>Matching catalog product found.</strong> Confirming will add a separate Type with a unique name; the existing Type and all placed openings remain unchanged.</p> : <p className="product-import-note">Model Builder will create a new Type with a fresh project ID. The package cannot bind itself to a local header assembly; the imported Type will use the host Wall&apos;s header default until you choose an override.</p>}
+            <p className="product-import-boundary"><strong>Native package only.</strong> DWG, RFA, SKP, IFC, and other manufacturer source files still require a reviewed conversion adapter before they can be imported safely.</p>
+          </div>
+          <footer><button type="button" onClick={() => setProductImport(null)}>Cancel</button><button type="button" className="story-save" onClick={confirmProductImport}>Import as New Type</button></footer>
+        </section>
+      </div> : null}
     </div>
   );
 }

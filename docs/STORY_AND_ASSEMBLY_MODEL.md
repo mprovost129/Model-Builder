@@ -255,6 +255,16 @@ manufacturer identity and validated product-specific dimensions explicitly.
 Version-38 files store the expanded component generators; version-37 and earlier
 files continue to open with their saved component topology.
 
+Version-39 files attach an optional immutable manufacturer source record to each
+Door or Window Type. The first `.mbproduct` importer validates manufacturer,
+model, revision, original source, native dimensions, and editable component
+topology before presenting a review screen. Confirmed imports always receive a
+fresh project Type ID, name conflicts are resolved without overwriting an existing
+Type, matching catalog products are called out explicitly, and imported header
+references are cleared so they cannot bind to an unrelated project assembly.
+Version-38 and earlier project files open with their existing Types marked as
+native generic content.
+
 The Door & Window Type Manager renders a live exterior-elevation preview from the
 same host-aware component solids used by placed openings. It shows the structural
 rough-opening boundary, unit boundary, generated component geometry, rough and unit
@@ -338,11 +348,11 @@ junction framing.
 
 ## Next Steps
 
-1. Define and validate the first Model Builder Product Package: manufacturer metadata,
-   SVG 2D views, GLB 3D geometry, native dimensions, and optional editable components.
-2. Build the shared asset registry and import review screen used by manufacturer
-   products and general placed Objects, including units, layer assignment, provenance,
-   validation, and duplicate handling.
+1. Extend the validated Model Builder Product Package with reviewed SVG 2D and GLB 3D
+   assets while preserving the original manufacturer source record.
+2. Build the shared asset registry used by manufacturer products and general placed
+   Objects, including units, layer assignment, asset storage, thumbnails, and update
+   tracking.
 3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
 4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
 5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
