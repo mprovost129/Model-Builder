@@ -283,6 +283,46 @@ export function createDefaultWallType(): LayeredAssembly {
   };
 }
 
+export function createDefaultWallTypes(): LayeredAssembly[] {
+  return [
+    createDefaultWallType(),
+    {
+      id: "wall-type-02",
+      kind: "wall-structure",
+      name: "2x6 Exterior Wall",
+      wallEndCapLayerIds: [],
+      layers: [
+        { id: "wall-type-02-01", material: "Exterior Cladding", name: "Exterior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
+        { id: "wall-type-02-02", material: "OSB", name: "Wall Sheathing", participatesInJoin: true, role: "sheathing", thickness: 0.4375, wallGroup: "exterior" },
+        { id: "wall-type-02-03", material: "Lumber", name: "2x6 Stud Framing", participatesInJoin: true, role: "framing", thickness: 5.5, wallGroup: "main" },
+        { id: "wall-type-02-04", material: "Gypsum Board", name: "Interior Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "interior" },
+      ],
+    },
+    {
+      id: "wall-type-03",
+      kind: "wall-structure",
+      name: "2x4 Interior Wall",
+      wallEndCapLayerIds: [],
+      layers: [
+        { id: "wall-type-03-01", material: "Gypsum Board", name: "Side A Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
+        { id: "wall-type-03-02", material: "Lumber", name: "2x4 Stud Framing", participatesInJoin: true, role: "framing", thickness: 3.5, wallGroup: "main" },
+        { id: "wall-type-03-03", material: "Gypsum Board", name: "Side B Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "interior" },
+      ],
+    },
+    {
+      id: "wall-type-04",
+      kind: "wall-structure",
+      name: "2x6 Interior Wall",
+      wallEndCapLayerIds: [],
+      layers: [
+        { id: "wall-type-04-01", material: "Gypsum Board", name: "Side A Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
+        { id: "wall-type-04-02", material: "Lumber", name: "2x6 Stud Framing", participatesInJoin: true, role: "framing", thickness: 5.5, wallGroup: "main" },
+        { id: "wall-type-04-03", material: "Gypsum Board", name: "Side B Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "interior" },
+      ],
+    },
+  ];
+}
+
 export function createDefaultWallHeaderTypes(): WallHeaderType[] {
   return [
     { alignment: "exterior", fillMaterial: "Rigid Insulation", fillMethod: "interior-insulation", id: "header-type-01", layout: "on-edge", name: "3-Ply Lumber + Interior Rigid", plyCount: 3, plyMaterial: "Dimensional Lumber", plyThickness: 1.5, spacerThickness: 0.5 },
@@ -393,7 +433,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     activeDoorTypeId: openingTypes.find((type) => type.kind === "door")!.id,
     activeFoundationWallTypeId: "foundation-wall-type-01",
     activeWindowTypeId: openingTypes.find((type) => type.kind === "window")!.id,
-    activeWallTypeId: "wall-type-01",
+    activeWallTypeId: "wall-type-02",
     activeStoryId: "story-01",
     anchorStoryId: "story-01",
     datumElevation: 0,
@@ -402,7 +442,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     openingTypes,
     stories: [createBuildingStory("story-01", "First Floor")],
     wallFraming: createDefaultWallFramingSettings(),
-    wallTypes: [createDefaultWallType()],
+    wallTypes: createDefaultWallTypes(),
   };
 }
 

@@ -13,6 +13,7 @@ import {
   wallFramingSettingsAreValid,
   wallHeaderTypeIsValid,
   wallHeaderTypeRequiredMainThickness,
+  wallLayerGroupThickness,
   removeBuildingStory,
   wallLayerCenterOffsets,
   wallReferenceDistanceFromExterior,
@@ -64,8 +65,10 @@ test("sums every layer in a rough floor assembly", () => {
 
 test("defines reusable exterior-to-interior layered wall types", () => {
   const building = createDefaultBuildingStructure();
-  assert.equal(building.wallTypes.length, 1);
-  assert.equal(building.activeWallTypeId, building.wallTypes[0].id);
+  assert.equal(building.wallTypes.length, 4);
+  assert.equal(building.activeWallTypeId, "wall-type-02");
+  assert.deepEqual(building.wallTypes.map((type) => type.name), ["2x4 Exterior Wall", "2x6 Exterior Wall", "2x4 Interior Wall", "2x6 Interior Wall"]);
+  assert.deepEqual(building.wallTypes.map((type) => wallLayerGroupThickness(type, "main")), [3.5, 5.5, 3.5, 5.5]);
   assert.equal(building.wallTypes[0].kind, "wall-structure");
   assert.equal(assemblyTotalThickness(building.wallTypes[0]), 4.9375);
   assert.equal(building.wallTypes[0].layers[0].name, "Exterior Finish");
@@ -73,6 +76,8 @@ test("defines reusable exterior-to-interior layered wall types", () => {
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.wallGroup), ["exterior", "exterior", "main", "interior"]);
   assert.deepEqual(building.wallTypes[0].layers.map((layer) => layer.participatesInJoin), [true, true, true, true]);
   assert.deepEqual(building.wallTypes[0].wallEndCapLayerIds, []);
+  assert.deepEqual(building.wallTypes[2].layers.map((layer) => layer.wallGroup), ["exterior", "main", "interior"]);
+  assert.deepEqual(building.wallTypes[2].layers.map((layer) => layer.name), ["Side A Finish", "2x4 Stud Framing", "Side B Finish"]);
 });
 
 test("defines reusable Foundation Wall types with condition-based sill ownership", () => {

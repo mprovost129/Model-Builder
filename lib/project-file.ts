@@ -51,6 +51,7 @@ import {
   cloneBuildingStructure,
   createDefaultCeilingStructure,
   createDefaultBuildingStructure,
+  createDefaultWallType,
   createDefaultWallFramingSettings,
   FOUNDATION_WALL_CONDITIONS,
   WALL_CORNER_FRAMING_STYLES,
@@ -372,9 +373,10 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   const stories = value.stories.map((story) => readBuildingStory(story, supportsCeilingStructure));
   if (stories.some((story) => story === null)) return null;
   const defaults = createDefaultBuildingStructure();
+  const legacyWallType = createDefaultWallType();
   const wallTypes = supportsWallTypes && Array.isArray(value.wallTypes)
     ? value.wallTypes.map((wallType) => readLayeredAssembly(wallType, "wall-structure", supportsWallGroups, supportsWallJoinMetadata, wallEndCapVersion))
-    : defaults.wallTypes;
+    : [legacyWallType];
   if (wallTypes.some((wallType) => wallType === null)) return null;
   if (supportsFoundationWallTypes && !Array.isArray(value.foundationWallTypes)) return null;
   const foundationWallTypes = supportsFoundationWallTypes
@@ -394,7 +396,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     ? (value.openingTypes as unknown[]).map((type) => readWallOpeningType(type, supportsOpeningFraming, wallFraming.headerHeight, supportsHeaderTypes, fallbackHeaderTypeId))
     : defaults.openingTypes;
   if (openingTypes.some((openingType) => openingType === null)) return null;
-  const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : defaults.activeWallTypeId;
+  const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : legacyWallType.id;
   if (typeof activeWallTypeId !== "string") return null;
   const activeFoundationWallTypeId = supportsFoundationWallTypes ? value.activeFoundationWallTypeId : defaults.activeFoundationWallTypeId;
   if (typeof activeFoundationWallTypeId !== "string") return null;

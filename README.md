@@ -94,7 +94,9 @@ polylines, rectangles, Circles, and Arcs.
 - Layered floor structure, floor finish, ceiling structure, and ceiling finish assemblies; only
   rough structure controls dependent Story elevations
 - Reusable wall types with explicitly ordered Exterior, Main, and Interior layer
-  groups, per-group thickness totals, and a required structural Main core
+  groups, per-group thickness totals, and a required structural Main core; new plans
+  include 2x4 and 2x6 exterior walls plus 2x4 and 2x6 interior walls, with the 2x6
+  exterior assembly active for initial drawing
 - Reusable Foundation Wall Types with concrete height/width/material, continuous footing
   geometry, top offsets, hosted sill dimensions, exterior-edge setback, and explicit
   plate ownership for standard, interior mudsill, dropped, garage, and walk-out conditions
@@ -333,6 +335,10 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   Resolved corners and T-intersections drive project-selected corner and
   partition-backing methods. The next framing work is manual per-junction overrides,
   header scheduling, and engineering metadata rather than automatic structural sizing.
+  New plans now include editable 2x4 and 2x6 exterior and interior Wall types. The
+  2x6 exterior assembly is the active drawing default; older project files keep their
+  saved Wall libraries, and pre-Wall-library files retain the original 2x4 exterior
+  compatibility default.
 Annotation, layouts, plotting, interchange, and specialty drafting commands will
 continue later as a Construction Documentation track rather than delaying the
 residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
@@ -343,7 +349,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-31 files open and upgrade
+Foundation Wall Type, Door/Window Type, Wall Framing defaults, and assembly definitions, and format metadata. Version-1 through version-33 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

@@ -187,7 +187,8 @@ test("defines a blank new-project document with editable project defaults", () =
   assert.deepEqual(NEW_PROJECT_DOCUMENT.circles, []);
   assert.deepEqual(NEW_PROJECT_DOCUMENT.arcs, []);
   assert.equal(NEW_PROJECT_DOCUMENT.building.stories[0].name, "First Floor");
-  assert.equal(NEW_PROJECT_DOCUMENT.building.wallTypes.length, 1);
+  assert.equal(NEW_PROJECT_DOCUMENT.building.wallTypes.length, 4);
+  assert.equal(NEW_PROJECT_DOCUMENT.building.activeWallTypeId, "wall-type-02");
   const added = addBoxObject(NEW_PROJECT_DOCUMENT);
   assert.ok(added);
   assert.equal(added.object.id, "box-01");
@@ -1404,7 +1405,7 @@ test("hosts framing-ready Door and Window rough openings on a Wall", () => {
 
 test("prevents header assemblies from being clipped by a thinner Wall Main layer", () => {
   const building = structuredClone(DEFAULT_DOCUMENT.building);
-  const mainLayer = building.wallTypes[0].layers.find((layer) => layer.wallGroup === "main");
+  const mainLayer = building.wallTypes.find((type) => type.id === building.activeWallTypeId)?.layers.find((layer) => layer.wallGroup === "main");
   assert.ok(mainLayer);
   mainLayer.thickness = 5.5;
   const activeWindowType = building.openingTypes.find((type) => type.id === building.activeWindowTypeId);
@@ -1421,12 +1422,13 @@ test("prevents header assemblies from being clipped by a thinner Wall Main layer
   assert.ok(placed);
 
   const thinnerBuilding = structuredClone(placed.document.building);
-  const thinnerMainLayer = thinnerBuilding.wallTypes[0].layers.find((layer) => layer.wallGroup === "main");
+  const thinnerMainLayer = thinnerBuilding.wallTypes.find((type) => type.id === placed.document.lines[0].wallTypeId)?.layers.find((layer) => layer.wallGroup === "main");
   assert.ok(thinnerMainLayer);
   thinnerMainLayer.thickness = 3.5;
   assert.equal(updateDocumentBuilding(placed.document, thinnerBuilding), null);
 
   const freshThinBuilding = structuredClone(DEFAULT_DOCUMENT.building);
+  freshThinBuilding.activeWallTypeId = "wall-type-01";
   const freshThinWindowType = freshThinBuilding.openingTypes.find((type) => type.id === freshThinBuilding.activeWindowTypeId);
   assert.ok(freshThinWindowType);
   freshThinWindowType.headerTypeId = "header-type-01";
@@ -1515,7 +1517,7 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   assert.ok(centeredPlatform);
   const centeredEdge = centeredPlatform.floorEdgeConditions.find((edge) => edge.wallId === officeOnlyWall.id);
   assert.ok(centeredEdge);
-  assert.equal(Math.abs(centeredEdge.offsetFromReference), 1.75);
+  assert.equal(Math.abs(centeredEdge.offsetFromReference), 2.75);
   assert.notDeepEqual(centeredPlatform.floorBoundary, centeredPlatform.boundary);
   assert.deepEqual(wallVerticalExtent(refreshed, officeOnlyWall), {
     adjacentRoomIds: [office.id],
@@ -1628,14 +1630,14 @@ test("keeps Walls on their Story when moved or copied and reassigns removed wall
   assert.equal(copied.document.lines[1].start.z, 0);
 
   const revised = cloneBuildingStructure(copied.document.building);
-  revised.wallTypes.push({ ...revised.wallTypes[0], id: "wall-type-02", name: "Alternate Wall", layers: revised.wallTypes[0].layers.map((layer, index) => ({ ...layer, id: `wall-type-02-${index + 1}` })) });
-  revised.activeWallTypeId = "wall-type-02";
+  revised.wallTypes.push({ ...revised.wallTypes[0], id: "wall-type-05", name: "Alternate Wall", layers: revised.wallTypes[0].layers.map((layer, index) => ({ ...layer, id: `wall-type-05-${index + 1}` })) });
+  revised.activeWallTypeId = "wall-type-05";
   const withTypes = updateDocumentBuilding(copied.document, revised);
   assert.ok(withTypes);
-  const reassigned = assignWallType(withTypes, withTypes.lines[0].id, "wall-type-02");
+  const reassigned = assignWallType(withTypes, withTypes.lines[0].id, "wall-type-05");
   assert.ok(reassigned);
   const removed = cloneBuildingStructure(revised);
-  removed.wallTypes = removed.wallTypes.filter((wallType) => wallType.id !== "wall-type-02");
+  removed.wallTypes = removed.wallTypes.filter((wallType) => wallType.id !== "wall-type-05");
   removed.activeWallTypeId = removed.wallTypes[0].id;
   const normalized = updateDocumentBuilding({ ...reassigned, building: revised }, removed);
   assert.ok(normalized);

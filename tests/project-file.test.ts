@@ -48,7 +48,8 @@ test("round-trips a blank new plan with its project settings", () => {
   assert.deepEqual(document.objects, []);
   assert.deepEqual(document.lines, []);
   assert.equal(document.building.stories[0].name, "First Floor");
-  assert.equal(document.building.wallTypes.length, 1);
+  assert.equal(document.building.wallTypes.length, 4);
+  assert.equal(document.building.activeWallTypeId, "wall-type-02");
   assert.equal(document.building.foundationWallTypes.length, 1);
   assert.equal(document.building.activeFoundationWallTypeId, document.building.foundationWallTypes[0].id);
 });
@@ -505,9 +506,11 @@ test("upgrades version-20 wall types without open-end caps", () => {
 test("upgrades a version-21 open-end cap into a one-layer wrap", () => {
   const legacy = createProjectDocument({ createdAt, document: DEFAULT_DOCUMENT, name: "Single End Cap", updatedAt });
   legacy.version = 21 as 34;
-  const wallType = legacy.building.wallTypes[0] as unknown as Record<string, unknown>;
-  delete wallType.wallEndCapLayerIds;
-  wallType.wallEndCapLayerId = legacy.building.wallTypes[0].layers[0].id;
+  legacy.building.wallTypes.forEach((type, index) => {
+    const wallType = type as unknown as Record<string, unknown>;
+    delete wallType.wallEndCapLayerIds;
+    wallType.wallEndCapLayerId = index === 0 ? type.layers[0].id : null;
+  });
   const parsed = parseProjectDocument(JSON.stringify(legacy));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
