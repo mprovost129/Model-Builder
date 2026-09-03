@@ -10,6 +10,9 @@ This control point introduces the first editable on-canvas dimension in Slater W
 - The Wall remains on its current Story and retains its Wall Type, reference line, exterior side, join rules, foundation support, layer, and hosted openings.
 - The existing Wall validation path remains authoritative. A resize is rejected when the Wall is locked, its layer is locked, or the new length would invalidate a hosted Door or Window opening.
 - Automatic Wall joins and Room detection continue to derive from the updated Wall endpoints.
+- A selected Wall also reports the nearest clear distance to an overlapping parallel Wall on each side. The witnesses use the actual facing finish surfaces, not the editable reference-line center paths.
+- Clear-distance candidates must be visible Walls on the same Story, parallel within one degree, and overlap the selected Wall along its length. Perpendicular, non-overlapping, crossing, unresolved-Type, and other-Story Walls are excluded.
+- The first clear-distance pass is read-only. Moving a Wall by editing a clearance requires an explicit decision about join ownership and connected perpendicular Walls; the program does not guess that behavior.
 - Temporary dimensions are editing aids. They are separate from future persistent dimension objects, annotation layers, and printed dimension chains.
 
 ## Acceptance criteria
@@ -21,14 +24,17 @@ This control point introduces the first editable on-canvas dimension in Slater W
 - [x] Invalid, locked, and opening-conflicting lengths are rejected without changing the project.
 - [x] The temporary control follows pan, zoom, fit, and Wall geometry changes.
 - [x] The control is available in both light and dark interface themes.
-- [ ] Add temporary clear dimensions from a selected Wall or opening to nearby references.
+- [x] Show nearest same-Story clear dimensions between the selected Wall and overlapping parallel Wall finish surfaces.
+- [ ] Extend temporary clear dimensions to selected Door and Window opening edges.
+- [ ] Make a clear dimension editable after connected-Wall and join-ownership behavior is defined.
 - [ ] Add persistent dimension objects with styles, layers, witnesses, text placement, and print-scale behavior.
 - [ ] Add chained exterior dimensions after object references and witness associations are stable.
 
 ## Next sequence
 
-1. Test fixed-Start and fixed-End resizing on a small mixed 2x4/2x6 plan with Doors and Windows.
-2. Define the reference-selection rules for temporary clear dimensions.
-3. Design persistent dimension objects independently of the temporary editing control.
+1. Test fixed-Start and fixed-End resizing plus the two-sided clear-distance witnesses on a small mixed 2x4/2x6 plan.
+2. Add selected Door and Window edge clearances using the same face-reference rules.
+3. Define how editing a clearance moves joined Walls before enabling that mutation.
+4. Design persistent dimension objects independently of the temporary editing control.
 
 Last reviewed: 2026-09-03

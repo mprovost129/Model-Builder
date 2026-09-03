@@ -397,6 +397,7 @@ import {
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
 import { wallFramingSolids } from "@/lib/wall-framing";
+import { nearestParallelWallClearDimensions } from "@/lib/wall-clear-dimensions";
 import {
   automaticFoundationWallJoinCount,
   buildAutomaticFoundationWallJoinPlan,
@@ -1391,6 +1392,13 @@ type ActiveGripInput = {
 };
 
 type TemporaryWallDimensionScreen = {
+  clearDimensions: Array<{
+    distance: number;
+    from: ScreenPoint;
+    referenceWallId: string;
+    side: "left" | "right";
+    to: ScreenPoint;
+  }>;
   dimensionEnd: ScreenPoint;
   dimensionStart: ScreenPoint;
   label: ScreenPoint;
@@ -1442,7 +1450,18 @@ function TemporaryWallDimension({
         <line className="temporary-wall-extension" x1={screen.wallStart.x} y1={screen.wallStart.y} x2={screen.dimensionStart.x} y2={screen.dimensionStart.y} />
         <line className="temporary-wall-extension" x1={screen.wallEnd.x} y1={screen.wallEnd.y} x2={screen.dimensionEnd.x} y2={screen.dimensionEnd.y} />
         <line className="temporary-wall-dimension-line" x1={screen.dimensionStart.x} y1={screen.dimensionStart.y} x2={screen.dimensionEnd.x} y2={screen.dimensionEnd.y} />
+        {screen.clearDimensions.map((dimension) => <g key={`${dimension.side}:${dimension.referenceWallId}`}>
+          <line className="temporary-wall-clear-line" x1={dimension.from.x} y1={dimension.from.y} x2={dimension.to.x} y2={dimension.to.y} />
+          <circle className="temporary-wall-clear-witness" cx={dimension.from.x} cy={dimension.from.y} r="2.5" />
+          <circle className="temporary-wall-clear-witness" cx={dimension.to.x} cy={dimension.to.y} r="2.5" />
+        </g>)}
       </svg>
+      {screen.clearDimensions.map((dimension) => <output
+        key={`${dimension.side}:${dimension.referenceWallId}`}
+        className="temporary-wall-clear-value"
+        style={{ left: (dimension.from.x + dimension.to.x) / 2, top: (dimension.from.y + dimension.to.y) / 2 }}
+        title="Clear distance between facing Wall finish surfaces"
+      >{formatArchitectural(dimension.distance)}</output>)}
       <button
         type="button"
         className={fixedEndpoint === "start" ? "temporary-wall-anchor is-fixed" : "temporary-wall-anchor"}
@@ -6825,7 +6844,19 @@ function Viewport({
           const dimensionOffset = 38;
           const dimensionStart = { x: wallStart.x + normalX * dimensionOffset, y: wallStart.y + normalY * dimensionOffset };
           const dimensionEnd = { x: wallEnd.x + normalX * dimensionOffset, y: wallEnd.y + normalY * dimensionOffset };
+          const clearDimensions = nearestParallelWallClearDimensions(
+            selectedWall,
+            documentRef.current.lines.filter((line) => findLayer(documentRef.current, line.layerId)?.visible),
+            documentRef.current.building.wallTypes,
+          ).map((dimension) => ({
+            distance: dimension.distance,
+            from: projectDimensionPoint(dimension.from),
+            referenceWallId: dimension.referenceWallId,
+            side: dimension.side,
+            to: projectDimensionPoint(dimension.to),
+          })).filter((dimension) => Math.hypot(dimension.to.x - dimension.from.x, dimension.to.y - dimension.from.y) >= 30);
           const screen: TemporaryWallDimensionScreen = {
+            clearDimensions,
             dimensionEnd,
             dimensionStart,
             label: { x: (dimensionStart.x + dimensionEnd.x) / 2, y: (dimensionStart.y + dimensionEnd.y) / 2 },
@@ -6841,6 +6872,7 @@ function Viewport({
             screen.wallEnd.y,
             screen.dimensionStart.x,
             screen.dimensionStart.y,
+            ...screen.clearDimensions.flatMap((dimension) => [dimension.referenceWallId, dimension.distance, dimension.from.x, dimension.from.y, dimension.to.x, dimension.to.y]),
           ].map((value) => typeof value === "number" ? Math.round(value) : value).join(":");
           if (signature !== temporaryWallDimensionScreenSignatureRef.current) {
             temporaryWallDimensionScreenSignatureRef.current = signature;
@@ -7690,7 +7722,7 @@ function Viewport({
       {arcMode && !dragStatus ? <div className="move-grip-hint is-drawing">ARC · start point · second point · endpoint · exact coordinates accepted</div> : null}
       {lineMode && !dragStatus ? <div className="move-grip-hint is-drawing">LINE · click or type X,Y,Z · type a distance · U undoes · C closes</div> : null}
       {circleMode && !dragStatus ? <div className="move-grip-hint is-drawing">CIRCLE · click or type center · click edge or type radius · Escape exits</div> : null}
-      {selectedLineId && !lineMode && !dragStatus ? <div className="move-grip-hint">{temporarilyDimensionedWall?.architecturalRole === "wall" ? "Wall selected · edit length above · choose S or E to hold that endpoint" : "Line selected · blue endpoints reshape · green midpoint moves"}</div> : null}
+      {selectedLineId && !lineMode && !dragStatus ? <div className="move-grip-hint">{temporarilyDimensionedWall?.architecturalRole === "wall" ? "Wall selected · edit blue length · S/E holds an endpoint · green values show nearest clearances" : "Line selected · blue endpoints reshape · green midpoint moves"}</div> : null}
       {selectedCircleId && !circleMode && !dragStatus ? <div className="move-grip-hint">Circle selected · green center moves · blue quadrant grips resize</div> : null}
       {selectedArcId && !arcMode && !dragStatus ? <div className="move-grip-hint">Arc selected · blue endpoints and midpoint reshape · green center moves</div> : null}
       {polylineMode && !dragStatus ? <div className="move-grip-hint is-drawing">POLYLINE · click or type points · distance follows cursor · U undoes · C closes</div> : null}
