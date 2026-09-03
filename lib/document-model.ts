@@ -2768,22 +2768,65 @@ export function createRoofPlaneFromWall(document: ModelDocument, wallId: string,
   return { document: withPolylines(document, [...document.polylines, roofPlane]), roofPlane: clonePolylineObject(roofPlane) };
 }
 
-export function updateRoofPlane(document: ModelDocument, polylineId: string, change: Partial<RoofSettings> & { horizontalRun?: number }): ModelDocument | null {
+export function updateRoofPlane(document: ModelDocument, polylineId: string, change: Partial<RoofSettings> & { eaveLength?: number; horizontalRun?: number }): ModelDocument | null {
   const source = findPolylineObject(document, polylineId);
   const sourceGeometry = source ? roofPlaneGeometry(source) : null;
   if (!source || !sourceGeometry || !source.roofSettings || !polylineIsEditable(document, source)) return null;
-  const { horizontalRun = sourceGeometry.horizontalRun, ...settingsChange } = change;
+  const sourceEaveLength = Math.hypot(sourceGeometry.eaveEnd.x - sourceGeometry.eaveStart.x, sourceGeometry.eaveEnd.y - sourceGeometry.eaveStart.y);
+  const { eaveLength = sourceEaveLength, horizontalRun = sourceGeometry.horizontalRun, ...settingsChange } = change;
   const settings = { ...source.roofSettings, ...settingsChange };
-  if (!roofSettingsAreValid(settings) || !Number.isFinite(horizontalRun) || horizontalRun < 1 / 16 || horizontalRun > MAXIMUM_COORDINATE) return null;
+  if (!roofSettingsAreValid(settings) || !Number.isFinite(eaveLength) || eaveLength < 1 / 16 || eaveLength > MAXIMUM_COORDINATE || !Number.isFinite(horizontalRun) || horizontalRun < 1 / 16 || horizontalRun > MAXIMUM_COORDINATE) return null;
   const nx = sourceGeometry.inwardNormal.x;
   const ny = sourceGeometry.inwardNormal.y;
+  const ux = (sourceGeometry.eaveEnd.x - sourceGeometry.eaveStart.x) / sourceEaveLength;
+  const uy = (sourceGeometry.eaveEnd.y - sourceGeometry.eaveStart.y) / sourceEaveLength;
+  const bearingEnd = { x: sourceGeometry.bearingStart.x + ux * eaveLength, y: sourceGeometry.bearingStart.y + uy * eaveLength };
   const eaveStart = { x: snapToSixteenth(sourceGeometry.bearingStart.x - nx * settings.overhang), y: snapToSixteenth(sourceGeometry.bearingStart.y - ny * settings.overhang) };
-  const eaveEnd = { x: snapToSixteenth(sourceGeometry.bearingEnd.x - nx * settings.overhang), y: snapToSixteenth(sourceGeometry.bearingEnd.y - ny * settings.overhang) };
+  const eaveEnd = { x: snapToSixteenth(bearingEnd.x - nx * settings.overhang), y: snapToSixteenth(bearingEnd.y - ny * settings.overhang) };
   const highStart = { x: snapToSixteenth(sourceGeometry.bearingStart.x + nx * horizontalRun), y: snapToSixteenth(sourceGeometry.bearingStart.y + ny * horizontalRun) };
-  const highEnd = { x: snapToSixteenth(sourceGeometry.bearingEnd.x + nx * horizontalRun), y: snapToSixteenth(sourceGeometry.bearingEnd.y + ny * horizontalRun) };
+  const highEnd = { x: snapToSixteenth(bearingEnd.x + nx * horizontalRun), y: snapToSixteenth(bearingEnd.y + ny * horizontalRun) };
   const candidate: PolylineObject = { ...clonePolylineObject(source), roofSettings: settings, vertices: [eaveStart, eaveEnd, highEnd, highStart] };
   if (!polylineGeometryIsValid(candidate) || !roofPlaneGeometry(candidate)) return null;
   return withPolylines(document, document.polylines.map((polyline) => polyline.id === polylineId ? candidate : polyline));
+}
+
+/**
+ * Constrains Roof Plane corner grips to meaningful architectural edits. Eave
+ * grips adjust the bearing span along its existing baseline. High-edge grips
+ * adjust the horizontal run. The paired edge always moves with the grip so a
+ * drag cannot accidentally turn a calculable plane into a skewed quadrilateral.
+ */
+export function updateRoofPlaneEdgeGrip(document: ModelDocument, polylineId: string, index: number, point: PlanPoint): ModelDocument | null {
+  const source = findPolylineObject(document, polylineId);
+  const geometry = source ? roofPlaneGeometry(source) : null;
+  if (!source || !geometry || !source.roofSettings || !polylineIsEditable(document, source) || !Number.isInteger(index) || index < 0 || index > 3 || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+  if (index === 2 || index === 3) {
+    const eave = index === 2 ? geometry.eaveEnd : geometry.eaveStart;
+    const totalDepth = (point.x - eave.x) * geometry.inwardNormal.x + (point.y - eave.y) * geometry.inwardNormal.y;
+    return updateRoofPlane(document, polylineId, { horizontalRun: snapToSixteenth(totalDepth - source.roofSettings.overhang) });
+  }
+  const ux = (geometry.eaveEnd.x - geometry.eaveStart.x) / Math.hypot(geometry.eaveEnd.x - geometry.eaveStart.x, geometry.eaveEnd.y - geometry.eaveStart.y);
+  const uy = (geometry.eaveEnd.y - geometry.eaveStart.y) / Math.hypot(geometry.eaveEnd.x - geometry.eaveStart.x, geometry.eaveEnd.y - geometry.eaveStart.y);
+  if (index === 0) {
+    const shift = snapToSixteenth((point.x - geometry.eaveStart.x) * ux + (point.y - geometry.eaveStart.y) * uy);
+    const eaveLength = Math.hypot(geometry.eaveEnd.x - geometry.eaveStart.x, geometry.eaveEnd.y - geometry.eaveStart.y) - shift;
+    if (eaveLength < 1 / 16) return null;
+    const dx = ux * shift;
+    const dy = uy * shift;
+    const candidate: PolylineObject = {
+      ...clonePolylineObject(source),
+      vertices: [
+        { x: geometry.eaveStart.x + dx, y: geometry.eaveStart.y + dy },
+        geometry.eaveEnd,
+        geometry.highEnd,
+        { x: geometry.highStart.x + dx, y: geometry.highStart.y + dy },
+      ],
+    };
+    if (!polylineGeometryIsValid(candidate) || !roofPlaneGeometry(candidate)) return null;
+    return withPolylines(document, document.polylines.map((polyline) => polyline.id === polylineId ? candidate : polyline));
+  }
+  const eaveLength = snapToSixteenth((point.x - geometry.eaveStart.x) * ux + (point.y - geometry.eaveStart.y) * uy);
+  return updateRoofPlane(document, polylineId, { eaveLength });
 }
 
 export function removeRoofPlaneRole(document: ModelDocument, polylineId: string): ModelDocument | null {
@@ -2797,6 +2840,7 @@ export function removeRoofPlaneRole(document: ModelDocument, polylineId: string)
 export function updatePolylineObjectVertex(document: ModelDocument, polylineId: string, index: number, point: PlanPoint): ModelDocument | null {
   const polyline = findPolylineObject(document, polylineId);
   if (!polyline) return null;
+  if (polyline.architecturalRole === "roof-plane") return updateRoofPlaneEdgeGrip(document, polylineId, index, point);
   const geometry = polyline.shape === "rectangle"
     ? moveRectangleGrip(polyline, { index, kind: "corner" }, point)
     : updatePolylineVertex(polyline, index, point);

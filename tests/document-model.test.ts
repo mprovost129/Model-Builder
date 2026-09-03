@@ -153,6 +153,31 @@ test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () 
   assert.deepEqual(updatedGeometry.bearingStart, { x: 0, y: 0 });
   assert.equal(updatedReference.peakElevation, 238.375);
 
+  const lengthened = updateRoofPlane(created.document, created.roofPlane.id, { eaveLength: 300 });
+  assert.ok(lengthened);
+  const lengthenedPlane = lengthened.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
+  const lengthenedGeometry = roofPlaneGeometry(lengthenedPlane)!;
+  assert.equal(Math.hypot(lengthenedGeometry.eaveEnd.x - lengthenedGeometry.eaveStart.x, lengthenedGeometry.eaveEnd.y - lengthenedGeometry.eaveStart.y), 300);
+  assert.equal(lengthenedPlane.roofBearingWallId, line.line.id);
+
+  const shortenedAtStart = updatePolylineObjectVertex(lengthened, lengthenedPlane.id, 0, { x: 24, y: lengthenedGeometry.eaveStart.y });
+  assert.ok(shortenedAtStart);
+  const shortenedPlane = shortenedAtStart.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
+  const shortenedGeometry = roofPlaneGeometry(shortenedPlane)!;
+  assert.equal(shortenedGeometry.bearingStart.x, 24);
+  assert.equal(Math.hypot(shortenedGeometry.eaveEnd.x - shortenedGeometry.eaveStart.x, shortenedGeometry.eaveEnd.y - shortenedGeometry.eaveStart.y), 276);
+  assert.equal(shortenedPlane.roofBearingWallId, line.line.id);
+
+  const runTarget = {
+    x: shortenedGeometry.eaveStart.x + shortenedGeometry.inwardNormal.x * (200 + shortenedPlane.roofSettings!.overhang),
+    y: shortenedGeometry.eaveStart.y + shortenedGeometry.inwardNormal.y * (200 + shortenedPlane.roofSettings!.overhang),
+  };
+  const deeper = updatePolylineObjectVertex(shortenedAtStart, shortenedPlane.id, 3, runTarget);
+  assert.ok(deeper);
+  const deeperPlane = deeper.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
+  assert.equal(roofPlaneGeometry(deeperPlane)?.horizontalRun, 200);
+  assert.equal(deeperPlane.roofBearingWallId, line.line.id);
+
   const copied = copyModelEntities(updated, [{ id: updatedPlane.id, kind: "polyline" }], { x: 300, y: 0, z: 0 });
   assert.ok(copied);
   const copiedPlane = copied.document.polylines.find((polyline) => polyline.id === copied.refs[0].id)!;

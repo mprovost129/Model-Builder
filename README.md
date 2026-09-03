@@ -157,8 +157,10 @@ polylines, rectangles, Circles, and Arcs.
   pitch, Height Above Plate at the exterior bearing face, overhang, birdsmouth,
   fascia, and subfascia inputs. A live section calculates Top of Plate, the
   separate underside bearing reference, exterior heel, peak at a reference run,
-  fascia/subfascia elevations, roof angle, and notch limit; actual manual Roof
-  Plane entities and automatic roof generation remain tracked next phases
+  fascia/subfascia elevations, roof angle, and notch limit. Manual Roof Planes
+  can be created from a Wall Main-layer exterior face, viewed in plan or 3D, and
+  edited by eave span, horizontal run, pitch, heel, and overhang; automatic roof
+  generation remains a later phase
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling
