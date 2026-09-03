@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Model Builder",
-  description: "Precision 3D modeling in U.S. architectural units.",
+  title: "Slater Woods Omni Design",
+  description: "Residential 2D and 3D design workspace in U.S. architectural units.",
 };
 
 export default function RootLayout({

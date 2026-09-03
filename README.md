@@ -1,6 +1,6 @@
-# Model Builder
+# Slater Woods Omni Design
 
-Model Builder is an early-stage precision 3D modeling application aimed at
+Slater Woods Omni Design is an early-stage precision residential modeling application aimed at
 residential design. The current foundation provides multiple parametric boxes,
 U.S. architectural dimension entry, CAD-style viewport navigation,
 object-and-face selection, true 3D line entities, and first-class 2D CAD
@@ -418,10 +418,23 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, ordinary product object Types and instance links, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-41 files open and upgrade
+Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, ordinary product object Types and instance links, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-45 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.
+
+## Startup Dashboard
+
+The application opens to a light gray and blue project dashboard. New Plan starts
+an empty model in 2D Top view, Open Project accepts a portable `.mbproj` file, and
+an active recovered or in-progress project can be resumed without discarding it.
+The Dashboard remains available from File > Dashboard and from its document tab.
+
+Saving or opening a project also records a validated convenience copy in Recent
+Projects for this browser. The list is bounded and invalid entries are ignored;
+removing a recent shortcut does not delete a downloaded project file. Browser-local
+recent copies and automatic recovery are conveniences, not replacements for saved
+portable `.mbproj` files.
 
 ## 2D CAD Drawing
 
@@ -521,7 +534,8 @@ AutoCAD 2026 feature and command specification.
 Model Builder keeps a validated recovery draft in this browser after a short
 pause in editing and flushes the latest state when the page closes or becomes
 hidden. On the next visit, it restores both the current work and the last
-manually saved baseline, so the unsaved-change indicator remains accurate.
+manually saved baseline behind the startup dashboard, where Continue Current
+Project resumes the model with an accurate unsaved-change indicator.
 Recovery data stays on this device and is not a substitute for a portable
 `.mbproj` file. Untouched new projects do not create recovery data.
 

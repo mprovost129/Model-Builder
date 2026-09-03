@@ -402,13 +402,23 @@ import {
   projectFilename,
   projectToDocument,
   serializeProjectDocument,
+  type ModelBuilderProject,
 } from "@/lib/project-file";
+import {
+  parseRecentProjects,
+  RECENT_PROJECTS_STORAGE_KEY,
+  rememberRecentProject,
+  removeRecentProject,
+  serializeRecentProjects,
+  type RecentProjectRecord,
+} from "@/lib/recent-projects";
 import {
   MAXIMUM_PRODUCT_PACKAGE_BYTES,
   PRODUCT_PACKAGE_EXTENSION,
   parseProductPackage,
 } from "@/lib/product-package";
 import { ProductLibraryDialog } from "@/features/products/product-library-dialog";
+import { StartDashboard } from "@/features/start-dashboard";
 import {
   applyPreferredProductRepresentations,
   clearPreferredProductRepresentations,
@@ -10706,6 +10716,9 @@ export function ModelBuilderApp() {
   const [projectName, setProjectName] = useState("Untitled Model");
   const [savedProjectName, setSavedProjectName] = useState("Untitled Model");
   const [projectCreatedAt, setProjectCreatedAt] = useState(() => new Date().toISOString());
+  const [showDashboard, setShowDashboard] = useState(true);
+  const [hasActiveProject, setHasActiveProject] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<RecentProjectRecord[]>([]);
   const [fileNotice, setFileNotice] = useState<{
     text: string;
     tone: "error" | "info" | "success";
@@ -10723,6 +10736,36 @@ export function ModelBuilderApp() {
   const arcContinueSeedCommandRef = useRef<ArcContinueSeed | null>(null);
   const continuableEntityHistoryRef = useRef<ContinuableEntityReference[]>([]);
   const recoveryErrorReportedRef = useRef(false);
+
+  const storeRecentProject = useCallback((project: ModelBuilderProject) => {
+    setRecentProjects((current) => {
+      const next = rememberRecentProject(current, project);
+      try {
+        window.localStorage.setItem(
+          RECENT_PROJECTS_STORAGE_KEY,
+          serializeRecentProjects(next),
+        );
+        return next;
+      } catch {
+        return current;
+      }
+    });
+  }, []);
+
+  const forgetRecentProject = useCallback((projectId: string) => {
+    setRecentProjects((current) => {
+      const next = removeRecentProject(current, projectId);
+      try {
+        window.localStorage.setItem(
+          RECENT_PROJECTS_STORAGE_KEY,
+          serializeRecentProjects(next),
+        );
+      } catch {
+        // Removing the dashboard shortcut remains best-effort if browser storage is unavailable.
+      }
+      return next;
+    });
+  }, []);
 
   const selectedBox = findBoxObject(editor.present, selectedObjectId);
   const selectedLine = findLineObject(editor.present, selectedLineId);
@@ -10840,6 +10883,19 @@ export function ModelBuilderApp() {
       setCadDraftingSettings(storedDrafting);
       setActiveElevationDraft(formatSignedArchitectural(storedDrafting.activeElevation));
       setDraftingPreferencesReady(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      try {
+        setRecentProjects(parseRecentProjects(
+          window.localStorage.getItem(RECENT_PROJECTS_STORAGE_KEY),
+        ));
+      } catch {
+        setRecentProjects([]);
+      }
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);
@@ -14079,6 +14135,8 @@ export function ModelBuilderApp() {
     setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
     setRecoveredAt(null);
+    setHasActiveProject(true);
+    setShowDashboard(false);
     setFileNotice({ text: "Started a blank new plan in Top view. Adjust Stories and Wall Types, then begin drawing.", tone: "info" });
   }, [confirmDiscard, setDrawingPlaneFromBuilding, setSelectionForDocument]);
 
@@ -14091,7 +14149,8 @@ export function ModelBuilderApp() {
       name,
       updatedAt: now,
     });
-    const blob = new Blob([serializeProjectDocument(project)], {
+    const serializedProject = serializeProjectDocument(project);
+    const blob = new Blob([serializedProject], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -14107,26 +14166,76 @@ export function ModelBuilderApp() {
     setProjectName(name);
     setSavedProjectName(name);
     setRecoveredAt(null);
+    setHasActiveProject(true);
+    storeRecentProject(project);
     setFileNotice({
       text: `Saved ${projectFilename(name)} to Downloads.`,
       tone: "success",
     });
-  }, [editor.present, projectCreatedAt]);
+  }, [editor.present, projectCreatedAt, storeRecentProject]);
 
   const saveProject = useCallback(() => {
+    if (!hasActiveProject) {
+      setFileNotice({ text: "Start a New Plan or open a project before saving.", tone: "info" });
+      return;
+    }
     saveProjectWithName(normalizedProjectName);
-  }, [normalizedProjectName, saveProjectWithName]);
+  }, [hasActiveProject, normalizedProjectName, saveProjectWithName]);
 
   const saveProjectAs = useCallback(() => {
+    if (!hasActiveProject) {
+      setFileNotice({ text: "Start a New Plan or open a project before saving.", tone: "info" });
+      return;
+    }
     const requestedName = window.prompt("Save project as", normalizedProjectName);
     if (requestedName === null) return;
     saveProjectWithName(requestedName);
-  }, [normalizedProjectName, saveProjectWithName]);
+  }, [hasActiveProject, normalizedProjectName, saveProjectWithName]);
 
   const requestOpen = useCallback(() => {
     if (!confirmDiscard()) return;
     fileInputRef.current?.click();
   }, [confirmDiscard]);
+
+  const loadProjectIntoWorkspace = useCallback((
+    project: ModelBuilderProject,
+    notice: string,
+  ) => {
+    const openedDocument = projectToDocument(project);
+    dispatch({ type: "load", next: openedDocument });
+    setDrawingPlaneFromBuilding(openedDocument.building);
+    setProjectName(project.name);
+    setSavedProjectName(project.name);
+    setProjectCreatedAt(project.createdAt);
+    setSelectionForDocument(openedDocument, firstSelectableObjectId(openedDocument));
+    setCopyMode(false);
+    setMoveMode(false);
+    setRotateMode(false);
+    setScaleMode(false);
+    setBoundaryMode(false);
+    setMirrorMode(false);
+    setOffsetMode(false);
+    setChamferMode(false);
+    setChamferStage(0);
+    setChamferDistancePrompt(0);
+    setFilletMode(false);
+    setFilletStage(0);
+    setStretchMode(false);
+    setStretchTargets([]);
+    setArcMode(false);
+    setCircleMode(false);
+    setLineMode(false);
+    setWallMode(false);
+    setFoundationWallMode(false);
+    setPolylineMode(false);
+    setRectangleMode(false);
+    continuableEntityHistoryRef.current = [];
+    setRecoveredAt(null);
+    setHasActiveProject(true);
+    setShowDashboard(false);
+    storeRecentProject(project);
+    setFileNotice({ text: notice, tone: "success" });
+  }, [setDrawingPlaneFromBuilding, setSelectionForDocument, storeRecentProject]);
 
   const openProjectFile = useCallback(async (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -14148,44 +14257,36 @@ export function ModelBuilderApp() {
         setFileNotice({ text: result.error, tone: "error" });
         return;
       }
-      const openedDocument = projectToDocument(result.project);
-      dispatch({ type: "load", next: openedDocument });
-      setDrawingPlaneFromBuilding(openedDocument.building);
-      setProjectName(result.project.name);
-      setSavedProjectName(result.project.name);
-      setProjectCreatedAt(result.project.createdAt);
-      setSelectionForDocument(openedDocument, firstSelectableObjectId(openedDocument));
-      setCopyMode(false);
-      setMoveMode(false);
-      setRotateMode(false);
-      setScaleMode(false);
-      setBoundaryMode(false);
-      setMirrorMode(false);
-      setOffsetMode(false);
-      setChamferMode(false);
-      setChamferStage(0);
-      setChamferDistancePrompt(0);
-      setFilletMode(false);
-      setFilletStage(0);
-      setStretchMode(false);
-      setStretchTargets([]);
-      setArcMode(false);
-      setCircleMode(false);
-      setLineMode(false);
-      setWallMode(false);
-      setFoundationWallMode(false);
-      setPolylineMode(false);
-      setRectangleMode(false);
-      continuableEntityHistoryRef.current = [];
-      setRecoveredAt(null);
-      setFileNotice({ text: `Opened ${file.name}.`, tone: "success" });
+      loadProjectIntoWorkspace(result.project, `Opened ${file.name}.`);
     } catch {
       setFileNotice({
         text: "Model Builder could not read that project file.",
         tone: "error",
       });
     }
-  }, [setDrawingPlaneFromBuilding, setSelectionForDocument]);
+  }, [loadProjectIntoWorkspace]);
+
+  const openRecentProject = useCallback((projectId: string) => {
+    const recentProject = recentProjects.find((project) => project.id === projectId);
+    if (!recentProject || !confirmDiscard()) return;
+    const result = parseProjectDocument(recentProject.project);
+    if (!result.ok) {
+      forgetRecentProject(projectId);
+      setFileNotice({ text: "That recent-project shortcut was damaged and has been removed.", tone: "error" });
+      return;
+    }
+    loadProjectIntoWorkspace(result.project, `Opened ${result.project.name} from Recent Projects.`);
+  }, [confirmDiscard, forgetRecentProject, loadProjectIntoWorkspace, recentProjects]);
+
+  const openDashboard = useCallback(() => {
+    setTopMenu(null);
+    setShowDashboard(true);
+  }, []);
+
+  const continueCurrentProject = useCallback(() => {
+    if (!hasActiveProject) return;
+    setShowDashboard(false);
+  }, [hasActiveProject]);
 
   const discardRecoveredDraft = useCallback(() => {
     if (!window.confirm("Discard the recovered draft and start a blank new plan?")) {
@@ -14224,6 +14325,8 @@ export function ModelBuilderApp() {
     setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
     setRecoveredAt(null);
+    setHasActiveProject(true);
+    setShowDashboard(false);
     setFileNotice({ text: "Discarded the recovered draft.", tone: "info" });
   }, [setDrawingPlaneFromBuilding, setSelectionForDocument]);
 
@@ -14266,6 +14369,7 @@ export function ModelBuilderApp() {
             setPolylineMode(false);
             setRectangleMode(false);
             continuableEntityHistoryRef.current = [];
+            setHasActiveProject(true);
             setRecoveredAt(new Date(snapshot.autosavedAt).toLocaleString());
           } else {
             window.localStorage.removeItem(PROJECT_RECOVERY_STORAGE_KEY);
@@ -14551,7 +14655,7 @@ export function ModelBuilderApp() {
   };
 
   return (
-    <main className={`app-shell theme-${interfaceTheme}`}>
+    <main className={`app-shell theme-${interfaceTheme}${showDashboard ? " is-dashboard" : ""}`}>
       <input
         ref={fileInputRef}
         className="project-file-input"
@@ -14568,8 +14672,8 @@ export function ModelBuilderApp() {
         <nav className="quick-access" aria-label="Quick access">
           <button type="button" onClick={newProject} title="New Plan" aria-label="New Plan">＋</button>
           <button type="button" onClick={requestOpen} title="Open (Ctrl+O)" aria-label="Open project">▱</button>
-          <button type="button" onClick={saveProject} title="Save (Ctrl+S)" aria-label="Save project">▣</button>
-          <button type="button" onClick={saveProjectAs} title="Save As" aria-label="Save project as">▣<sup>+</sup></button>
+          <button type="button" onClick={saveProject} disabled={!hasActiveProject} title="Save (Ctrl+S)" aria-label="Save project">▣</button>
+          <button type="button" onClick={saveProjectAs} disabled={!hasActiveProject} title="Save As" aria-label="Save project as">▣<sup>+</sup></button>
           <span className="quick-separator" />
           <button type="button" onClick={undo} disabled={!editor.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
           <button type="button" onClick={redo} disabled={!editor.future.length} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
@@ -14577,16 +14681,17 @@ export function ModelBuilderApp() {
         <label className="project-name-shell">
           <span className="sr-only">Project name</span>
           <input
-            value={projectName}
+            value={hasActiveProject ? projectName : "Dashboard"}
             maxLength={120}
             onChange={(event) => setProjectName(event.target.value)}
             onBlur={() => setProjectName(normalizedProjectName)}
             aria-label="Project name"
             spellCheck={false}
+            disabled={!hasActiveProject}
           />
           {isDirty ? <span className="dirty-mark" title="Unsaved changes">•</span> : null}
         </label>
-        <span className="workspace-name">2D + 3D Modeling</span>
+        <span className="workspace-name">Slater Woods Omni Design</span>
         <button
           className="theme-toggle"
           type="button"
@@ -14605,8 +14710,8 @@ export function ModelBuilderApp() {
             <div className="program-menu-primary">
               <button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><b>＋</b><span><strong>New Plan</strong><small>Start with a blank Top view</small></span></button>
               <button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><b>▱</b><span><strong>Open</strong><small>Open an .mbproj project</small></span></button>
-              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProject)}><b>▣</b><span><strong>Save</strong><small>Save the current project</small></span></button>
-              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProjectAs)}><b>▣</b><span><strong>Save As</strong><small>Save with a different project name</small></span></button>
+              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProject)} disabled={!hasActiveProject}><b>▣</b><span><strong>Save</strong><small>Save the current project</small></span></button>
+              <button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProjectAs)} disabled={!hasActiveProject}><b>▣</b><span><strong>Save As</strong><small>Save with a different project name</small></span></button>
             </div>
             <footer><span>{normalizedProjectName}</span><small>{isDirty ? "Unsaved changes" : "Current project is saved"}</small></footer>
           </div>
@@ -14621,7 +14726,7 @@ export function ModelBuilderApp() {
               <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={topMenu === menu} className={topMenu === menu ? "is-open" : ""} onClick={() => setTopMenu((current) => current === menu ? null : menu)}>{label}</button>
               {topMenu === menu ? (
                 <div className="application-menu" role="menu" aria-label={`${label} menu`}>
-                  {menu === "file" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><span>New Plan</span><kbd>Ctrl+N</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><span>Open…</span><kbd>Ctrl+O</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProject)}><span>Save</span><kbd>Ctrl+S</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(saveProjectAs)}><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button></> : null}
+                  {menu === "file" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(openDashboard)}><span>Dashboard</span><kbd>Home</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><span>New Plan</span><kbd>Ctrl+N</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><span>Open…</span><kbd>Ctrl+O</kbd></button><hr /><button type="button" role="menuitem" disabled={!hasActiveProject} onClick={() => runTopMenuCommand(saveProject)}><span>Save</span><kbd>Ctrl+S</kbd></button><button type="button" role="menuitem" disabled={!hasActiveProject} onClick={() => runTopMenuCommand(saveProjectAs)}><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button></> : null}
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
                   {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
@@ -14637,6 +14742,7 @@ export function ModelBuilderApp() {
 
       {topMenu ? <button type="button" className="menu-dismiss-layer" onClick={() => setTopMenu(null)} aria-label="Close application menu" /> : null}
 
+      {!showDashboard ? <>
       <nav className="ribbon-tabs" aria-label="Tool categories">
         {ribbonTabs.map((tab) => (
           <button
@@ -14870,10 +14976,12 @@ export function ModelBuilderApp() {
         <button type="button" onClick={createSavedPlanView}>Save Current View</button>
         <output>{activeStory.name} · {viewTarget.id === "top" ? "Plan" : viewTarget.label}</output>
       </section>
+      </> : null}
 
       <nav className="document-tabs" aria-label="Open projects">
         <button className="document-menu" type="button" aria-label="Project menu">☰</button>
-        <button className="document-tab is-active" type="button"><span>{normalizedProjectName}</span>{isDirty ? <b>•</b> : null}<i>×</i></button>
+        <button className={showDashboard ? "document-tab dashboard-document-tab is-active" : "document-tab dashboard-document-tab"} type="button" onClick={openDashboard}><span>Dashboard</span></button>
+        {hasActiveProject ? <button className={!showDashboard ? "document-tab is-active" : "document-tab"} type="button" onClick={continueCurrentProject}><span>{normalizedProjectName}</span>{isDirty ? <b>•</b> : null}</button> : null}
         <button className="new-document-tab" type="button" onClick={newProject} title="New blank plan">＋</button>
       </nav>
 
@@ -14895,6 +15003,19 @@ export function ModelBuilderApp() {
         </div>
       ) : null}
 
+      {showDashboard ? (
+        <StartDashboard
+          currentProjectDirty={isDirty}
+          currentProjectName={normalizedProjectName}
+          hasActiveProject={hasActiveProject}
+          onContinueProject={continueCurrentProject}
+          onNewPlan={newProject}
+          onOpenProject={requestOpen}
+          onOpenRecentProject={openRecentProject}
+          onRemoveRecentProject={forgetRecentProject}
+          recentProjects={recentProjects}
+        />
+      ) : <>
       <section className="work-area">
         <aside className="properties-panel">
           <div className="panel-heading"><span>PROPERTIES</span><button type="button" aria-label="More property options">···</button></div>
@@ -15536,6 +15657,7 @@ export function ModelBuilderApp() {
         <nav className="space-tabs" aria-label="Model and layouts"><button type="button" className="space-menu" aria-label="Space menu">☰</button><button type="button" className="is-active">Model</button><button type="button" disabled title="Layouts are planned">Layout 1 <small>planned</small></button><button type="button" disabled aria-label="Add layout">＋</button></nav>
         <div className="status-items"><span>{editor.present.objects.length} BOX{editor.present.objects.length === 1 ? "" : "ES"} · {editor.present.lines.length} LINE{editor.present.lines.length === 1 ? "" : "S"} · {editor.present.polylines.length} POLYLINE{editor.present.polylines.length === 1 ? "" : "S"} · {editor.present.circles.length} CIRCLE{editor.present.circles.length === 1 ? "" : "S"} · {editor.present.arcs.length} ARC{editor.present.arcs.length === 1 ? "" : "S"}</span><span>Story: {activeStory.name}</span><span>Layer: {activeLayer?.name ?? "Default"}</span><span>FT-IN</span><button type="button" className={cadDraftingSettings.gridVisible ? "status-toggle grid-toggle is-on" : "status-toggle grid-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))} title="Grid Display (F7)" aria-label="Toggle model space grid" aria-pressed={cadDraftingSettings.gridVisible}>GRID <small>{formatDraftingSpacing(cadDraftingSettings.gridSpacing)}</small></button><button type="button" className={activeLayerSet?.fillsVisible ?? true ? "status-toggle is-on" : "status-toggle"} onClick={toggleActiveLayerSetFills} title="Show or hide all fills for the active Layer Set" aria-pressed={activeLayerSet?.fillsVisible ?? true}>FILLS</button><span>Snap {formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</span><button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)">OSNAP</button><button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)">ORTHO</button><button type="button" className={cadDraftingSettings.polarEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, polarEnabled: !current.polarEnabled }))} title="Polar Tracking (F10)">POLAR</button><span>ELEV {formatSignedArchitectural(cadDraftingSettings.activeElevation)}</span><span>{viewTarget.label}</span><span title="Work is automatically recoverable on this device">RECOVERY ON</span></div>
       </footer>
+      </>}
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
