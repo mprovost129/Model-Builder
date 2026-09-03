@@ -10339,12 +10339,13 @@ export function ModelBuilderApp() {
   const [polylineCommand, setPolylineCommand] = useState<PolylineViewportCommand | null>(null);
   const [rectangleAnchor, setRectangleAnchor] = useState<LinePoint | null>(null);
   const [rectangleCommand, setRectangleCommand] = useState<RectangleViewportCommand | null>(null);
-  const [lineSnapAngles, setLineSnapAngles] = useState(() => [0, 90, 180, 270, ...storedAdditionalLineSnapAngles()]);
-  const [lineSnapAngleDraft, setLineSnapAngleDraft] = useState(() => storedAdditionalLineSnapAngles().join(", "));
+  const [lineSnapAngles, setLineSnapAngles] = useState(() => [0, 90, 180, 270]);
+  const [lineSnapAngleDraft, setLineSnapAngleDraft] = useState("");
   const [lineSnapAngleError, setLineSnapAngleError] = useState("");
-  const [cadDraftingSettings, setCadDraftingSettings] = useState(storedCadDraftingSettings);
+  const [cadDraftingSettings, setCadDraftingSettings] = useState<CadDraftingSettings>(() => ({ ...DEFAULT_CAD_DRAFTING_SETTINGS, objectSnapModes: [...DEFAULT_OBJECT_SNAP_MODES] }));
+  const [draftingPreferencesReady, setDraftingPreferencesReady] = useState(false);
   const [objectSnapOverride, setObjectSnapOverride] = useState<ObjectSnapMode | null>(null);
-  const [activeElevationDraft, setActiveElevationDraft] = useState(() => formatSignedArchitectural(storedCadDraftingSettings().activeElevation));
+  const [activeElevationDraft, setActiveElevationDraft] = useState(() => formatSignedArchitectural(DEFAULT_CAD_DRAFTING_SETTINGS.activeElevation));
   const [activeElevationError, setActiveElevationError] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
   const [lastCommandName, setLastCommandName] = useState<"arc" | "circle" | "foundation-wall" | "line" | "polyline" | "rectangle" | "wall" | null>(null);
@@ -10499,20 +10500,35 @@ export function ModelBuilderApp() {
   );
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const storedAngles = storedAdditionalLineSnapAngles();
+      const storedDrafting = storedCadDraftingSettings();
+      setLineSnapAngles([0, 90, 180, 270, ...storedAngles]);
+      setLineSnapAngleDraft(storedAngles.join(", "));
+      setCadDraftingSettings(storedDrafting);
+      setActiveElevationDraft(formatSignedArchitectural(storedDrafting.activeElevation));
+      setDraftingPreferencesReady(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    if (!draftingPreferencesReady) return;
     try {
       window.localStorage.setItem(LINE_SNAP_ANGLES_STORAGE_KEY, JSON.stringify(lineSnapAngles));
     } catch {
       // Line tracking settings remain available for the current session.
     }
-  }, [lineSnapAngles]);
+  }, [draftingPreferencesReady, lineSnapAngles]);
 
   useEffect(() => {
+    if (!draftingPreferencesReady) return;
     try {
       window.localStorage.setItem(CAD_DRAFTING_SETTINGS_STORAGE_KEY, JSON.stringify(cadDraftingSettings));
     } catch {
       // Drafting settings remain available for the current session.
     }
-  }, [cadDraftingSettings]);
+  }, [cadDraftingSettings, draftingPreferencesReady]);
 
   useEffect(() => {
     document.documentElement.style.colorScheme = interfaceTheme;
