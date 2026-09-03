@@ -8,6 +8,7 @@ import {
   cloneLayerSet,
   cloneLineObject,
   clonePolylineObject,
+  DEFAULT_PROJECT_INFORMATION,
   DEFAULT_LAYER,
   DEFAULT_LAYER_ID,
   MAXIMUM_GROUP_COUNT,
@@ -22,6 +23,7 @@ import {
   MAXIMUM_PLATFORM_OPENING_COUNT,
   PLATFORM_OPENING_CUTS,
   PLATFORM_OPENING_KINDS,
+  PROJECT_TYPES,
   type BoxObject,
   type ArcObject,
   type CircleObject,
@@ -29,6 +31,7 @@ import {
   type ModelDocument,
   type ModelFillOverride,
   type ModelLayer,
+  type ProjectInformation,
   type LineObject,
   type WallOpening,
   type PolylineObject,
@@ -144,7 +147,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 45;
+export const PROJECT_FILE_VERSION = 46;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -163,6 +166,7 @@ export type ModelBuilderProject = {
   name: string;
   objects: BoxObject[];
   polylines: PolylineObject[];
+  projectInformation: ProjectInformation;
   rooms: RoomObject[];
   roomAnnotations: RoomAnnotationObject[];
   savedPlanViews: SavedPlanView[];
@@ -203,6 +207,22 @@ function isIsoDate(value: unknown): value is string {
     value.length > 0 &&
     Number.isFinite(Date.parse(value))
   );
+}
+
+function readProjectInformation(value: unknown): ProjectInformation | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.address !== "string" || value.address.length > 240 ||
+    typeof value.clientName !== "string" || value.clientName.length > 120 ||
+    typeof value.projectNumber !== "string" || value.projectNumber.length > 80 ||
+    typeof value.projectType !== "string" || !PROJECT_TYPES.includes(value.projectType as ProjectInformation["projectType"])
+  ) return null;
+  return {
+    address: value.address.trim(),
+    clientName: value.clientName.trim(),
+    projectNumber: value.projectNumber.trim(),
+    projectType: value.projectType as ProjectInformation["projectType"],
+  };
 }
 
 const ASSEMBLY_KINDS: AssemblyKind[] = ["ceiling-finish", "ceiling-structure", "floor-finish", "floor-structure", "wall-structure"];
@@ -1087,6 +1107,7 @@ export function createProjectDocument({
     name: name.trim() || "Untitled Model",
     objects: cloneDocument(document).objects,
     polylines: cloneDocument(document).polylines,
+    projectInformation: { ...(document.projectInformation ?? DEFAULT_PROJECT_INFORMATION) },
     rooms: cloneDocument(document).rooms,
     roomAnnotations: cloneDocument(document).roomAnnotations,
     savedPlanViews: cloneDocument(document).savedPlanViews,
@@ -1144,6 +1165,11 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   ) {
     return { ok: false, error: "This project's measurement format is not supported." };
   }
+
+  const projectInformation = version >= 46
+    ? readProjectInformation(value.projectInformation)
+    : { ...DEFAULT_PROJECT_INFORMATION };
+  if (!projectInformation) return { ok: false, error: "The project information is missing or invalid." };
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
@@ -1407,7 +1433,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
       return ROOM_ANNOTATION_KINDS.map((kind) => ({ id: `${room.id}-${kind}`, kind, layerId: kind === "label" ? STANDARD_LAYER_IDS["room-label"] : kind === "area" ? STANDARD_LAYER_IDS["room-area"] : kind === "interior-dimensions" ? STANDARD_LAYER_IDS["room-interior-dimensions"] : STANDARD_LAYER_IDS["room-ceiling-height"], position: { ...center }, roomId: room.id, storyId: room.storyId, visible: true }));
     });
   }
-  const roomDocument: ModelDocument = { activeLayerSetId, activeLayerId, activeSavedPlanViewId, arcs, building, circles, groups, layers, layerSets, lines, objects: validObjects, polylines, rooms, roomAnnotations, savedPlanViews };
+  const roomDocument: ModelDocument = { activeLayerSetId, activeLayerId, activeSavedPlanViewId, arcs, building, circles, groups, layers, layerSets, lines, objects: validObjects, polylines, projectInformation, rooms, roomAnnotations, savedPlanViews };
   if (new Set(layerSets.map((set) => set.id)).size !== layerSets.length || !layerSets.some((set) => set.id === activeLayerSetId) || layerSets.some((set) => set.layers.length !== layers.length || new Set(set.layers.map((layer) => layer.id)).size !== layers.length || set.layers.some((layer) => !layerIds.has(layer.id)))) return { ok: false, error: "Layer Set identities or layer references are invalid." };
   if (new Set(savedPlanViews.map((view) => view.id)).size !== savedPlanViews.length || !savedPlanViews.some((view) => view.id === activeSavedPlanViewId) || savedPlanViews.some((view) => !layerSets.some((set) => set.id === view.layerSetId) || !layerIds.has(view.activeLayerId) || !storyIds.has(view.storyId) || view.referenceStoryId !== null && !storyIds.has(view.referenceStoryId))) return { ok: false, error: "Saved Plan View identities or references are invalid." };
   if (version >= 24) {
@@ -1445,6 +1471,7 @@ export function projectToDocument(project: ModelBuilderProject): ModelDocument {
     lines: project.lines.map(cloneLineObject),
     objects: project.objects.map(cloneBoxObject),
     polylines: project.polylines.map(clonePolylineObject),
+    projectInformation: { ...(project.projectInformation ?? DEFAULT_PROJECT_INFORMATION) },
     rooms: project.rooms.map(cloneRoomObject),
     roomAnnotations: project.roomAnnotations.map(cloneRoomAnnotation),
     savedPlanViews: project.savedPlanViews.map(cloneSavedPlanView),

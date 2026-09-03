@@ -370,6 +370,23 @@ export type ModelGroup = {
   name: string;
 };
 
+export const PROJECT_TYPES = ["new-construction", "addition", "remodel", "as-built"] as const;
+export type ProjectType = (typeof PROJECT_TYPES)[number];
+
+export type ProjectInformation = {
+  address: string;
+  clientName: string;
+  projectNumber: string;
+  projectType: ProjectType;
+};
+
+export const DEFAULT_PROJECT_INFORMATION: ProjectInformation = {
+  address: "",
+  clientName: "",
+  projectNumber: "",
+  projectType: "new-construction",
+};
+
 export type ModelDocument = {
   activeLayerSetId: string;
   activeLayerId: string;
@@ -383,6 +400,7 @@ export type ModelDocument = {
   lines: LineObject[];
   objects: BoxObject[];
   polylines: PolylineObject[];
+  projectInformation: ProjectInformation;
   rooms: RoomObject[];
   roomAnnotations: RoomAnnotationObject[];
   savedPlanViews: SavedPlanView[];
@@ -441,6 +459,7 @@ export const DEFAULT_DOCUMENT: ModelDocument = {
     },
   ],
   polylines: [],
+  projectInformation: { ...DEFAULT_PROJECT_INFORMATION },
   rooms: [],
   roomAnnotations: [],
   savedPlanViews: [createDefaultSavedPlanView("story-01")],
@@ -460,6 +479,7 @@ export const NEW_PROJECT_DOCUMENT: ModelDocument = {
   lines: [],
   objects: [],
   polylines: [],
+  projectInformation: { ...DEFAULT_PROJECT_INFORMATION },
   rooms: [],
   roomAnnotations: [],
   savedPlanViews: [createDefaultSavedPlanView("story-01")],
@@ -1540,6 +1560,7 @@ export function cloneDocument(document: ModelDocument): ModelDocument {
     lines: document.lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
+    projectInformation: { ...(document.projectInformation ?? DEFAULT_PROJECT_INFORMATION) },
     rooms: (document.rooms ?? []).map(cloneRoomObject),
     roomAnnotations: document.roomAnnotations.map(cloneRoomAnnotation),
     savedPlanViews: document.savedPlanViews.map(cloneSavedPlanView),
@@ -1552,6 +1573,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.activeLayerId === b.activeLayerId &&
     a.activeSavedPlanViewId === b.activeSavedPlanViewId &&
     buildingStructuresEqual(a.building, b.building) &&
+    JSON.stringify(a.projectInformation ?? DEFAULT_PROJECT_INFORMATION) === JSON.stringify(b.projectInformation ?? DEFAULT_PROJECT_INFORMATION) &&
     a.arcs.length === b.arcs.length &&
     a.arcs.every((arc, index) => {
       const other = b.arcs[index];

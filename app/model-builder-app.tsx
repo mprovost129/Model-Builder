@@ -305,6 +305,8 @@ import {
   type ModelDocument,
   type ModelEntityRef,
   type OpeningComponentOverride,
+  type ProjectInformation,
+  type ProjectType,
   type RoomObject,
   type RoomAnnotationObject,
   type RoomHorizontalPlatformSolution,
@@ -9175,6 +9177,13 @@ const FLOOR_STRUCTURE_PRESET_LABELS: Record<FloorStructurePreset, string> = {
   "slab-on-grade": "4 in. insulated slab-on-grade",
 };
 
+const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
+  "new-construction": "New construction",
+  addition: "Addition",
+  remodel: "Remodel",
+  "as-built": "Existing / as-built",
+};
+
 const WALL_LAYER_GROUP_LABELS: Record<WallLayerGroup, string> = {
   exterior: "Exterior Layers",
   main: "Main Layers",
@@ -9275,15 +9284,18 @@ function AssemblyMaterialSelect({
 
 function StoryAssemblyEditor({
   assembly,
+  defaultOpen = true,
   onChange,
   onSelectLayer,
   selectedLayerId,
 }: {
   assembly: LayeredAssembly;
+  defaultOpen?: boolean;
   onChange: (assembly: LayeredAssembly) => void;
   onSelectLayer?: (layerId: string) => void;
   selectedLayerId?: string;
 }) {
+  const [expanded, setExpanded] = useState(defaultOpen);
   const isWallAssembly = assembly.kind === "wall-structure";
   const addLayer = (wallGroup?: WallLayerGroup) => {
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
@@ -9371,11 +9383,12 @@ function StoryAssemblyEditor({
     );
   };
   return (
-    <section className="story-assembly">
-      <header>
+    <details className="story-assembly" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+      <summary>
         <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story reference elevations"}</span></div>
         <b>{formatArchitectural(assemblyTotalThickness(assembly))}</b>
-      </header>
+      </summary>
+      <div className="story-assembly-body">
       <div className={isWallAssembly ? "story-layer-grid story-layer-head is-wall-assembly" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span><span>Role</span><span>Thickness</span>{isWallAssembly ? <><span>Join</span><span>End</span></> : null}<span>Order</span></div>
       {isWallAssembly ? WALL_LAYER_GROUPS.map((group) => (
         <div className="story-wall-layer-group" key={group}>
@@ -9384,7 +9397,8 @@ function StoryAssemblyEditor({
         </div>
       )) : assembly.layers.map(renderLayer)}
       {!isWallAssembly ? <button type="button" className="story-add-layer" onClick={() => addLayer()}>＋ Add layer</button> : null}
-    </section>
+      </div>
+    </details>
   );
 }
 
@@ -9492,6 +9506,7 @@ function StoryManagerDialog({
               </div>
               <p><strong>{STORY_PURPOSE_LABELS[selectedStory.purpose]}:</strong> {STORY_PURPOSE_HELP[selectedStory.purpose]} Applying a preset replaces this Story&apos;s floor-structure layers; floor finishes remain separate and editable.</p>
             </section>
+            <div className="story-section-label"><strong>Calculated Results</strong><span>Read-only values derived from Story height and assembly thicknesses</span></div>
             <section className="story-calculated-grid" aria-label="Calculated Story elevations">
               <div><span>Rough floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughFloorElevation) : "—"}</strong></div>
               <div><span>Finished floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedFloorElevation) : "—"}</strong></div>
@@ -9502,10 +9517,10 @@ function StoryManagerDialog({
               <div><span>Finished clear height</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.finishedClearHeight) : "—"}</strong></div>
               <div><span>Floor above</span><strong>{selectedCalculation?.floorAboveElevation !== null && selectedCalculation?.floorAboveElevation !== undefined ? formatSignedArchitectural(selectedCalculation.floorAboveElevation) : "No Story above"}</strong></div>
             </section>
-            <StoryAssemblyEditor assembly={selectedStory.floorStructure} onChange={(assembly) => replaceAssembly("floor-structure", assembly)} />
-            <StoryAssemblyEditor assembly={selectedStory.floorFinish} onChange={(assembly) => replaceAssembly("floor-finish", assembly)} />
-            <StoryAssemblyEditor assembly={selectedStory.ceilingStructure} onChange={(assembly) => replaceAssembly("ceiling-structure", assembly)} />
-            <StoryAssemblyEditor assembly={selectedStory.ceilingFinish} onChange={(assembly) => replaceAssembly("ceiling-finish", assembly)} />
+            <StoryAssemblyEditor assembly={selectedStory.floorStructure} defaultOpen onChange={(assembly) => replaceAssembly("floor-structure", assembly)} />
+            <StoryAssemblyEditor assembly={selectedStory.floorFinish} defaultOpen={false} onChange={(assembly) => replaceAssembly("floor-finish", assembly)} />
+            <StoryAssemblyEditor assembly={selectedStory.ceilingStructure} defaultOpen={false} onChange={(assembly) => replaceAssembly("ceiling-structure", assembly)} />
+            <StoryAssemblyEditor assembly={selectedStory.ceilingFinish} defaultOpen={false} onChange={(assembly) => replaceAssembly("ceiling-finish", assembly)} />
           </main>
           <aside className="story-section-preview" aria-label="Story section preview">
             <header><strong>Section Preview</strong><span>Calculated rough and finish planes</span></header>
@@ -10898,6 +10913,202 @@ function RoomManagerDialog({
   );
 }
 
+type ProjectSetupStep = "project" | "stories" | "defaults" | "review";
+
+const PROJECT_SETUP_STEPS: { id: ProjectSetupStep; label: string; note: string }[] = [
+  { id: "project", label: "Project", note: "Identity and starting point" },
+  { id: "stories", label: "Stories", note: "Levels, heights, and floors" },
+  { id: "defaults", label: "Defaults", note: "Foundation, walls, and openings" },
+  { id: "review", label: "Review", note: "Confirm before drawing" },
+];
+
+function ProjectSetupDialog({
+  document,
+  initialName,
+  mode,
+  onCancel,
+  onOpenAdvanced,
+  onSave,
+}: {
+  document: ModelDocument;
+  initialName: string;
+  mode: "edit" | "new";
+  onCancel: () => void;
+  onOpenAdvanced: (target: "foundation" | "stories" | "walls") => void;
+  onSave: (name: string, document: ModelDocument) => void;
+}) {
+  const [draft, setDraft] = useState(() => cloneDocument(document));
+  const [name, setName] = useState(initialName);
+  const [step, setStep] = useState<ProjectSetupStep>("project");
+  const [selectedStoryId, setSelectedStoryId] = useState(document.building.activeStoryId);
+  const [error, setError] = useState("");
+  const selectedStory = draft.building.stories.find((story) => story.id === selectedStoryId) ?? draft.building.stories[0];
+  const selectedCalculation = calculateStoryElevations(draft.building).find((item) => item.storyId === selectedStory.id);
+  const activeFoundation = draft.building.foundationWallTypes.find((type) => type.id === draft.building.activeFoundationWallTypeId) ?? draft.building.foundationWallTypes[0];
+  const activeWall = draft.building.wallTypes.find((type) => type.id === draft.building.activeWallTypeId) ?? draft.building.wallTypes[0];
+  const activeDoor = draft.building.openingTypes.find((type) => type.id === draft.building.activeDoorTypeId);
+  const activeWindow = draft.building.openingTypes.find((type) => type.id === draft.building.activeWindowTypeId);
+  const stepIndex = PROJECT_SETUP_STEPS.findIndex((item) => item.id === step);
+
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+
+  const changeProjectInformation = (change: Partial<ProjectInformation>) => {
+    setDraft((current) => ({
+      ...cloneDocument(current),
+      projectInformation: { ...current.projectInformation, ...change },
+    }));
+    setError("");
+  };
+  const changeBuilding = (building: BuildingStructure) => {
+    setDraft((current) => ({ ...cloneDocument(current), building: cloneBuildingStructure(building) }));
+    setError("");
+  };
+  const replaceSelectedStory = (change: Partial<typeof selectedStory>) => {
+    const building = cloneBuildingStructure(draft.building);
+    const index = building.stories.findIndex((story) => story.id === selectedStory.id);
+    if (index < 0) return;
+    building.stories[index] = { ...building.stories[index], ...change };
+    changeBuilding(building);
+  };
+  const addStory = (placement: "above" | "below") => {
+    const building = addBuildingStory(draft.building, selectedStory.id, placement);
+    if (!building) return;
+    changeBuilding(building);
+    setSelectedStoryId(building.activeStoryId);
+  };
+  const deleteStory = () => {
+    const building = removeBuildingStory(draft.building, selectedStory.id);
+    if (!building) return;
+    changeBuilding(building);
+    setSelectedStoryId(building.activeStoryId);
+  };
+  const applyTemplate = (template: "one-story" | "basement" | "two-story-basement") => {
+    const next = cloneDocument(NEW_PROJECT_DOCUMENT);
+    next.projectInformation = { ...draft.projectInformation };
+    let building = cloneBuildingStructure(next.building);
+    if (template === "basement" || template === "two-story-basement") {
+      const withBasement = addBuildingStory(building, "story-01", "below");
+      if (withBasement) {
+        building = withBasement;
+        const basementIndex = building.stories.findIndex((story) => story.id === building.activeStoryId);
+        if (basementIndex >= 0) building.stories[basementIndex] = {
+          ...applyFloorStructurePreset(building.stories[basementIndex], "basement-slab"),
+          name: "Basement",
+          purpose: "basement",
+          roughCeilingHeight: 93,
+        };
+      }
+    }
+    if (template === "two-story-basement") {
+      const withSecondFloor = addBuildingStory(building, "story-01", "above");
+      if (withSecondFloor) {
+        building = withSecondFloor;
+        const secondIndex = building.stories.findIndex((story) => story.id === building.activeStoryId);
+        if (secondIndex >= 0) building.stories[secondIndex] = { ...building.stories[secondIndex], name: "Second Floor" };
+      }
+    }
+    building.activeStoryId = "story-01";
+    building.anchorStoryId = "story-01";
+    next.building = building;
+    setDraft(next);
+    setSelectedStoryId("story-01");
+    setError("");
+  };
+  const save = () => {
+    const normalizedName = name.trim();
+    if (!normalizedName || normalizedName.length > 120) {
+      setStep("project");
+      setError("Enter a project name between 1 and 120 characters.");
+      return;
+    }
+    if (!buildingStructureIsValid(draft.building)) {
+      setStep("stories");
+      setError("Review Story names, heights, and assemblies before continuing.");
+      return;
+    }
+    onSave(normalizedName, cloneDocument(draft));
+  };
+  const openAdvanced = (target: "foundation" | "stories" | "walls") => {
+    const normalizedName = name.trim();
+    if (!normalizedName || !buildingStructureIsValid(draft.building)) {
+      setError("Complete the required Project and Story settings before opening an advanced manager.");
+      return;
+    }
+    onSave(normalizedName, cloneDocument(draft));
+    onOpenAdvanced(target);
+  };
+  const reviewItems = [
+    { complete: Boolean(name.trim()), label: "Project name", value: name.trim() || "Required" },
+    { complete: draft.building.stories.length > 0, label: "Building Stories", value: `${draft.building.stories.length} configured` },
+    { complete: draft.building.stories.every((story) => story.roughCeilingHeight > 0), label: "Ceiling / plate heights", value: "Set for every Story" },
+    { complete: draft.building.stories.every((story) => story.floorStructure.layers.length > 0), label: "Floor structure", value: "Assembly assigned to every Story" },
+    { complete: Boolean(activeFoundation), label: "Foundation default", value: activeFoundation?.name ?? "Required" },
+    { complete: Boolean(activeWall), label: "Wall drawing default", value: activeWall?.name ?? "Required" },
+  ];
+
+  return (
+    <div className="story-manager-backdrop project-setup-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="project-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="project-setup-title">
+        <header className="project-setup-header">
+          <div><strong id="project-setup-title">{mode === "new" ? "New Project Quick Setup" : "Project Setup Center"}</strong><span>{mode === "new" ? "Establish the building before drawing. Everything can be refined later." : "Review the project-wide settings that drive Stories, Rooms, Walls, and openings."}</span></div>
+          <button type="button" onClick={onCancel} aria-label="Close Project Setup">×</button>
+        </header>
+        <div className="project-setup-layout">
+          <nav className="project-setup-nav" aria-label="Project setup categories">
+            <div className="project-setup-progress"><span>Setup progress</span><strong>{reviewItems.filter((item) => item.complete).length} of {reviewItems.length} ready</strong><i><b style={{ width: `${reviewItems.filter((item) => item.complete).length / reviewItems.length * 100}%` }} /></i></div>
+            {PROJECT_SETUP_STEPS.map((item, index) => <button type="button" key={item.id} className={step === item.id ? "is-active" : ""} onClick={() => { setStep(item.id); setError(""); }}><b>{index + 1}</b><span><strong>{item.label}</strong><small>{item.note}</small></span></button>)}
+            <div className="project-setup-scope"><strong>Advanced managers</strong><span>Detailed assemblies stay in their dedicated editors so this setup remains readable. Current setup changes are applied first.</span>{mode === "edit" ? <><button type="button" onClick={() => openAdvanced("stories")}>Story &amp; Assemblies</button><button type="button" onClick={() => openAdvanced("foundation")}>Foundation Types</button><button type="button" onClick={() => openAdvanced("walls")}>Wall Types</button></> : <small>Create the project first, then use the advanced managers when needed.</small>}</div>
+          </nav>
+          <main className="project-setup-content">
+            {step === "project" ? <>
+              <header><span>1 · Project</span><strong>Name the job and choose a sensible starting structure.</strong><p>Only the project name is required. The remaining fields travel with the saved project and can be completed as information becomes available.</p></header>
+              {mode === "new" ? <section className="project-template-grid" aria-label="Starting templates"><button type="button" onClick={() => applyTemplate("one-story")}><b>▱</b><strong>One Story</strong><span>First Floor with a wood-framed floor</span></button><button type="button" onClick={() => applyTemplate("basement")}><b>▤</b><strong>Basement + First Floor</strong><span>Separate Basement Story with a concrete slab</span></button><button type="button" onClick={() => applyTemplate("two-story-basement")}><b>▥</b><strong>Two Stories + Basement</strong><span>Basement, First Floor, and Second Floor</span></button></section> : null}
+              <section className="project-setup-card"><header><strong>Project Information</strong><span>Saved in the .mbproj file</span></header><div className="project-setup-fields">
+                <label className="is-wide"><span>Project name *</span><input autoFocus value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setError(""); }} /></label>
+                <label><span>Project number</span><input value={draft.projectInformation.projectNumber} maxLength={80} onChange={(event) => changeProjectInformation({ projectNumber: event.target.value })} /></label>
+                <label><span>Project type</span><select value={draft.projectInformation.projectType} onChange={(event) => changeProjectInformation({ projectType: event.target.value as ProjectType })}>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>Client</span><input value={draft.projectInformation.clientName} maxLength={120} onChange={(event) => changeProjectInformation({ clientName: event.target.value })} /></label>
+                <label><span>Measurement format</span><output>US Architectural · 1/16&quot;</output></label>
+                <label className="is-wide"><span>Project address</span><input value={draft.projectInformation.address} maxLength={240} onChange={(event) => changeProjectInformation({ address: event.target.value })} /></label>
+              </div><p className="project-setup-note">Metric and additional display precisions are planned. Internal model geometry currently remains inches for dependable architectural input.</p></section>
+            </> : null}
+            {step === "stories" ? <>
+              <header><span>2 · Stories</span><strong>Set the vertical building structure once.</strong><p>Story values establish the defaults. Room settings can override floor and ceiling assemblies or heights only where needed.</p></header>
+              <section className="project-story-workspace"><div className="project-story-table"><header><span>Story</span><span>Type</span><span>Rough floor</span><span>Ceiling</span></header>{[...draft.building.stories].reverse().map((story) => { const calculation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id); return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>{STORY_PURPOSE_LABELS[story.purpose]}</span><span>{calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span><span>{formatArchitectural(story.roughCeilingHeight)}</span></button>; })}<footer><button type="button" onClick={() => addStory("above")}>＋ Above</button><button type="button" onClick={() => addStory("below")}>＋ Below</button><button type="button" onClick={deleteStory} disabled={draft.building.stories.length === 1}>Delete</button></footer></div>
+                <div className="project-story-editor"><header><strong>{selectedStory.name}</strong><span>Defaults for this Story</span></header><div className="project-setup-fields"><label><span>Story name</span><input value={selectedStory.name} maxLength={80} onChange={(event) => replaceSelectedStory({ name: event.target.value })} /></label><label><span>Story type</span><select value={selectedStory.purpose} onChange={(event) => replaceSelectedStory({ purpose: event.target.value as StoryPurpose })}>{Object.entries(STORY_PURPOSE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><StoryDimensionInput key={`${selectedStory.id}:${selectedStory.roughCeilingHeight}`} label="Rough ceiling / plate height" value={selectedStory.roughCeilingHeight} onChange={(roughCeilingHeight) => replaceSelectedStory({ roughCeilingHeight })} /><label><span>Calculated rough floor</span><output>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughFloorElevation) : "—"}</output></label></div><div className="project-floor-presets"><span>Floor structure</span>{Object.entries(FLOOR_STRUCTURE_PRESET_LABELS).map(([preset, label]) => <button type="button" key={preset} onClick={() => replaceSelectedStory(applyFloorStructurePreset(selectedStory, preset as FloorStructurePreset))}>{label}</button>)}</div><dl><div><dt>Floor depth</dt><dd>{selectedCalculation ? formatArchitectural(selectedCalculation.floorStructureThickness) : "—"}</dd></div><div><dt>Finished clear height</dt><dd>{selectedCalculation ? formatArchitectural(selectedCalculation.finishedClearHeight) : "—"}</dd></div><div><dt>Finished ceiling</dt><dd>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedCeilingElevation) : "—"}</dd></div></dl></div>
+              </section>
+            </> : null}
+            {step === "defaults" ? <>
+              <header><span>3 · Defaults</span><strong>Choose what the first drafting tools will use.</strong><p>These choices select active reusable Types. Editing the construction layers remains in the detailed managers.</p></header>
+              <section className="project-default-grid">
+                <article><header><b>▰</b><div><strong>Foundation</strong><span>Support, footing, and sill edge</span></div></header><label><span>Active Foundation Wall type</span><select value={draft.building.activeFoundationWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeFoundationWallTypeId: event.target.value })}>{draft.building.foundationWallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Condition</dt><dd>{activeFoundation?.condition.replaceAll("-", " ")}</dd></div><div><dt>Sill plates</dt><dd>{activeFoundation?.sill.foundationPlateCount}</dd></div></dl></article>
+                <article><header><b>▥</b><div><strong>Walls</strong><span>Active type for the Wall tool</span></div></header><label><span>Active Wall type</span><select value={draft.building.activeWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWallTypeId: event.target.value })}>{draft.building.wallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Location</dt><dd>{activeWall?.wallLocation ?? "—"}</dd></div><div><dt>Total thickness</dt><dd>{activeWall ? formatArchitectural(assemblyTotalThickness(activeWall)) : "—"}</dd></div></dl></article>
+                <article><header><b>▣</b><div><strong>Doors &amp; Windows</strong><span>Reusable opening Types</span></div></header><label><span>Active Door type</span><select value={draft.building.activeDoorTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeDoorTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "door").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Active Window type</span><select value={draft.building.activeWindowTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWindowTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "window").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Door</dt><dd>{activeDoor?.name}</dd></div><div><dt>Window</dt><dd>{activeWindow?.name}</dd></div></dl></article>
+              </section><p className="project-setup-note">A future milestone will add separate exterior, interior-bearing, and partition defaults. For now, the selected active Wall type is exactly what the Wall tool uses, so the interface does not imply behavior that is not yet implemented.</p>
+            </> : null}
+            {step === "review" ? <>
+              <header><span>4 · Review</span><strong>Confirm the model-driving settings.</strong><p>This is a setup check, not a lock. Every value remains editable from Manage after the project opens.</p></header>
+              <section className="project-review-list">{reviewItems.map((item) => <div key={item.label} className={item.complete ? "is-complete" : "is-required"}><b>{item.complete ? "✓" : "!"}</b><span><strong>{item.label}</strong><small>{item.value}</small></span></div>)}</section>
+              <section className="project-review-summary"><div><span>Project</span><strong>{name.trim() || "Unnamed"}</strong><small>{PROJECT_TYPE_LABELS[draft.projectInformation.projectType]}{draft.projectInformation.projectNumber ? ` · ${draft.projectInformation.projectNumber}` : ""}</small></div><div><span>Building</span><strong>{draft.building.stories.length} Stor{draft.building.stories.length === 1 ? "y" : "ies"}</strong><small>{draft.building.stories.map((story) => story.name).join(" · ")}</small></div><div><span>First tools</span><strong>{activeWall?.name}</strong><small>{activeFoundation?.name}</small></div></section>
+            </> : null}
+          </main>
+        </div>
+        {error ? <p className="project-setup-error" role="alert">{error}</p> : null}
+        <footer className="project-setup-footer"><span>{mode === "new" ? "Creates a blank model in Top view" : "Changes are added to Undo history"}</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={() => setStep(PROJECT_SETUP_STEPS[Math.max(0, stepIndex - 1)].id)} disabled={stepIndex === 0}>Back</button>{stepIndex < PROJECT_SETUP_STEPS.length - 1 ? <button type="button" className="story-save" onClick={() => setStep(PROJECT_SETUP_STEPS[stepIndex + 1].id)}>Next</button> : <button type="button" className="story-save" onClick={save}>{mode === "new" ? "Create Project" : "Apply Project Setup"}</button>}</div></footer>
+      </section>
+    </div>
+  );
+}
+
 function NameEntryDialog({
   description,
   initialValue,
@@ -10965,6 +11176,7 @@ export function ModelBuilderApp() {
   const [selectedPolylineId, setSelectedPolylineId] = useState<string | null>(null);
   const [dragStatus, setDragStatus] = useState<DragStatus | null>(null);
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
+  const [projectSetupMode, setProjectSetupMode] = useState<"edit" | "new" | null>(null);
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
   const [framingManagerOpen, setFramingManagerOpen] = useState(false);
@@ -14501,42 +14713,54 @@ export function ModelBuilderApp() {
 
   const newProject = useCallback(() => {
     if (!confirmDiscard()) return;
-    const now = new Date().toISOString();
-    dispatch({ type: "load", next: NEW_PROJECT_DOCUMENT });
-    setDrawingPlaneFromBuilding(NEW_PROJECT_DOCUMENT.building);
-    setProjectName("Untitled Model");
-    setSavedProjectName("Untitled Model");
-    setProjectCreatedAt(now);
-    setSelectionForDocument(NEW_PROJECT_DOCUMENT, null);
-    setViewTarget(VIEW_PRESETS.top);
-    setFitViewSignal((value) => value + 1);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setBoundaryMode(false);
-    setChamferMode(false);
-    setChamferStage(0);
-    setChamferDistancePrompt(0);
-    setFilletMode(false);
-    setFilletStage(0);
-    setStretchMode(false);
-    setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setWallMode(false);
-    setFoundationWallMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
-    continuableEntityHistoryRef.current = [];
-    setRecoveredAt(null);
-    setHasActiveProject(true);
-    setShowDashboard(false);
-    setFileNotice({ text: "Started a blank new plan in Top view. Adjust Stories and Wall Types, then begin drawing.", tone: "info" });
-  }, [confirmDiscard, setDrawingPlaneFromBuilding, setSelectionForDocument]);
+    setTopMenu(null);
+    setProjectSetupMode("new");
+  }, [confirmDiscard]);
+
+  const applyProjectSetup = useCallback((name: string, nextDocument: ModelDocument) => {
+    if (projectSetupMode === "new") {
+      const now = new Date().toISOString();
+      dispatch({ type: "recover", next: nextDocument, saved: NEW_PROJECT_DOCUMENT });
+      setSavedProjectName("Untitled Model");
+      setProjectCreatedAt(now);
+      setSelectionForDocument(nextDocument, null);
+      setViewTarget(VIEW_PRESETS.top);
+      setFitViewSignal((value) => value + 1);
+      setCopyMode(false);
+      setMoveMode(false);
+      setRotateMode(false);
+      setScaleMode(false);
+      setMirrorMode(false);
+      setOffsetMode(false);
+      setBoundaryMode(false);
+      setChamferMode(false);
+      setChamferStage(0);
+      setChamferDistancePrompt(0);
+      setFilletMode(false);
+      setFilletStage(0);
+      setStretchMode(false);
+      setStretchTargets([]);
+      setArcMode(false);
+      setCircleMode(false);
+      setLineMode(false);
+      setWallMode(false);
+      setFoundationWallMode(false);
+      setPolylineMode(false);
+      setRectangleMode(false);
+      continuableEntityHistoryRef.current = [];
+      setRecoveredAt(null);
+      setHasActiveProject(true);
+      setShowDashboard(false);
+      setShowStartGuide(false);
+      setFileNotice({ text: `Created ${name} in Top view. Project defaults are ready; begin with Foundation Walls or Walls.`, tone: "success" });
+    } else {
+      dispatch({ type: "commit", next: nextDocument });
+      setFileNotice({ text: `Updated project setup for ${name}.`, tone: "success" });
+    }
+    setProjectName(name);
+    setDrawingPlaneFromBuilding(nextDocument.building);
+    setProjectSetupMode(null);
+  }, [projectSetupMode, setDrawingPlaneFromBuilding, setSelectionForDocument]);
 
   const saveProjectWithName = useCallback((requestedName: string) => {
     const now = new Date().toISOString();
@@ -15332,6 +15556,7 @@ export function ModelBuilderApp() {
             <div className="ribbon-group current-settings manage-project-summary"><div><span>Units</span><strong>Architectural</strong></div><div><span>Active Story</span><strong>{activeStory.name}</strong></div><small>Project</small></div>
             <div className="ribbon-group manage-setting-group">
               <div className="ribbon-tools compact-tools manage-tools">
+                <button type="button" onClick={() => setProjectSetupMode("edit")} title="Review project information, Stories, and active building defaults in one place"><b>☷</b><span>Project<br />Setup</span></button>
                 <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor and ceiling assemblies, and vertical building defaults"><b>≋</b><span>Floors &amp;<br />Ceilings</span></button>
                 <button type="button" onClick={() => setFoundationManagerOpen(true)} title="Define concrete Foundation Wall, footing, and sill support types"><b>▰</b><span>Foundation</span></button>
                 <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
@@ -15707,7 +15932,7 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Floor depth"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(activeStory.floorStructure))}</span></PropertyGridRow>
                 <PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Project active Wall Type">{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Rooms"><span className="property-readout">{activeStoryRoomCount} detected</span></PropertyGridRow>
-                <div className="property-action-row project-setup-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story &amp; Floor Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
+                <div className="property-action-row project-setup-actions"><button type="button" onClick={() => setProjectSetupMode("edit")}>Project Setup Center</button><button type="button" onClick={() => setStoryManagerOpen(true)}>Story &amp; Floor Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
                 <p className="property-grid-note">Story settings establish the defaults. Room settings override them only where needed.</p>
               </PropertyGridSection>
               <PropertyGridSection className="drawing-properties" title="Drawing" meta="No selection">
@@ -16074,6 +16299,7 @@ export function ModelBuilderApp() {
         </div>
       </footer>
       </>}
+      {projectSetupMode ? <ProjectSetupDialog document={projectSetupMode === "new" ? NEW_PROJECT_DOCUMENT : editor.present} initialName={projectSetupMode === "new" ? "Untitled Project" : normalizedProjectName} mode={projectSetupMode} onCancel={() => setProjectSetupMode(null)} onOpenAdvanced={(target) => { setProjectSetupMode(null); if (target === "stories") setStoryManagerOpen(true); else if (target === "foundation") setFoundationManagerOpen(true); else setWallTypeManagerOpen(true); }} onSave={applyProjectSetup} /> : null}
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}

@@ -37,9 +37,16 @@ const createdAt = "2026-08-27T12:00:00.000Z";
 const updatedAt = "2026-08-27T12:30:00.000Z";
 
 test("round-trips a blank new plan with its project settings", () => {
+  const documentWithProjectInformation = structuredClone(NEW_PROJECT_DOCUMENT);
+  documentWithProjectInformation.projectInformation = {
+    address: "12 Example Lane, Westport, MA",
+    clientName: "Example Client",
+    projectNumber: "260901",
+    projectType: "new-construction",
+  };
   const project = createProjectDocument({
     createdAt,
-    document: NEW_PROJECT_DOCUMENT,
+    document: documentWithProjectInformation,
     name: "Blank Plan",
     updatedAt,
   });
@@ -56,6 +63,18 @@ test("round-trips a blank new plan with its project settings", () => {
   assert.equal(document.building.activeFoundationWallTypeId, document.building.foundationWallTypes[0].id);
   assert.equal(document.layerSets.length, 1);
   assert.equal(document.savedPlanViews[0].viewMode, "top");
+  assert.deepEqual(document.projectInformation, documentWithProjectInformation.projectInformation);
+});
+
+test("upgrades version-45 projects with blank project information", () => {
+  const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Version 45 Plan", updatedAt });
+  const legacy = structuredClone(current) as Partial<typeof current> & { version: number };
+  legacy.version = 45;
+  delete legacy.projectInformation;
+  const parsed = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(projectToDocument(parsed.project).projectInformation, NEW_PROJECT_DOCUMENT.projectInformation);
 });
 
 test("upgrades version-42 projects with standard layers, Layer Sets, Saved Views, and Room annotation storage", () => {
