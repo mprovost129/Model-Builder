@@ -45,7 +45,7 @@ Do not add more ordinary product-object families until this checklist is complet
 
 ## Next sequence after this milestone
 
-1. Complete wall design editing against the stable layer and Room system.
+1. Complete wall design editing against the stable layer and Room system. See `WALL_ASSEMBLY_EDITOR_MILESTONE.md`.
 2. Add framing-aware wall intersections, platform edge cases, and garage/mudsill conditions.
 3. Expand manufacturer object import and reusable component libraries.
 4. Add annotation/dimension style managers and construction-document views.

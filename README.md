@@ -96,7 +96,10 @@ polylines, rectangles, Circles, and Arcs.
 - Reusable wall types with explicitly ordered Exterior, Main, and Interior layer
   groups, per-group thickness totals, and a required structural Main core; new plans
   include 2x4 and 2x6 exterior walls plus 2x4 and 2x6 interior walls, with the 2x6
-  exterior assembly active for initial drawing
+  exterior assembly active for initial drawing. The Wall Type Manager includes a
+  live plan-section preview whose selectable layer bands, group dimensions, and
+  Wall/Main reference-line offsets update from the same exterior-face geometry used
+  by placed Walls; the selected layer thickness is editable directly in the preview
 - Reusable Foundation Wall Types with concrete height/width/material, continuous footing
   geometry, top offsets, hosted sill dimensions, exterior-edge setback, and explicit
   plate ownership for standard, interior mudsill, dropped, garage, and walk-out conditions

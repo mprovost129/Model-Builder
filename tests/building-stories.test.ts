@@ -27,6 +27,7 @@ import {
   windowSashArrangementForType,
   removeBuildingStory,
   wallLayerCenterOffsets,
+  wallLayerDistanceRanges,
   wallReferenceDistanceFromExterior,
 } from "../lib/building-stories.ts";
 
@@ -325,6 +326,12 @@ test("positions wall layers from selectable Main reference lines and exterior si
   assert.deepEqual(wallLayerCenterOffsets(wallType, "exterior-main", "left"), [0.6875, 0.21875, -1.75, -3.75]);
   assert.deepEqual(wallLayerCenterOffsets(wallType, "exterior-main", "right"), [-0.6875, -0.21875, 1.75, 3.75]);
   assert.deepEqual(wallLayerCenterOffsets(wallType, "wall-center", "left"), [2.21875, 1.75, -0.21875, -2.21875]);
+  assert.deepEqual(wallLayerDistanceRanges(wallType), [
+    { center: 0.25, end: 0.5, layerId: "wall-type-01-01", start: 0 },
+    { center: 0.71875, end: 0.9375, layerId: "wall-type-01-02", start: 0.5 },
+    { center: 2.6875, end: 4.4375, layerId: "wall-type-01-03", start: 0.9375 },
+    { center: 4.6875, end: 4.9375, layerId: "wall-type-01-04", start: 4.4375 },
+  ]);
 });
 
 test("calculates Stories below the anchored First Floor downward", () => {

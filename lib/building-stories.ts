@@ -1027,6 +1027,29 @@ export function wallReferenceDistanceFromExterior(assembly: LayeredAssembly, ref
   return assemblyTotalThickness(assembly) / 2;
 }
 
+export type WallLayerDistanceRange = {
+  center: number;
+  end: number;
+  layerId: string;
+  start: number;
+};
+
+/** Exterior-face distances used by plan graphics, dimensions, and assembly previews. */
+export function wallLayerDistanceRanges(assembly: LayeredAssembly): WallLayerDistanceRange[] {
+  let distanceFromExterior = 0;
+  return assembly.layers.map((layer) => {
+    const start = distanceFromExterior;
+    const end = start + layer.thickness;
+    distanceFromExterior = end;
+    return {
+      center: start + layer.thickness / 2,
+      end,
+      layerId: layer.id,
+      start,
+    };
+  });
+}
+
 /** Layer-center offsets from the drawn reference line along its left-hand normal. */
 export function wallLayerCenterOffsets(
   assembly: LayeredAssembly,
