@@ -27,6 +27,7 @@ import {
   copyModelEntities,
   createBoundaryPolylineObject,
   createFloorPlatformFromPolyline,
+  createRoofPlaneFromWall,
   createFoundationWallFromLine,
   createWallFromLine,
   DEFAULT_DOCUMENT,
@@ -78,6 +79,8 @@ import {
   platformOpeningContinuity,
   platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
+  roofPlaneGeometry,
+  roofPlaneReferenceDimensions,
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
@@ -92,6 +95,7 @@ import {
   updateRoomAnnotation,
   updateLayerAppearance,
   updatePlatformOpening,
+  updateRoofPlane,
   wallOpeningRoughBottom,
   wallVerticalExtent,
   updateCircleGrip,
@@ -117,6 +121,49 @@ test("clones documents without sharing nested geometry", () => {
   clone.objects[0].dimensions.length = 200;
   assert.equal(DEFAULT_DOCUMENT.objects[0].dimensions.length, 144);
   assert.equal(documentsEqual(DEFAULT_DOCUMENT, clone), false);
+});
+
+test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () => {
+  const line = addLineObject(NEW_PROJECT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 240, y: 0, z: 0 });
+  assert.ok(line);
+  const wallDocument = createWallFromLine(line.document, line.line.id);
+  assert.ok(wallDocument);
+  const created = createRoofPlaneFromWall(wallDocument, line.line.id, 144);
+  assert.ok(created);
+  assert.equal(created.roofPlane.architecturalRole, "roof-plane");
+  assert.equal(created.roofPlane.layerId, STANDARD_LAYER_IDS["roof-plane"]);
+  const geometry = roofPlaneGeometry(created.roofPlane);
+  const reference = roofPlaneReferenceDimensions(created.document, created.roofPlane);
+  assert.ok(geometry);
+  assert.ok(reference);
+  assert.equal(geometry.horizontalRun, 144);
+  assert.deepEqual(geometry.bearingStart, { x: 0, y: 0 });
+  assert.equal(reference.topOfPlateElevation, 109.125);
+  assert.equal(reference.heelElevation, 118.375);
+  assert.equal(reference.peakElevation, 190.375);
+
+  const updated = updateRoofPlane(created.document, created.roofPlane.id, { horizontalRun: 180, overhang: 24, pitchRise: 8 });
+  assert.ok(updated);
+  const updatedPlane = updated.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
+  const updatedGeometry = roofPlaneGeometry(updatedPlane);
+  const updatedReference = roofPlaneReferenceDimensions(updated, updatedPlane);
+  assert.ok(updatedGeometry);
+  assert.ok(updatedReference);
+  assert.equal(updatedGeometry.horizontalRun, 180);
+  assert.deepEqual(updatedGeometry.bearingStart, { x: 0, y: 0 });
+  assert.equal(updatedReference.peakElevation, 238.375);
+
+  const copied = copyModelEntities(updated, [{ id: updatedPlane.id, kind: "polyline" }], { x: 300, y: 0, z: 0 });
+  assert.ok(copied);
+  const copiedPlane = copied.document.polylines.find((polyline) => polyline.id === copied.refs[0].id)!;
+  assert.equal(copiedPlane.roofBearingWallId, null);
+
+  const scaled = scaleModelEntities(updated, [{ id: updatedPlane.id, kind: "polyline" }], { x: 0, y: 0, z: 0 }, 2);
+  assert.ok(scaled);
+  const scaledPlane = scaled.polylines.find((polyline) => polyline.id === updatedPlane.id)!;
+  assert.equal(scaledPlane.roofBearingWallId, null);
+  assert.equal(scaledPlane.roofSettings?.overhang, 48);
+  assert.equal(roofPlaneGeometry(scaledPlane)?.horizontalRun, 360);
 });
 
 test("adds a uniquely named box beyond the current document bounds", () => {

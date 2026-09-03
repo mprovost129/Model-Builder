@@ -11,6 +11,7 @@ import {
   addRectangleObject,
   addWallOpening,
   createFloorPlatformFromPolyline,
+  createRoofPlaneFromWall,
   createFoundationWallFromLine,
   createWallFromLine,
   DEFAULT_DOCUMENT,
@@ -1121,6 +1122,23 @@ test("round-trips open and closed polylines", () => {
   const parsed = parseProjectDocument(serializeProjectDocument(project));
   assert.equal(parsed.ok, true);
   if (parsed.ok) assert.deepEqual(projectToDocument(parsed.project).polylines, added.document.polylines);
+});
+
+test("round-trips a manual Roof Plane with its per-plane heel and pitch settings", () => {
+  const line = addLineObject(NEW_PROJECT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 240, y: 0, z: 0 });
+  assert.ok(line);
+  const wallDocument = createWallFromLine(line.document, line.line.id);
+  assert.ok(wallDocument);
+  const created = createRoofPlaneFromWall(wallDocument, line.line.id, 180);
+  assert.ok(created);
+  const project = createProjectDocument({ createdAt, document: created.document, name: "Manual Roof", updatedAt });
+  const parsed = parseProjectDocument(serializeProjectDocument(project));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const restored = projectToDocument(parsed.project);
+  assert.deepEqual(restored.polylines, created.document.polylines);
+  assert.equal(restored.polylines[0].architecturalRole, "roof-plane");
+  assert.equal(restored.polylines[0].roofSettings?.heightAbovePlate, 9.25);
 });
 
 test("round-trips Polyline Arc segments and constant width", () => {

@@ -15,6 +15,7 @@ export type ModelObjectCategory =
   | "room-ceiling-height"
   | "room-interior-dimensions"
   | "room-label"
+  | "roof-plane"
   | "wall"
   | "window";
 
@@ -114,6 +115,7 @@ export const STANDARD_LAYER_IDS: Record<ModelObjectCategory, string> = {
   "room-ceiling-height": "layer-room-ceiling-heights",
   "room-interior-dimensions": "layer-room-interior-dimensions",
   "room-label": "layer-room-labels",
+  "roof-plane": "layer-roof-planes",
   wall: "layer-walls",
   window: "layer-windows",
 };
@@ -129,6 +131,7 @@ export const STANDARD_LAYERS: readonly ModelLayer[] = [
   layer("layer-doors", "Doors", "#8a5d45", "#d8c3b7", 2),
   layer("layer-windows", "Windows", "#397d9d", "#b7d8e5", 2),
   layer("layer-floor-platforms", "Floors, Platforms", "#927c58", "#ded2bd", 2),
+  layer("layer-roof-planes", "Roofs, Planes", "#6d4f39", "#d7b99a", 2),
   layer("layer-rooms", "Rooms", "#d6e8f3", "#e8eef2"),
   layer("layer-room-labels", "Rooms, Labels", "#20394c", "#ffffff", 2),
   layer("layer-room-area", "Rooms, Standard Area", "#496b80", "#ffffff"),

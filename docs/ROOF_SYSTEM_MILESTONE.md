@@ -2,7 +2,7 @@
 
 Status updated: September 3, 2026
 
-This file is the implementation record for Roof design in Slater Woods Omni Design. It separates the working height-reference foundation from future Roof Plane geometry and automatic roof generation.
+This file is the implementation record for Roof design in Slater Woods Omni Design. It separates the working height-reference foundation, the first manual Roof Plane workflow, and future automatic roof generation.
 
 ## Governing geometry
 
@@ -28,11 +28,18 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 
 ## Next: manual Roof Planes
 
-- [ ] Native Roof Plane entity with editable baseline, polygon boundary, pitch direction, bearing Story/Wall, and horizontal run.
+- [x] Native saved Roof Plane object created from a selected framed Wall and assigned to a standard `Roofs, Planes` layer.
+- [x] Initial four-corner plane footprint generated from the exterior face of the Wall Main layer, horizontal overhang, and inward horizontal run.
+- [x] Bearing Wall identity and Story retained; removing or changing the source Wall safely detaches the manual plane instead of deleting it.
+- [x] Plan graphics show the footprint, bearing line, and uphill pitch direction; perspective/elevation views show the calculated sloped surface.
+- [x] Per-plane pitch, Height Above Plate, horizontal run, and overhang are editable in Properties.
+- [x] Live Top of Plate, heel, high-edge/peak, and fascia-top elevations use the actual plane run.
+- [x] Version-49 project files preserve manual Roof Planes and their per-plane defaults.
+- [ ] Direct baseline and arbitrary polygon-boundary editing while preserving a valid bearing reference.
 - [ ] Roof Plane input methods based on Height Above Plate, fascia height, or an existing plane's matched fascia.
-- [ ] Per-plane overrides for pitch, heel, overhang, rafter/truss size, fascia, and subfascia.
+- [ ] Complete per-plane overrides for rafter/truss size, fascia, subfascia, and birdsmouth inputs; pitch, heel, run, and overhang are complete.
 - [ ] Live editable dimensions in plan and section/elevation views.
-- [ ] Exact ridge/peak, eave, fascia, subfascia, and top-surface elevations from actual plane geometry.
+- [ ] Complete exact ridge/eave/fascia/subfascia component solids; the current structural surface and reference elevations are calculated.
 - [ ] Birdsmouth solid generated from the hosted Wall plate, member geometry, seat length, and maximum-notch validation rule.
 - [ ] Layered Roof Types for sheathing, underlayment, roofing, insulation, and finish components above/below the structural plane.
 - [ ] Hip, valley, ridge, rake, and roof-opening joins with explicit cleanup rules.
@@ -51,3 +58,4 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - Birdsmouth limits and member sizes are project modeling inputs, not structural engineering approval.
 - Automatic generation must never silently alter manually detached Roof Planes.
 - Calculated elevations remain derived values; editing one must change an identified driver such as pitch, heel, overhang, or run.
+- A Wall-created Roof Plane starts with a 12-foot inward run as an explicit editable starting value; it is not an automatic roof proposal.

@@ -180,6 +180,7 @@ import {
   copyModelEntities,
   copyBoxObjects,
   createFloorPlatformFromPolyline,
+  createRoofPlaneFromWall,
   createFoundationWallFromLine,
   createWallFromLine,
   duplicateLayerSet,
@@ -237,6 +238,7 @@ import {
   renameBoxObject,
   renameCircleObject,
   removeFloorPlatformRole,
+  removeRoofPlaneRole,
   removeWallRole,
   refreshRoomsForStory,
   ROOM_TYPES,
@@ -288,6 +290,9 @@ import {
   platformOpeningContinuity,
   platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
+  roofPlaneGeometry,
+  roofPlaneReferenceDimensions,
+  updateRoofPlane,
   updatePlatformOpening,
   foundationSillOffsetFromReference,
   foundationWallVerticalExtent,
@@ -1785,6 +1790,64 @@ function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObje
   rebuildPlatformEdges(view);
 }
 
+function updateRoofPlaneView(view: FloorPlatformView, document: ModelDocument, polyline: PolylineObject, viewTarget: ViewTarget) {
+  clearFloorPlatformView(view);
+  const geometry = roofPlaneGeometry(polyline);
+  const reference = roofPlaneReferenceDimensions(document, polyline);
+  if (!geometry || !reference) return;
+  const eaveZ = reference.fasciaTopElevation;
+  const highZ = reference.peakElevation;
+  const buffer = new THREE.BufferGeometry();
+  buffer.setAttribute("position", new THREE.Float32BufferAttribute([
+    geometry.eaveStart.x, geometry.eaveStart.y, eaveZ,
+    geometry.eaveEnd.x, geometry.eaveEnd.y, eaveZ,
+    geometry.highEnd.x, geometry.highEnd.y, highZ,
+    geometry.highStart.x, geometry.highStart.y, highZ,
+  ], 3));
+  buffer.setIndex([0, 1, 2, 0, 2, 3]);
+  buffer.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({ color: 0xd7b99a, metalness: 0, opacity: 0.9, roughness: 0.82, side: THREE.DoubleSide, transparent: true });
+  const mesh = new THREE.Mesh(buffer, material);
+  mesh.userData.polylineId = polyline.id;
+  mesh.userData.roofPlane = true;
+  view.group.add(mesh);
+  view.meshes.push(mesh);
+  view.materials.push(material);
+  rebuildPlatformEdges(view);
+
+  const bearingMaterial = new THREE.LineDashedMaterial({ color: 0x3f7592, dashSize: 6, depthTest: false, gapSize: 3, opacity: 0.95, transparent: true });
+  const bearingLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(geometry.bearingStart.x, geometry.bearingStart.y, reference.heelElevation + 1 / 16),
+    new THREE.Vector3(geometry.bearingEnd.x, geometry.bearingEnd.y, reference.heelElevation + 1 / 16),
+  ]), bearingMaterial);
+  bearingLine.computeLineDistances();
+  bearingLine.renderOrder = 18;
+  bearingLine.visible = viewTarget.id === "top";
+  view.group.add(bearingLine);
+  view.outlines.push(bearingLine);
+  view.outlineMaterials.push(bearingMaterial);
+
+  const midpoint = { x: (geometry.bearingStart.x + geometry.bearingEnd.x) / 2, y: (geometry.bearingStart.y + geometry.bearingEnd.y) / 2 };
+  const arrowLength = Math.min(60, geometry.horizontalRun * 0.55);
+  const tip = { x: midpoint.x + geometry.inwardNormal.x * arrowLength, y: midpoint.y + geometry.inwardNormal.y * arrowLength };
+  const tangent = { x: -geometry.inwardNormal.y, y: geometry.inwardNormal.x };
+  const arrowZ = reference.heelElevation + 1 / 8;
+  const roofArrowMaterial = new THREE.LineDashedMaterial({ color: 0x3f7592, dashSize: 1000, depthTest: false, gapSize: 0, opacity: 0.95, transparent: true });
+  const roofArrow = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(midpoint.x, midpoint.y, arrowZ),
+    new THREE.Vector3(tip.x, tip.y, arrowZ),
+    new THREE.Vector3(tip.x - geometry.inwardNormal.x * 8 + tangent.x * 4, tip.y - geometry.inwardNormal.y * 8 + tangent.y * 4, arrowZ),
+    new THREE.Vector3(tip.x, tip.y, arrowZ),
+    new THREE.Vector3(tip.x - geometry.inwardNormal.x * 8 - tangent.x * 4, tip.y - geometry.inwardNormal.y * 8 - tangent.y * 4, arrowZ),
+  ]), roofArrowMaterial);
+  roofArrow.computeLineDistances();
+  roofArrow.renderOrder = 19;
+  roofArrow.visible = viewTarget.id === "top";
+  view.group.add(roofArrow);
+  view.outlines.push(roofArrow);
+  view.outlineMaterials.push(roofArrowMaterial);
+}
+
 function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizontalPlatformSolution) {
   clearFloorPlatformView(view);
   const floorShape = platformShape(solution.floorBoundary, solution.floorOpeningBoundaries);
@@ -2824,6 +2887,7 @@ function Viewport({
   const circleViewsRef = useRef(new Map<string, ViewportLine>());
   const polylineViewsRef = useRef(new Map<string, ViewportLine>());
   const floorPlatformViewsRef = useRef(new Map<string, FloorPlatformView>());
+  const roofPlaneViewsRef = useRef(new Map<string, FloorPlatformView>());
   const roomPlatformViewsRef = useRef(new Map<string, FloorPlatformView>());
   const moveGizmoRef = useRef<MoveGizmo | null>(null);
   const rotationGizmoRef = useRef<RotationGizmo | null>(null);
@@ -3444,6 +3508,7 @@ function Viewport({
       polylineViews.set(polyline.id, view);
     });
     const floorPlatformViews = floorPlatformViewsRef.current;
+    const roofPlaneViews = roofPlaneViewsRef.current;
     const roomPlatformViews = roomPlatformViewsRef.current;
     const circleViews = circleViewsRef.current;
     documentRef.current.circles.forEach((circle) => {
@@ -3886,6 +3951,10 @@ function Viewport({
         if (typeof id === "string") register({ distance: hit.distance, faceIndex: null, point: hit.point, ref: { id, kind: "polyline" } });
       });
       raycaster.intersectObjects([...floorPlatformViewsRef.current.values()].flatMap((view) => view.meshes), false).forEach((hit) => {
+        const id = hit.object.userData.polylineId;
+        if (typeof id === "string") register({ distance: hit.distance, faceIndex: null, point: hit.point, ref: { id, kind: "polyline" } });
+      });
+      raycaster.intersectObjects([...roofPlaneViewsRef.current.values()].flatMap((view) => view.meshes), false).forEach((hit) => {
         const id = hit.object.userData.polylineId;
         if (typeof id === "string") register({ distance: hit.distance, faceIndex: null, point: hit.point, ref: { id, kind: "polyline" } });
       });
@@ -6994,6 +7063,8 @@ function Viewport({
       polylineViews.clear();
       floorPlatformViews.forEach((view) => disposeFloorPlatformView(scene, view));
       floorPlatformViews.clear();
+      roofPlaneViews.forEach((view) => disposeFloorPlatformView(scene, view));
+      roofPlaneViews.clear();
       roomPlatformViews.forEach((view) => disposeFloorPlatformView(scene, view));
       roomPlatformViews.clear();
       circleViews.forEach((view) => disposeViewportLine(scene, view));
@@ -7210,7 +7281,7 @@ function Viewport({
       updateViewportPolyline(view, polyline);
       applyLayerAppearanceToViewportLine(view, findLayer(document, polyline.layerId));
       const visible = findLayer(document, polyline.layerId)?.visible ?? true;
-      view.line.visible = visible;
+      view.line.visible = visible && (polyline.architecturalRole !== "roof-plane" || viewTarget.id === "top");
       if (view.fill) view.fill.visible = visible && resolvedObjectFill(document, polyline.layerId, polyline).visible && (polyline.width ?? 0) >= 1 / 16;
     });
     const currentFloorIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "floor-platform").map((polyline) => polyline.id));
@@ -7229,6 +7300,22 @@ function Viewport({
       const story = document.building.stories.find((candidate) => candidate.id === polyline.storyId);
       if (story) updateFloorPlatformView(view, polyline, story);
       view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true));
+    });
+    const currentRoofPlaneIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").map((polyline) => polyline.id));
+    roofPlaneViewsRef.current.forEach((view, polylineId) => {
+      if (!currentRoofPlaneIds.has(polylineId)) {
+        disposeFloorPlatformView(scene, view);
+        roofPlaneViewsRef.current.delete(polylineId);
+      }
+    });
+    document.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").forEach((polyline) => {
+      let view = roofPlaneViewsRef.current.get(polyline.id);
+      if (!view) {
+        view = createFloorPlatformView(scene);
+        roofPlaneViewsRef.current.set(polyline.id, view);
+      }
+      updateRoofPlaneView(view, document, polyline, viewTarget);
+      view.group.visible = Boolean(findLayer(document, polyline.layerId)?.visible ?? true);
     });
     const currentRoomIds = new Set(document.rooms.map((room) => room.id));
     roomPlatformViewsRef.current.forEach((view, roomId) => {
@@ -7475,6 +7562,21 @@ function Viewport({
         edge.visible = sourceMesh?.visible ?? true;
       });
       view.materials.forEach((material) => {
+        material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
+      });
+    });
+    roofPlaneViewsRef.current.forEach((view, polylineId) => {
+      const selected = selectedEntityKeys.includes(cadEntityKey({ id: polylineId, kind: "polyline" }));
+      const hovered = hoveredEntityKey === cadEntityKey({ id: polylineId, kind: "polyline" });
+      const polyline = findPolylineObject(document, polylineId);
+      const layer = findLayer(document, polyline?.layerId ?? null);
+      const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
+      view.meshes.forEach((mesh) => setMeshOpacity(mesh, fill.visible, selected, hovered));
+      view.edges.forEach((edge) => {
+        (edge.material as THREE.LineBasicMaterial).color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x6d4f39);
+      });
+      view.materials.forEach((material) => {
+        material.color.set(fill.color);
         material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
       });
     });
@@ -7914,6 +8016,51 @@ function DimensionField({
       {error ? <small className="property-row-error" id={`${dimensionKey}-error`} role="alert">{error}</small> : null}
     </label>
   );
+}
+
+function ArchitecturalPropertyField({
+  allowZero = false,
+  label,
+  onCommit,
+  value,
+}: {
+  allowZero?: boolean;
+  label: string;
+  onCommit: (value: number) => void;
+  value: number;
+}) {
+  const [draft, setDraft] = useState(formatArchitectural(value));
+  const [error, setError] = useState(false);
+  const commit = () => {
+    const parsed = parseArchitectural(draft);
+    if (parsed === null || (allowZero ? parsed < 0 : parsed <= 0)) {
+      setError(true);
+      return;
+    }
+    setError(false);
+    onCommit(snapToSixteenth(parsed));
+  };
+  return (
+    <label className="property-table-row property-input-row">
+      <span className="property-table-label">{label}</span>
+      <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
+        <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatArchitectural(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} spellCheck={false} />
+        <span>ft-in</span>
+      </div>
+    </label>
+  );
+}
+
+function NumberPropertyField({ label, max, min, onCommit, step = 0.0625, value }: { label: string; max: number; min: number; onCommit: (value: number) => void; step?: number; value: number }) {
+  const [draft, setDraft] = useState(String(value));
+  const [error, setError] = useState(false);
+  const commit = () => {
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max) { setError(true); return; }
+    setError(false);
+    onCommit(snapToSixteenth(parsed));
+  };
+  return <label className="property-table-row property-input-row"><span className="property-table-label">{label}</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input type="number" min={min} max={max} step={step} value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(String(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} /><span>:12</span></div></label>;
 }
 
 function PositionField({
@@ -14128,6 +14275,20 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${selectedLine.name} is now a Story-controlled Foundation Wall.`, tone: "success" });
   }, [editor.present, selectedLine, selectedLineIsEditable]);
 
+  const createRoofPlaneForSelectedWall = useCallback(() => {
+    if (!selectedLine || selectedLine.architecturalRole !== "wall" || !selectedLineIsEditable) return;
+    const result = createRoofPlaneFromWall(editor.present, selectedLine.id);
+    if (!result) {
+      setFileNotice({ text: "A Roof Plane requires an editable framed Wall with a valid exterior side, Wall Type, Story, and Roof defaults.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next: result.document });
+    setSelectedLineId(null);
+    setSelectedPolylineId(result.roofPlane.id);
+    setSelectedEntityKeys([cadEntityKey({ id: result.roofPlane.id, kind: "polyline" })]);
+    setFileNotice({ text: `Created ${result.roofPlane.name} from the exterior face of the Wall main layer.`, tone: "success" });
+  }, [editor.present, selectedLine, selectedLineIsEditable]);
+
   const assignSelectedWallType = useCallback((wallTypeId: string) => {
     if (!selectedLine) return;
     const next = assignWallType(editor.present, selectedLine.id, wallTypeId);
@@ -14393,6 +14554,24 @@ export function ModelBuilderApp() {
       tone: "success",
     });
   }, [editor.present, selectedPolyline, selectedPolylineIsEditable]);
+
+  const updateSelectedRoofPlane = useCallback((change: Parameters<typeof updateRoofPlane>[2]) => {
+    if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
+    const next = updateRoofPlane(editor.present, selectedPolyline.id, change);
+    if (!next) {
+      setFileNotice({ text: "That Roof Plane value is outside the supported range or would collapse its footprint.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+  }, [editor.present, selectedPolyline]);
+
+  const convertSelectedRoofPlaneToBoundary = useCallback(() => {
+    if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
+    const next = removeRoofPlaneRole(editor.present, selectedPolyline.id);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: "Removed the Roof Plane role; its closed outline remains as a drafting boundary.", tone: "success" });
+  }, [editor.present, selectedPolyline]);
 
   const deleteSelectedPolyline = useCallback(() => {
     if (!selectedPolyline || !selectedPolylineIsEditable) return;
@@ -15595,6 +15774,7 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor depth, finishes, and ceiling height"><b>≋</b><span>Plan Setup</span></button>
                 <button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title={`Draw Walls using ${activeWallType.name}`}><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Walls"}</span></button>
                 <button className={lineMode && foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && foundationWallMode ? finishLineMode : activateFoundationWallMode} title={`Draw Foundation Walls using ${activeFoundationWallType.name}`}><b>▰</b><span>{lineMode && foundationWallMode ? "Finish Foundation" : "Foundation Walls"}</span></button>
+                <button type="button" onClick={createRoofPlaneForSelectedWall} disabled={selectedLine?.architecturalRole !== "wall" || !selectedLineIsEditable} title="Create a manual Roof Plane from the selected Wall"><b>⌂</b><span>Roof Plane</span></button>
                 <button type="button" onClick={() => setRoomManagerOpen(true)} title="Detect enclosed Rooms and manage overrides"><b>▦</b><span>Rooms</span></button>
               </div>
               <small>Building workflow</small>
@@ -15905,7 +16085,7 @@ export function ModelBuilderApp() {
             </PropertyGridSection>
           ) : selectedPolyline ? (
             <PropertyGridSection ariaLabel="Polyline properties" title="General" meta="2D entity">
-              <PropertyGridRow label="Type"><span className="property-readout">{selectedPolyline.architecturalRole === "floor-platform" ? "Floor platform · closed footprint" : selectedPolyline.shape === "rectangle" ? "Rectangle · closed polyline" : `${selectedPolyline.closed ? "Closed" : "Open"} polyline`}</span></PropertyGridRow>
+              <PropertyGridRow label="Type"><span className="property-readout">{selectedPolyline.architecturalRole === "floor-platform" ? "Floor platform · closed footprint" : selectedPolyline.architecturalRole === "roof-plane" ? "Manual Roof Plane" : selectedPolyline.shape === "rectangle" ? "Rectangle · closed polyline" : `${selectedPolyline.closed ? "Closed" : "Open"} polyline`}</span></PropertyGridRow>
               <PropertyGridRow label="Story"><select className="property-cell-select" value={selectedPolyline.storyId} onChange={(event) => assignSelectedEntityStory({ id: selectedPolyline.id, kind: "polyline" }, event.target.value)} aria-label="Polyline Story" disabled={!selectedPolylineIsEditable}>{editor.present.building.stories.map((story) => <option key={story.id} value={story.id}>{story.name}</option>)}</select></PropertyGridRow>
               <PropertyGridRow label="Layer"><select className="property-cell-select" value={selectedPolyline.layerId} onChange={(event) => assignSelectedPolylineLayer(event.target.value)} aria-label="Polyline layer" disabled={!selectedPolylineIsEditable}>{editor.present.layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}{layer.locked ? " (locked)" : ""}{!layer.visible ? " (hidden)" : ""}</option>)}</select></PropertyGridRow>
               <PropertyGridRow label="Locked"><button className={selectedPolyline.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedPolylineLock}>{selectedPolyline.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>
@@ -15916,7 +16096,23 @@ export function ModelBuilderApp() {
                   <PropertyGridRow label="Finish"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(story.floorFinish))} · {story.floorFinish.layers.length} layer{story.floorFinish.layers.length === 1 ? "" : "s"}</span></PropertyGridRow>
                 </> : null;
               })() : null}
-              {selectedPolyline.closed ? <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedFloorPlatform} disabled={!selectedPolylineIsEditable}>{selectedPolyline.architecturalRole === "floor-platform" ? "Convert to Boundary" : "Create Floor Platform"}</button></div> : null}
+              {selectedPolyline.architecturalRole === "roof-plane" ? (() => {
+                const geometry = roofPlaneGeometry(selectedPolyline);
+                const reference = roofPlaneReferenceDimensions(editor.present, selectedPolyline);
+                return geometry && reference && selectedPolyline.roofSettings ? <>
+                  <PropertyGridRow label="Bearing"><span className="property-readout">{selectedPolyline.roofBearingWallId ? `${findLineObject(editor.present, selectedPolyline.roofBearingWallId)?.name ?? "Missing Wall"} · exterior Main face` : "Detached manual plane"}</span></PropertyGridRow>
+                  <PropertyGridRow label="Top of plate"><span className="property-readout">{formatSignedArchitectural(reference.topOfPlateElevation)}</span></PropertyGridRow>
+                  <ArchitecturalPropertyField key={`${selectedPolyline.id}:run:${geometry.horizontalRun}`} label="Horizontal run" value={geometry.horizontalRun} onCommit={(horizontalRun) => updateSelectedRoofPlane({ horizontalRun })} />
+                  <NumberPropertyField key={`${selectedPolyline.id}:pitch:${selectedPolyline.roofSettings.pitchRise}`} label="Roof pitch" min={0.25} max={24} value={selectedPolyline.roofSettings.pitchRise} onCommit={(pitchRise) => updateSelectedRoofPlane({ pitchRise })} />
+                  <ArchitecturalPropertyField key={`${selectedPolyline.id}:heel:${selectedPolyline.roofSettings.heightAbovePlate}`} label="Height above plate" value={selectedPolyline.roofSettings.heightAbovePlate} onCommit={(heightAbovePlate) => updateSelectedRoofPlane({ heightAbovePlate })} />
+                  <ArchitecturalPropertyField key={`${selectedPolyline.id}:overhang:${selectedPolyline.roofSettings.overhang}`} allowZero label="Overhang" value={selectedPolyline.roofSettings.overhang} onCommit={(overhang) => updateSelectedRoofPlane({ overhang })} />
+                  <PropertyGridRow label="Heel"><span className="property-readout">{formatSignedArchitectural(reference.heelElevation)}</span></PropertyGridRow>
+                  <PropertyGridRow label="High edge"><span className="property-readout">{formatSignedArchitectural(reference.peakElevation)}</span></PropertyGridRow>
+                  <PropertyGridRow label="Fascia"><span className="property-readout">Top {formatSignedArchitectural(reference.fasciaTopElevation)} · bottom {formatSignedArchitectural(reference.fasciaBottomElevation)}</span></PropertyGridRow>
+                  <PropertyGridRow label="Subfascia"><span className="property-readout">Top {formatSignedArchitectural(reference.subfasciaTopElevation)} · bottom {formatSignedArchitectural(reference.subfasciaBottomElevation)}</span></PropertyGridRow>
+                  <div className="property-action-row single-action"><button type="button" onClick={convertSelectedRoofPlaneToBoundary} disabled={!selectedPolylineIsEditable}>Convert to Boundary</button></div>
+                </> : <p className="property-grid-note">This Roof Plane footprint needs repair before its calculated elevations can be shown.</p>;
+              })() : selectedPolyline.closed ? <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedFloorPlatform} disabled={!selectedPolylineIsEditable}>{selectedPolyline.architecturalRole === "floor-platform" ? "Convert to Boundary" : "Create Floor Platform"}</button></div> : null}
             </PropertyGridSection>
           ) : selectedLine ? (
             <PropertyGridSection ariaLabel="Line properties" title="General" meta={selectedLine.architecturalRole !== null ? "Architectural" : "3D entity"}>
@@ -15954,7 +16150,7 @@ export function ModelBuilderApp() {
               })() : null}
               <PropertyGridRow label="Locked"><button className={selectedLine.locked ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={toggleSelectedLineLock}>{selectedLine.locked ? "◆ Yes — unlock" : "◇ No — lock"}</button></PropertyGridRow>
               {selectedLine.architecturalRole !== null
-                ? <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>Convert to Line</button></div>
+                ? <div className={selectedLine.architecturalRole === "wall" ? "property-action-row" : "property-action-row single-action"}><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>Convert to Line</button>{selectedLine.architecturalRole === "wall" ? <button type="button" onClick={createRoofPlaneForSelectedWall} disabled={!selectedLineIsEditable}>Create Roof Plane</button> : null}</div>
                 : <div className="property-action-row"><button type="button" onClick={toggleSelectedWallRole} disabled={!selectedLineIsEditable}>Create Wall</button><button type="button" onClick={makeSelectedFoundationWall} disabled={!selectedLineIsEditable}>Create Foundation Wall</button></div>}
             </PropertyGridSection>
           ) : selectedBox ? (
@@ -16352,7 +16548,7 @@ export function ModelBuilderApp() {
                   const layer = findLayer(editor.present, polyline.layerId);
                   const selectable = Boolean(layer?.visible);
                   const selected = selectedEntityKeys.includes(cadEntityKey({ id: polyline.id, kind: "polyline" }));
-                  return <button key={polyline.id} type="button" className={`${selected ? "is-selected" : ""}${polyline.locked ? " is-object-locked" : ""}${selectable ? "" : " is-unavailable"}`} onClick={(event) => { if (selectable) selectPolyline(polyline.id, event.shiftKey); }} aria-pressed={selected} aria-disabled={!selectable}><span className="object-state-markers"><span className="object-layer-swatch" style={{ backgroundColor: layer?.color }} />{polyline.locked ? <i title="Locked">◆</i> : null}</span><span><strong>{polyline.name}</strong><small>{layer?.name ?? "Default"} · {polyline.shape === "rectangle" ? "Rectangle" : polyline.closed ? "Closed polyline" : "Polyline"} · {formatArchitectural(polylineLength(polyline))}</small></span></button>;
+                  return <button key={polyline.id} type="button" className={`${selected ? "is-selected" : ""}${polyline.locked ? " is-object-locked" : ""}${selectable ? "" : " is-unavailable"}`} onClick={(event) => { if (selectable) selectPolyline(polyline.id, event.shiftKey); }} aria-pressed={selected} aria-disabled={!selectable}><span className="object-state-markers"><span className="object-layer-swatch" style={{ backgroundColor: layer?.color }} />{polyline.locked ? <i title="Locked">◆</i> : null}</span><span><strong>{polyline.name}</strong><small>{layer?.name ?? "Default"} · {polyline.architecturalRole === "roof-plane" ? "Roof Plane" : polyline.architecturalRole === "floor-platform" ? "Floor Platform" : polyline.shape === "rectangle" ? "Rectangle" : polyline.closed ? "Closed polyline" : "Polyline"} · {formatArchitectural(polylineLength(polyline))}</small></span></button>;
                 })}
                 {editor.present.circles.map((circle) => {
                   const layer = findLayer(editor.present, circle.layerId);
@@ -16453,6 +16649,10 @@ export function ModelBuilderApp() {
               <section className="building-browser-section">
                 <header><strong>Roof Defaults</strong><span>{editor.present.building.roofSettings.pitchRise}:12</span></header>
                 <button type="button" className="building-browser-row" onClick={() => setRoofDefaultsOpen(true)}><span className="building-browser-icon">⌂</span><span><strong>{editor.present.building.roofSettings.framingMethod === "rafters" ? "Conventional rafters" : "Roof trusses"}</strong><small>Heel {formatArchitectural(editor.present.building.roofSettings.heightAbovePlate)} above plate · overhang {formatArchitectural(editor.present.building.roofSettings.overhang)}</small></span></button>
+                {editor.present.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").map((roofPlane) => {
+                  const geometry = roofPlaneGeometry(roofPlane);
+                  return <button type="button" className="building-browser-row" key={roofPlane.id} onClick={() => selectPolyline(roofPlane.id, false)}><span className="building-browser-icon">◩</span><span><strong>{roofPlane.name}</strong><small>{roofPlane.roofSettings?.pitchRise ?? editor.present.building.roofSettings.pitchRise}:12 · run {geometry ? formatArchitectural(geometry.horizontalRun) : "needs repair"}</small></span></button>;
+                })}
               </section>
               <section className="building-browser-section">
                 <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>

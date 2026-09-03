@@ -155,7 +155,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 48;
+export const PROJECT_FILE_VERSION = 49;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -1002,7 +1002,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   };
 }
 
-function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegmentsAndWidth: boolean, supportsStories: boolean, fallbackStoryId: string): PolylineObject | null {
+function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegmentsAndWidth: boolean, supportsStories: boolean, supportsRoofPlanes: boolean, fallbackStoryId: string): PolylineObject | null {
   if (!isRecord(value) || value.type !== "polyline" || !Array.isArray(value.vertices) || typeof value.closed !== "boolean") return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -1029,11 +1029,16 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
     ? null
     : value.architecturalRole === "floor-platform"
       ? "floor-platform"
+      : supportsRoofPlanes && value.architecturalRole === "roof-plane"
+        ? "roof-plane"
       : undefined;
-  if (architecturalRole === undefined || (architecturalRole === "floor-platform" && !geometry.closed)) return null;
+  const roofSettings = supportsRoofPlanes && architecturalRole === "roof-plane" ? readRoofSettings(value.roofSettings) : null;
+  if (supportsRoofPlanes && architecturalRole === "roof-plane" && !(value.roofBearingWallId === null || typeof value.roofBearingWallId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.roofBearingWallId))) return null;
+  const roofBearingWallId = supportsRoofPlanes && architecturalRole === "roof-plane" ? value.roofBearingWallId as string | null : null;
+  if (architecturalRole === undefined || ((architecturalRole === "floor-platform" || architecturalRole === "roof-plane") && !geometry.closed) || (architecturalRole === "roof-plane" && (!roofSettings || geometry.vertices.length !== 4))) return null;
   const fillOverride = readFillOverride(value.fillOverride);
   if (fillOverride === undefined) return null;
-  return { ...geometry, architecturalRole, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), shape: value.shape, storyId, type: "polyline" };
+  return { ...geometry, architecturalRole, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), roofBearingWallId, roofSettings, shape: value.shape, storyId, type: "polyline" };
 }
 
 function readPlatformOpening(value: unknown, supportsVerticalOpeningContinuity: boolean): PlatformOpening | null {
@@ -1434,7 +1439,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.polylines) || value.polylines.length > MAXIMUM_POLYLINE_COUNT) {
       return { ok: false, error: "The project polyline collection is missing or invalid." };
     }
-    const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, fallbackStoryId));
+    const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, version >= 49, fallbackStoryId));
     if (parsedPolylines.some((polyline) => polyline === null)) return { ok: false, error: "One or more drawing polylines are invalid." };
     polylines = (parsedPolylines as PolylineObject[]).map((polyline) => version >= 43 || polyline.architecturalRole !== "floor-platform" ? polyline : { ...polyline, layerId: STANDARD_LAYER_IDS["floor-platform"] });
     if (new Set(polylines.map((polyline) => polyline.id)).size !== polylines.length ||
@@ -1443,6 +1448,8 @@ export function parseProjectDocument(content: string): ProjectParseResult {
       return { ok: false, error: "Drawing polyline identities, names, or layers are invalid." };
     }
     if (polylines.some((polyline) => !storyIds.has(polyline.storyId))) return { ok: false, error: "One or more drawing polylines reference a missing Story." };
+    const wallsById = new Map(lines.filter((line) => line.architecturalRole === "wall").map((line) => [line.id, line]));
+    if (polylines.some((polyline) => polyline.architecturalRole === "roof-plane" && polyline.roofBearingWallId !== null && wallsById.get(polyline.roofBearingWallId)?.storyId !== polyline.storyId)) return { ok: false, error: "One or more Roof Planes reference a missing bearing Wall." };
     const allIds = [...validObjects.map((object) => object.id), ...lines.map((line) => line.id), ...polylines.map((polyline) => polyline.id)];
     const allNames = [...validObjects.map((object) => object.name.toLowerCase()), ...lines.map((line) => line.name.toLowerCase()), ...polylines.map((polyline) => polyline.name.toLowerCase())];
     if (new Set(allIds).size !== allIds.length || new Set(allNames).size !== allNames.length) return { ok: false, error: "Project entity identifiers and names must be unique." };
