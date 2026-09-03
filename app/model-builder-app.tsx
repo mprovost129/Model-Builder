@@ -1653,14 +1653,40 @@ function clearWallView(view: WallView) {
   view.edgeMaterials = [];
 }
 
-function rebuildWallEdges(view: WallView) {
+function rebuildWallEdges(view: WallView, target?: ViewTarget) {
   view.edges.forEach((edge) => { view.group.remove(edge); edge.geometry.dispose(); });
   view.edgeMaterials.forEach((material) => material.dispose());
   view.edges = [];
   view.edgeMaterials = [];
   [...view.meshes, ...view.productMeshes].forEach((mesh) => {
     const material = new THREE.LineBasicMaterial({ color: 0x263746, depthTest: false, toneMapped: false, transparent: true, opacity: 0.94 });
-    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 20), material);
+    const baseGeometry = new THREE.EdgesGeometry(mesh.geometry, 20);
+    const hiddenPlanSeams = target?.id === "top"
+      ? mesh.userData.hiddenPlanSeams as [PlanPoint, PlanPoint][] | undefined
+      : undefined;
+    let edgeGeometry: THREE.BufferGeometry = baseGeometry;
+    if (hiddenPlanSeams?.length) {
+      const position = baseGeometry.getAttribute("position");
+      const keptPositions: number[] = [];
+      const near = (first: PlanPoint, second: PlanPoint) => Math.hypot(first.x - second.x, first.y - second.y) <= 1 / 64;
+      for (let index = 0; index < position.count; index += 2) {
+        const first = { x: position.getX(index), y: position.getY(index) };
+        const second = { x: position.getX(index + 1), y: position.getY(index + 1) };
+        const hidden = hiddenPlanSeams.some(([seamFirst, seamSecond]) =>
+          (near(first, seamFirst) && near(second, seamSecond))
+          || (near(first, seamSecond) && near(second, seamFirst))
+        );
+        if (hidden) continue;
+        keptPositions.push(
+          position.getX(index), position.getY(index), position.getZ(index),
+          position.getX(index + 1), position.getY(index + 1), position.getZ(index + 1),
+        );
+      }
+      baseGeometry.dispose();
+      edgeGeometry = new THREE.BufferGeometry();
+      edgeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(keptPositions, 3));
+    }
+    const edge = new THREE.LineSegments(edgeGeometry, material);
     edge.position.copy(mesh.position);
     edge.rotation.copy(mesh.rotation);
     edge.scale.copy(mesh.scale);
@@ -1709,6 +1735,10 @@ function updateWallView(
       mesh.position.z = vertical.baseElevation + segment.baseHeight;
       mesh.userData.lineId = line.id;
       mesh.userData.wallLayer = layer.name;
+      mesh.userData.hiddenPlanSeams = [
+        ...(segment.hidePlanStartSeam ? [[segment.startExterior, segment.startInterior] as [PlanPoint, PlanPoint]] : []),
+        ...(segment.hidePlanEndSeam ? [[segment.endExterior, segment.endInterior] as [PlanPoint, PlanPoint]] : []),
+      ];
       view.group.add(mesh);
       view.meshes.push(mesh);
       view.materials.push(material);
@@ -1829,7 +1859,7 @@ function updateWallView(
     vertical,
     wallType,
   });
-  rebuildWallEdges(view);
+  rebuildWallEdges(view, target);
 }
 
 function addFoundationSolid(
@@ -5513,9 +5543,21 @@ function Viewport({
       if (!currentPoint) return;
 
       if (drag.kind === "line-grip" && drag.lineGrip) {
-        const snapped = snapCadPoint({ x: currentPoint.x, y: currentPoint.y, z: currentPoint.z }, drag.objectId);
-        const next = updateLineGrip(drag.before, drag.objectId, drag.lineGrip, snapped.point);
         const source = findLineObject(drag.before, drag.objectId);
+        const trackingAnchor = source
+          ? drag.lineGrip === "start"
+            ? source.end
+            : drag.lineGrip === "end"
+              ? source.start
+              : lineMidpoint(source)
+          : null;
+        const snapped = snapCadPoint(
+          { x: currentPoint.x, y: currentPoint.y, z: currentPoint.z },
+          drag.objectId,
+          trackingAnchor,
+          true,
+        );
+        const next = updateLineGrip(drag.before, drag.objectId, drag.lineGrip, snapped.point);
         const nextLine = next ? findLineObject(next, drag.objectId) : null;
         callbacksRef.current.onDragStatus({
           angle: nextLine ? lineAngle(nextLine) : source ? lineAngle(source) : 0,
@@ -8837,7 +8879,7 @@ const STORY_PURPOSE_LABELS: Record<StoryPurpose, string> = {
 };
 
 const STORY_PURPOSE_HELP: Record<StoryPurpose, string> = {
-  standard: "An ordinary framed level. Stories above and below stack from its rough framing datums.",
+  standard: "An ordinary framed level. Stories above and below stack from its rough framing reference elevations.",
   basement: "A full lower level with its own walls, rooms, openings, slab, ceiling height, and plan view.",
   crawlspace: "A non-occupiable service or foundation level. Use a separate Story only when it needs its own plan or controlled height.",
   "slab-on-grade": "The occupied level bears on a slab. Do not add a Basement Story below solely to represent the slab.",
@@ -8991,7 +9033,7 @@ function StoryAssemblyEditor({
     const nextLayer = assembly.layers[index + 1];
     return (
       <div
-        className={`${isWallAssembly ? "story-layer-grid has-wall-group" : "story-layer-grid"}${layer.id === selectedLayerId ? " is-selected" : ""}`}
+        className={`${isWallAssembly ? "story-layer-grid is-wall-assembly" : "story-layer-grid"}${layer.id === selectedLayerId ? " is-selected" : ""}`}
         key={layer.id}
         onFocusCapture={() => onSelectLayer?.(layer.id)}
       >
@@ -9000,11 +9042,6 @@ function StoryAssemblyEditor({
           <input value={layer.name} onChange={(event) => updateLayer(index, { name: event.target.value })} aria-label={`${assembly.name} layer ${index + 1} name`} />
           <input value={layer.material} onChange={(event) => updateLayer(index, { material: event.target.value })} aria-label={`${layer.name} material`} />
         </div>
-        {isWallAssembly ? (
-          <select value={layer.wallGroup} onChange={(event) => updateLayer(index, { wallGroup: event.target.value as WallLayerGroup })} aria-label={`${layer.name} wall layer group`}>
-            {WALL_LAYER_GROUPS.map((group) => <option key={group} value={group} disabled={isOnlyMainLayer && group !== "main"}>{WALL_LAYER_GROUP_LABELS[group]}</option>)}
-          </select>
-        ) : null}
         <select value={layer.role} onChange={(event) => updateLayer(index, { role: event.target.value as AssemblyLayerRole })} aria-label={`${layer.name} role`}>
           {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
         </select>
@@ -9018,17 +9055,17 @@ function StoryAssemblyEditor({
   return (
     <section className="story-assembly">
       <header>
-        <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story datums"}</span></div>
+        <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : "Finish only · does not move Story reference elevations"}</span></div>
         <b>{formatArchitectural(assemblyTotalThickness(assembly))}</b>
       </header>
-      <div className={isWallAssembly ? "story-layer-grid story-layer-head has-wall-group" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isWallAssembly ? <span>Group</span> : null}<span>Role</span><span>Thickness</span>{isWallAssembly ? <><span>Join</span><span>End</span></> : null}<span>Order</span></div>
+      <div className={isWallAssembly ? "story-layer-grid story-layer-head is-wall-assembly" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span><span>Role</span><span>Thickness</span>{isWallAssembly ? <><span>Join</span><span>End</span></> : null}<span>Order</span></div>
       {isWallAssembly ? WALL_LAYER_GROUPS.map((group) => (
         <div className="story-wall-layer-group" key={group}>
-          <div className={`story-wall-group-heading is-${group}`}><strong>{WALL_LAYER_GROUP_LABELS[group]}</strong><span>{group === "main" ? "Structural core and future reference layer" : group === "exterior" ? "Outside of the Main layer" : "Room side of the Main layer"}</span><b>{formatArchitectural(wallLayerGroupThickness(assembly, group))}</b></div>
+          <div className={`story-wall-group-heading is-${group}`}><strong>{WALL_LAYER_GROUP_LABELS[group]}</strong><span>{group === "main" ? "Structural core and future reference layer" : group === "exterior" ? "Outside of the Main layer" : "Room side of the Main layer"}</span><b>{formatArchitectural(wallLayerGroupThickness(assembly, group))}</b><button type="button" className="story-wall-group-add" onClick={() => addLayer(group)} aria-label={`Add ${WALL_LAYER_GROUP_LABELS[group].toLowerCase()} layer`}>＋</button></div>
           {assembly.layers.map((layer, index) => layer.wallGroup === group ? renderLayer(layer, index) : null)}
         </div>
       )) : assembly.layers.map(renderLayer)}
-      {isWallAssembly ? <div className="story-add-wall-layers">{WALL_LAYER_GROUPS.map((group) => <button type="button" className="story-add-layer" key={group} onClick={() => addLayer(group)}>＋ {WALL_LAYER_GROUP_LABELS[group].replace(" Layers", "")}</button>)}</div> : <button type="button" className="story-add-layer" onClick={() => addLayer()}>＋ Add layer</button>}
+      {!isWallAssembly ? <button type="button" className="story-add-layer" onClick={() => addLayer()}>＋ Add layer</button> : null}
     </section>
   );
 }
@@ -9107,13 +9144,13 @@ function StoryManagerDialog({
   return (
     <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <section className="story-manager" role="dialog" aria-modal="true" aria-labelledby="story-manager-title">
-        <header className="story-manager-header"><div><strong id="story-manager-title">Story &amp; Assembly Manager</strong><span>Rough framing establishes vertical datums. Finish layers calculate finished dimensions.</span></div><button type="button" onClick={onCancel} aria-label="Close Story Manager">×</button></header>
+        <header className="story-manager-header"><div><strong id="story-manager-title">Story &amp; Assembly Manager</strong><span>Rough framing establishes reference elevations. Finish layers calculate finished dimensions.</span></div><button type="button" onClick={onCancel} aria-label="Close Story Manager">×</button></header>
         <div className="story-manager-body">
           <aside className="story-list">
             <header><strong>Stories</strong><span>Bottom to top</span></header>
             {[...draft.stories].reverse().map((story) => {
               const calculation = calculations.find((item) => item.storyId === story.id);
-              return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>{STORY_PURPOSE_LABELS[story.purpose]} · Rough floor {calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span>{story.id === draft.anchorStoryId ? <small>DATUM ANCHOR</small> : null}</button>;
+              return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>{STORY_PURPOSE_LABELS[story.purpose]} · Rough floor {calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span>{story.id === draft.anchorStoryId ? <small>ELEVATION REFERENCE</small> : null}</button>;
             })}
             <div className="story-list-actions"><button type="button" onClick={() => addStory("above")}>＋ Above</button><button type="button" onClick={() => addStory("below")}>＋ Below</button><button type="button" onClick={removeStory} disabled={draft.stories.length === 1}>Delete</button></div>
           </aside>
@@ -9121,8 +9158,8 @@ function StoryManagerDialog({
             <section className="story-editor-summary">
               <label><span>Story name</span><input value={selectedStory.name} maxLength={80} onChange={(event) => replaceSelectedStory({ name: event.target.value })} /></label>
               <StoryDimensionInput key={`${selectedStory.id}:${selectedStory.roughCeilingHeight}`} label="Rough ceiling / plate height" value={selectedStory.roughCeilingHeight} onChange={(roughCeilingHeight) => replaceSelectedStory({ roughCeilingHeight })} />
-              <StoryDimensionInput key={`${draft.anchorStoryId}:${draft.datumElevation}`} label="Datum elevation" signed value={draft.datumElevation} onChange={(datumElevation) => setDraft((current) => ({ ...cloneBuildingStructure(current), datumElevation }))} />
-              <button type="button" className={selectedStory.id === draft.anchorStoryId ? "is-anchor" : ""} onClick={setDatumAnchor}>{selectedStory.id === draft.anchorStoryId ? "Datum anchor" : "Set as datum anchor"}</button>
+              <StoryDimensionInput key={`${draft.anchorStoryId}:${draft.datumElevation}`} label="Reference elevation" signed value={draft.datumElevation} onChange={(datumElevation) => setDraft((current) => ({ ...cloneBuildingStructure(current), datumElevation }))} />
+              <button type="button" className={selectedStory.id === draft.anchorStoryId ? "is-anchor" : ""} onClick={setDatumAnchor}>{selectedStory.id === draft.anchorStoryId ? "Elevation reference" : "Set as elevation reference"}</button>
             </section>
             <section className="story-classification-panel">
               <label className="story-field">
@@ -9161,7 +9198,7 @@ function StoryManagerDialog({
                 return <button type="button" key={story.id} className={story.id === selectedStory.id ? "story-pole-level is-selected" : "story-pole-level"} onClick={() => setSelectedStoryId(story.id)}><span className="story-pole-ceiling"><b>ROUGH CEILING</b>{formatSignedArchitectural(calculation.roughCeilingElevation)}</span><strong>{story.name}</strong><span className="story-pole-floor"><b>ROUGH FLOOR</b>{formatSignedArchitectural(calculation.roughFloorElevation)}</span><i style={{ height: `${Math.max(5, Math.min(24, calculation.floorStructureThickness))}px` }} title={`Rough floor structure ${formatArchitectural(calculation.floorStructureThickness)}`} /></button>;
               })}
             </div>
-            <p>Gold lines are rough framing datums. Thin interior lines represent finish surfaces.</p>
+            <p>Gold lines are rough framing reference elevations. Thin interior lines represent finish surfaces.</p>
           </aside>
         </div>
         {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
@@ -13672,6 +13709,20 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${activeType?.name ?? "Wall type"} is active for new walls.`, tone: "success" });
   }, [editor.present]);
 
+  const selectActiveWallType = useCallback((wallTypeId: string) => {
+    if (!editor.present.building.wallTypes.some((wallType) => wallType.id === wallTypeId)) return;
+    const building = cloneBuildingStructure(editor.present.building);
+    building.activeWallTypeId = wallTypeId;
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "The selected Wall type could not be activated.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    const selectedType = building.wallTypes.find((wallType) => wallType.id === wallTypeId);
+    setFileNotice({ text: `${selectedType?.name ?? "Wall type"} is active for new walls.`, tone: "success" });
+  }, [editor.present]);
+
   const applyFoundationWallTypes = useCallback((building: BuildingStructure) => {
     const next = updateDocumentBuilding(editor.present, building);
     if (!next) {
@@ -15266,6 +15317,7 @@ export function ModelBuilderApp() {
             <>
               <PropertyGridSection className="drawing-properties" title={activeDrawingTitle} meta={activeDrawingMeta}>
                 {arcMode ? <PropertyGridRow label="Method"><select className="property-cell-select" value={arcMethod} onChange={(event) => activateArcMode(event.target.value as ArcMethod)} aria-label="Active Arc method">{ARC_METHODS.map((definition) => <option key={definition.method} value={definition.method}>{definition.label}</option>)}</select></PropertyGridRow> : null}
+                {wallMode ? <PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Active Wall Type for new walls">{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow> : null}
                 <PropertyGridRow label="Current layer"><span className="property-readout">{activeLayer?.name ?? "Default"}</span></PropertyGridRow>
                 {wallMode || foundationWallMode ? <PropertyGridRow label="Elevation"><span className="property-readout">{formatSignedArchitectural(cadDraftingSettings.activeElevation)} · Story controlled</span></PropertyGridRow> : <label className="property-table-row property-input-row"><span className="property-table-label">Elevation</span><div className={activeElevationError ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={activeElevationDraft} onChange={(event) => { setActiveElevationDraft(event.target.value); setActiveElevationError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyActiveElevation(); }} onBlur={applyActiveElevation} aria-label="Active drawing elevation" spellCheck={false} /><span>ft-in</span></div></label>}
                 {!wallMode && activeElevationError ? <p className="property-grid-note property-row-error" role="alert">{activeElevationError}</p> : null}
@@ -15306,7 +15358,7 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Rough floor"><span className="property-readout">{formatSignedArchitectural(activeStoryCalculation?.roughFloorElevation ?? 0)}</span></PropertyGridRow>
                 <PropertyGridRow label="Ceiling height"><span className="property-readout">{formatArchitectural(activeStory.roughCeilingHeight)}</span></PropertyGridRow>
                 <PropertyGridRow label="Floor depth"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(activeStory.floorStructure))}</span></PropertyGridRow>
-                <PropertyGridRow label="Active Wall"><span className="property-readout">{activeWallType.name} · {formatArchitectural(assemblyTotalThickness(activeWallType))}</span></PropertyGridRow>
+                <PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Project active Wall Type">{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Rooms"><span className="property-readout">{activeStoryRoomCount} detected</span></PropertyGridRow>
                 <div className="property-action-row project-setup-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story &amp; Floor Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
                 <p className="property-grid-note">Story settings establish the defaults. Room settings override them only where needed.</p>

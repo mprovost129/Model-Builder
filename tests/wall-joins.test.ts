@@ -242,20 +242,6 @@ function typeMap(types: LayeredAssembly[]) {
   return new Map(types.map((wallType) => [wallType.id, wallType]));
 }
 
-function alternateWallType(): LayeredAssembly {
-  const source = wallTypes()[0];
-  return {
-    ...source,
-    id: "wall-type-02",
-    name: "2x6 Exterior Wall",
-    layers: source.layers.map((layer, index) => ({
-      ...layer,
-      id: `wall-type-02-${index + 1}`,
-      thickness: layer.wallGroup === "main" ? 5.5 : layer.thickness,
-    })),
-  };
-}
-
 test("plans an automatic Main-core corner for two compatible wall endpoints", () => {
   const first = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 });
   const second = wall("wall-02", { x: 120, y: 0 }, { x: 120, y: 120 });
@@ -293,7 +279,7 @@ test("keeps layers excluded from automatic joins square at the editable endpoint
 });
 
 test("joins mixed wall types from their Main boundaries", () => {
-  const types = [...wallTypes(), alternateWallType()];
+  const types = wallTypes();
   const first = wall("wall-01", { x: 0, y: 0 }, { x: 120, y: 0 });
   const second = wall("wall-02", { x: 120, y: 0 }, { x: 120, y: 120 }, { wallTypeId: "wall-type-02" });
   const lines = [first, second];
@@ -303,6 +289,27 @@ test("joins mixed wall types from their Main boundaries", () => {
   const footprint = wallLayerFootprint(first, types[0], 2, plan, new Map(lines.map((line) => [line.id, line])), typeMap(types));
   assert.deepEqual(footprint.endExterior, { x: 120, y: 0 });
   assert.deepEqual(footprint.endInterior, { x: 125.5, y: -3.5 });
+});
+
+test("joins a 2x4 interior partition into a 2x6 exterior host and hides the joined plan seam", () => {
+  const types = wallTypes();
+  const exteriorType = types.find((type) => type.id === "wall-type-02")!;
+  const interiorType = types.find((type) => type.id === "wall-type-03")!;
+  const host = wall("wall-exterior", { x: 0, y: 0 }, { x: 240, y: 0 }, { wallTypeId: exteriorType.id });
+  const branch = wall("wall-interior", { x: 120, y: 0 }, { x: 120, y: -120 }, { wallTypeId: interiorType.id });
+  const lines = [host, branch];
+  const plan = buildAutomaticWallJoinPlan(lines, types);
+  const linesById = new Map(lines.map((line) => [line.id, line]));
+  const mainLayerIndex = interiorType.layers.findIndex((layer) => layer.wallGroup === "main");
+  const segments = wallLayerSolidSegments(branch, interiorType, mainLayerIndex, plan, linesById, typeMap(types), 97.125);
+
+  assert.deepEqual(plan.endpointJoins.get(branch.id)?.start, { hostWallId: host.id, kind: "tee" });
+  assert.equal(unresolvedWallJunctionCount(branch.id, plan), 0);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].hidePlanStartSeam, true);
+  assert.equal(segments[0].hidePlanEndSeam, false);
+  assert.equal(segments[0].startExterior.y, -5.5);
+  assert.equal(segments[0].startInterior.y, -5.5);
 });
 
 test("trims a branch endpoint to the near Main face of an uninterrupted host wall", () => {

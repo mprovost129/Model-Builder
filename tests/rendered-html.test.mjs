@@ -166,7 +166,16 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /createBoundaryPolylineObject/);
   assert.match(component, /onBoundaryCommit/);
   assert.match(component, /StoryManagerDialog/);
-  assert.match(component, /Rough framing establishes vertical datums/);
+  assert.match(component, /Rough framing establishes reference elevations/);
+  assert.match(component, /ELEVATION REFERENCE/);
+  assert.match(component, /label="Reference elevation"/);
+  assert.doesNotMatch(component, /Datum elevation|Datum anchor|Set as datum anchor/);
+  assert.match(component, /className="story-wall-group-add"/);
+  assert.doesNotMatch(component, /story-add-wall-layers/);
+  assert.match(component, /aria-label="Active Wall Type for new walls"/);
+  assert.match(component, /aria-label="Project active Wall Type"/);
+  assert.match(component, /const trackingAnchor = source/);
+  assert.match(component, /drag\.objectId,[\s\S]*trackingAnchor,[\s\S]*true,/);
   assert.match(component, /updateDocumentBuilding/);
   assert.match(component, /calculateStoryElevations/);
   assert.match(component, /RoomManagerDialog/);

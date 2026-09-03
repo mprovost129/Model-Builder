@@ -48,6 +48,8 @@ export type WallEndCapFootprint = WallLayerFootprint & { endpoint: WallEndpoint;
 export type WallLayerSolidSegment = WallLayerFootprint & {
   baseHeight: number;
   height: number;
+  hidePlanEndSeam: boolean;
+  hidePlanStartSeam: boolean;
 };
 
 export type WallOpeningReturnSolid = WallLayerFootprint & {
@@ -571,7 +573,11 @@ export function wallLayerSolidSegments(
   wallHeight: number,
 ): WallLayerSolidSegment[] {
   const fullFootprint = wallLayerFootprint(line, wallType, layerIndex, joinPlan, linesById, wallTypesById);
-  if (line.wallOpenings.length === 0) return [{ ...fullFootprint, baseHeight: 0, height: wallHeight }];
+  const joins = joinPlan.endpointJoins.get(line.id);
+  const participatesInJoin = wallType.layers[layerIndex]?.participatesInJoin !== false;
+  const hidePlanStartSeam = participatesInJoin && Boolean(joins?.start);
+  const hidePlanEndSeam = participatesInJoin && Boolean(joins?.end);
+  if (line.wallOpenings.length === 0) return [{ ...fullFootprint, baseHeight: 0, height: wallHeight, hidePlanEndSeam, hidePlanStartSeam }];
   const direction = lineDirection(line);
   if (!direction || wallHeight <= 0) return [];
   const length = Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y);
@@ -595,6 +601,8 @@ export function wallLayerSolidSegments(
       endExterior: endSection.exterior,
       endInterior: endSection.interior,
       height,
+      hidePlanEndSeam: hidePlanEndSeam && end >= length - ENDPOINT_TOLERANCE,
+      hidePlanStartSeam: hidePlanStartSeam && start <= ENDPOINT_TOLERANCE,
       startExterior: startSection.exterior,
       startInterior: startSection.interior,
     });
