@@ -115,11 +115,13 @@ test("server-renders the Model Builder workspace", async () => {
 });
 
 test("keeps product code separate from the removed starter preview", async () => {
-  const [page, layout, component, productLibraryDialog, packageJson] = await Promise.all([
+  const [page, layout, component, productLibraryDialog, productRepresentationRenderer, productRepresentations, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/model-builder-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../features/products/product-library-dialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/products/product-representation-renderer.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/product-representations.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -128,9 +130,13 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(layout, /title:\s*"Model Builder"/);
   assert.match(component, /"use client"/);
   assert.match(component, /from "@\/features\/products\/product-library-dialog"/);
+  assert.match(component, /from "@\/features\/products\/product-representation-renderer"/);
   assert.doesNotMatch(component, /function ProductLibraryDialog/);
   assert.match(productLibraryDialog, /export function ProductLibraryDialog/);
   assert.match(productLibraryDialog, /Representation Alignment/);
+  assert.match(productRepresentationRenderer, /applyPreferredProductRepresentations/);
+  assert.match(productRepresentationRenderer, /native parametric components remain visible/);
+  assert.match(productRepresentations, /preferredProductAssetForView/);
   assert.match(component, /from "three"/);
   assert.match(component, /OrthographicCamera/);
   assert.match(component, /changeViewTarget/);

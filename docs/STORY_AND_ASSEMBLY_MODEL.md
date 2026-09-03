@@ -298,6 +298,17 @@ reference-only assets with format-aware defaults. Product Package version 3 carr
 the new fields. Native components always remain available and continue to control
 the rough opening, Wall cut, header, framing, schedules, and fallback display.
 
+Preferred validated assets stored in the project bucket now participate in the
+model views. SVG plan symbols are used in Top/Bottom views, SVG elevation symbols
+in orthographic side views, and GLB models in perspective views. They inherit the
+placed opening's unit location, host-Wall orientation, Story elevation, source-unit
+conversion, insertion origin, scale, rotation, and offsets. The renderer does not
+load unvalidated external catalog references. Native components are hidden only
+after the matching representation loads successfully; load errors, missing files,
+unsupported formats, or view mismatches automatically preserve the native display.
+Wall cuts, finish returns, framing, dimensions, schedules, and selection remain
+driven by the native parametric opening in every case.
+
 The Door & Window Type Manager renders a live exterior-elevation preview from the
 same host-aware component solids used by placed openings. It shows the structural
 rough-opening boundary, unit boundary, generated component geometry, rough and unit
@@ -381,15 +392,13 @@ junction framing.
 
 ## Next Steps
 
-1. Apply preferred, reviewed SVG and GLB representations in their supported plan,
-   elevation, and 3D views, using the saved alignment and automatic native fallback.
-2. Generalize the Product Library registry for ordinary placed Objects, including unit
+1. Generalize the Product Library registry for ordinary placed Objects, including unit
    normalization, independent layer assignment, thumbnails, and update tracking.
-3. Add asset removal and orphan cleanup without deleting representations still referenced
+2. Add asset removal and orphan cleanup without deleting representations still referenced
    by another project or catalog record.
-4. Add manual per-junction framing overrides without making unsafe engineering assumptions.
-5. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
-6. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
-7. Add manual per-edge platform overrides for exceptional support details.
-8. Add split-level, vaulted-ceiling, and manual wall-height exceptions
+3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
+4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
+5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+6. Add manual per-edge platform overrides for exceptional support details.
+7. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

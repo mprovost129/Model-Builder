@@ -277,6 +277,7 @@ node --test tests/rendered-html.test.mjs
 
 - `app/model-builder-app.tsx`: application composition, viewport orchestration, controls, and properties
 - `features/products/product-library-dialog.tsx`: Product Library search, import, representation preview, and alignment workflow
+- `features/products/product-representation-renderer.ts`: view-specific SVG/GLB loading, placement, alignment, and native fallback
 - `lib/box-model.ts`: fixed-face geometry rules and parametric box state
 - `lib/cad-line.ts`: 3D line geometry, coordinate parsing, polar tracking, and grip rules
 - `lib/cad-circle.ts`: elevated Circle geometry, measurements, validation, and grip rules
@@ -298,6 +299,7 @@ node --test tests/rendered-html.test.mjs
 - `lib/project-recovery.ts`: device-local recovery snapshots and validation
 - `lib/architectural-units.ts`: dimension parsing, formatting, and 1/16-inch snapping
 - `lib/building-stories.ts`: rough-framing Stories, layered assemblies, datum rules, and calculated elevations
+- `lib/product-representations.ts`: safe preferred-asset selection and plan/elevation/3D view routing
 - `tests/architectural-units.test.ts`: measurement behavior tests
 - `tests/rendered-html.test.mjs`: production-render verification
 
@@ -367,7 +369,11 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   SVGs. Each representation now stores source units, insertion origin, scale,
   three-axis rotation, three-axis offsets, and reference/preferred use. Preferred
   use is unique per purpose, while the native parametric opening remains the
-  authoritative construction model and automatic fallback.
+  authoritative construction model and automatic fallback. Validated stored SVG
+  plan and elevation drawings and GLB models now load in their matching views,
+  follow each placed opening and host Wall, and replace only the native visible
+  Door or Window components after loading succeeds. Missing, incompatible,
+  catalog-only, or failed files leave the native assembly visible and editable.
   Proprietary CAD/BIM formats require conversion or dedicated adapters.
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing

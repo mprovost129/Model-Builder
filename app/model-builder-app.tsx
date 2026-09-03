@@ -386,6 +386,10 @@ import {
 } from "@/lib/product-package";
 import { ProductLibraryDialog } from "@/features/products/product-library-dialog";
 import {
+  applyPreferredProductRepresentations,
+  clearPreferredProductRepresentations,
+} from "@/features/products/product-representation-renderer";
+import {
   createRecoverySnapshot,
   parseRecoverySnapshot,
   PROJECT_RECOVERY_STORAGE_KEY,
@@ -1367,6 +1371,7 @@ type WallView = {
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
   meshes: THREE.Mesh[];
+  productMeshes: THREE.Mesh[];
 };
 
 const FLOOR_LAYER_COLORS: Record<AssemblyLayerRole, number> = {
@@ -1534,10 +1539,11 @@ function createWallView(scene: THREE.Scene): WallView {
   const group = new THREE.Group();
   group.renderOrder = 6;
   scene.add(group);
-  return { group, materials: [], meshes: [] };
+  return { group, materials: [], meshes: [], productMeshes: [] };
 }
 
 function clearWallView(view: WallView) {
+  clearPreferredProductRepresentations(view.group, view.productMeshes);
   view.meshes.forEach((mesh) => {
     view.group.remove(mesh);
     mesh.geometry.dispose();
@@ -1558,14 +1564,15 @@ function updateWallView(
   openingTypesById: ReadonlyMap<string, WallOpeningType>,
   headerTypesById: ReadonlyMap<string, WallHeaderType>,
   framing: WallFramingSettings,
-  showFraming: boolean,
+  target: ViewTarget,
 ) {
   clearWallView(view);
   const dx = line.end.x - line.start.x;
   const dy = line.end.y - line.start.y;
   const length = Math.hypot(dx, dy);
   if (length < 1 / 16) return;
-  const framingReveal = framing.enabled && framing.showInModel && showFraming;
+  const framingReveal = framing.enabled && framing.showInModel && target.id !== "top";
+  const nativeComponentMeshes = new Map<string, THREE.Mesh[]>();
   wallType.layers.forEach((layer, index) => {
     if (layer.thickness < 1 / 16) return;
     wallLayerSolidSegments(line, wallType, index, joinPlan, linesById, wallTypesById, vertical.height).forEach((segment) => {
@@ -1658,6 +1665,9 @@ function updateWallView(
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
+    const openingMeshes = nativeComponentMeshes.get(componentSolid.openingId) ?? [];
+    openingMeshes.push(mesh);
+    nativeComponentMeshes.set(componentSolid.openingId, openingMeshes);
   });
   if (framingReveal) wallFramingSolids(line, wallType, framing, vertical.height, joinPlan, [...linesById.values()], openingTypesById, headerTypesById).forEach((framingMember) => {
     const shape = new THREE.Shape();
@@ -1688,6 +1698,16 @@ function updateWallView(
     view.group.add(mesh);
     view.meshes.push(mesh);
     view.materials.push(material);
+  });
+  applyPreferredProductRepresentations({
+    host: view.group,
+    interactiveMeshes: view.productMeshes,
+    line,
+    nativeComponentMeshes,
+    openingTypesById,
+    target,
+    vertical,
+    wallType,
   });
 }
 
@@ -3472,7 +3492,7 @@ function Viewport({
         const id = hit.object.userData.lineId;
         if (typeof id === "string") register({ distance: hit.distance, faceIndex: null, point: hit.point, ref: { id, kind: "line" } });
       });
-      raycaster.intersectObjects([...wallViewsRef.current.values()].flatMap((view) => view.meshes), false).forEach((hit) => {
+      raycaster.intersectObjects([...wallViewsRef.current.values()].flatMap((view) => [...view.meshes, ...view.productMeshes]), false).forEach((hit) => {
         const id = hit.object.userData.lineId;
         if (typeof id === "string") register({ distance: hit.distance, faceIndex: null, point: hit.point, ref: { id, kind: "line" } });
       });
@@ -6666,7 +6686,7 @@ function Viewport({
       }
       const vertical = wallVerticalExtent(document, line);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
-      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById, headerTypesById, document.building.wallFraming, viewTarget.id !== "top");
+      if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById, headerTypesById, document.building.wallFraming, viewTarget);
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
@@ -6889,7 +6909,7 @@ function Viewport({
       arcCountRef.current = document.arcs.length;
       if (!arcMode) fitViewRef.current?.();
     }
-  }, [arcMode, breakMode, chamferMode, circleMode, copyMode, document, extendMode, filletMode, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, scaleBaseKey, scaleMode, selectedArcId, selectedCircleId, selectedEntityKeys, selectedLineId, selectedObjectId, selectedObjectIds, selectedPolylineId, stretchMode, trimMode, viewTarget.id]);
+  }, [arcMode, breakMode, chamferMode, circleMode, copyMode, document, extendMode, filletMode, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, scaleBaseKey, scaleMode, selectedArcId, selectedCircleId, selectedEntityKeys, selectedLineId, selectedObjectId, selectedObjectIds, selectedPolylineId, stretchMode, trimMode, viewTarget]);
 
   useEffect(() => {
     const selectedIds = new Set(selectedEntityKeys
