@@ -160,8 +160,11 @@ polylines, rectangles, Circles, and Arcs.
   fascia/subfascia elevations, roof angle, and notch limit. Manual Roof Planes
   can be created from a Wall Main-layer exterior face, viewed in plan or 3D, and
   edited by eave span, horizontal run, pitch, heel, overhang, direct Fascia Top
-  elevation, or a matched fascia elevation from another plane; automatic roof
-  generation remains a later phase
+  elevation, or a matched fascia elevation from another plane. Their protected
+  gold eave edge retains the bearing reference while blue boundary grips and
+  add/simplify controls create hips, valleys, rakes, and clipped polygon edges;
+  the resulting polygon is preserved in project files and triangulated as one
+  calculated sloped surface in 3D. Automatic roof generation remains a later phase
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling

@@ -181,6 +181,7 @@ import {
   copyBoxObjects,
   createFloorPlatformFromPolyline,
   createRoofPlaneFromWall,
+  addRoofPlaneBoundaryVertex,
   createFoundationWallFromLine,
   createWallFromLine,
   duplicateLayerSet,
@@ -248,6 +249,7 @@ import {
   roomAnnotationIsValid,
   rotateModelEntities,
   scaleModelEntities,
+  simplifyRoofPlaneBoundary,
   stretchModelEntities,
   selectionIdsForObject,
   setActiveLayer,
@@ -1798,15 +1800,16 @@ function updateRoofPlaneView(view: FloorPlatformView, document: ModelDocument, p
   const reference = roofPlaneReferenceDimensions(document, polyline);
   if (!geometry || !reference) return;
   const eaveZ = reference.fasciaTopElevation;
-  const highZ = reference.peakElevation;
+  const risePerInch = polyline.roofSettings!.pitchRise / 12;
+  const triangles = THREE.ShapeUtils.triangulateShape(polyline.vertices.map((point) => new THREE.Vector2(point.x, point.y)), []);
+  if (!triangles.length) return;
   const buffer = new THREE.BufferGeometry();
-  buffer.setAttribute("position", new THREE.Float32BufferAttribute([
-    geometry.eaveStart.x, geometry.eaveStart.y, eaveZ,
-    geometry.eaveEnd.x, geometry.eaveEnd.y, eaveZ,
-    geometry.highEnd.x, geometry.highEnd.y, highZ,
-    geometry.highStart.x, geometry.highStart.y, highZ,
-  ], 3));
-  buffer.setIndex([0, 1, 2, 0, 2, 3]);
+  buffer.setAttribute("position", new THREE.Float32BufferAttribute(polyline.vertices.flatMap((point, index) => [
+    point.x,
+    point.y,
+    eaveZ + geometry.boundaryDepths[index] * risePerInch,
+  ]), 3));
+  buffer.setIndex(triangles.flatMap((triangle) => triangle));
   buffer.computeVertexNormals();
   const material = new THREE.MeshStandardMaterial({ color: 0xd7b99a, metalness: 0, opacity: 0.9, roughness: 0.82, side: THREE.DoubleSide, transparent: true });
   const mesh = new THREE.Mesh(buffer, material);
@@ -2393,7 +2396,7 @@ function updatePolylineGripPositions(grips: PolylineGripSet, polyline: PolylineO
     if (!definition) return;
     if (definition.grip) handle.userData.rectangleGrip = definition.grip;
     else handle.userData.polylineVertex = definition.vertex;
-    if (polyline.architecturalRole === "roof-plane" && definition.vertex !== null) handle.userData.roofPlaneGrip = definition.vertex < 2 ? "eave-span" : "horizontal-run";
+    if (polyline.architecturalRole === "roof-plane" && definition.vertex !== null) handle.userData.roofPlaneGrip = definition.vertex < 2 ? "eave-span" : "boundary";
     handle.userData.screenPixels = definition.grip?.kind === "center" ? 12 : 10;
     (handle.material as THREE.MeshBasicMaterial).color.setHex(polyline.architecturalRole === "roof-plane" && definition.vertex !== null && definition.vertex < 2 ? 0xf2ad32 : definition.grip?.kind === "center" ? 0x55d68a : definition.grip?.kind === "edge" ? 0x62c3ff : 0x39a9ff);
     handle.position.set(definition.point.x, definition.point.y, polyline.elevation + 0.8);
@@ -7915,7 +7918,7 @@ function Viewport({
       {selectedArcId && !arcMode && !dragStatus ? <div className="move-grip-hint">Arc selected · blue endpoints and midpoint reshape · green center moves</div> : null}
       {polylineMode && !dragStatus ? <div className="move-grip-hint is-drawing">POLYLINE · click or type points · distance follows cursor · U undoes · C closes</div> : null}
       {rectangleMode && !dragStatus ? <div className="move-grip-hint is-drawing">RECTANGLE · click or type first corner · opposite corner or width × height</div> : null}
-      {selectedPolylineId && !polylineMode && !rectangleMode && !dragStatus ? <div className="move-grip-hint">{(() => { const selected = document.polylines.find((polyline) => polyline.id === selectedPolylineId); return selected?.architecturalRole === "roof-plane" ? "Roof Plane selected · gold eave grips change bearing span · blue high-edge grips change horizontal run" : selected?.shape === "rectangle" && rectangleSupportsConstrainedGrips(selected) ? "Rectangle selected · corner and edge grips resize · center grip moves" : "Closed polyline selected · drag blue vertex grips to reshape"; })()}</div> : null}
+      {selectedPolylineId && !polylineMode && !rectangleMode && !dragStatus ? <div className="move-grip-hint">{(() => { const selected = document.polylines.find((polyline) => polyline.id === selectedPolylineId); return selected?.architecturalRole === "roof-plane" ? "Roof Plane selected · gold eave grips adjust bearing span · blue grips shape the roof boundary" : selected?.shape === "rectangle" && rectangleSupportsConstrainedGrips(selected) ? "Rectangle selected · corner and edge grips resize · center grip moves" : "Closed polyline selected · drag blue vertex grips to reshape"; })()}</div> : null}
       {viewTarget.id === "top" ? (
         <div className="axis-labels plan-ucs" aria-hidden="true">
           <i className="plan-ucs-origin" />
@@ -14616,6 +14619,28 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `Matched ${selectedPolyline.name} fascia elevation to ${source.name}.`, tone: "success" });
   }, [editor.present, selectedPolyline]);
 
+  const addSelectedRoofBoundaryVertex = useCallback(() => {
+    if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
+    const next = addRoofPlaneBoundaryVertex(editor.present, selectedPolyline.id);
+    if (!next) {
+      setFileNotice({ text: "A boundary point could not be added without making the Roof Plane invalid.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: "Added a blue Roof boundary grip. Drag it to shape a hip, valley, rake, or clipped edge.", tone: "success" });
+  }, [editor.present, selectedPolyline]);
+
+  const simplifySelectedRoofBoundary = useCallback(() => {
+    if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
+    const next = simplifyRoofPlaneBoundary(editor.present, selectedPolyline.id);
+    if (!next) {
+      setFileNotice({ text: "This Roof Plane is already at its minimum boundary or cannot be simplified safely.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: "Removed the least shape-defining Roof boundary point.", tone: "success" });
+  }, [editor.present, selectedPolyline]);
+
   const convertSelectedRoofPlaneToBoundary = useCallback(() => {
     if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
     const next = removeRoofPlaneRole(editor.present, selectedPolyline.id);
@@ -16166,11 +16191,15 @@ export function ModelBuilderApp() {
                   <ArchitecturalPropertyField key={`${selectedPolyline.id}:heel:${selectedPolyline.roofSettings.heightAbovePlate}`} label="Height above plate" value={selectedPolyline.roofSettings.heightAbovePlate} onCommit={(heightAbovePlate) => updateSelectedRoofPlane({ heightAbovePlate })} />
                   <ArchitecturalPropertyField key={`${selectedPolyline.id}:overhang:${selectedPolyline.roofSettings.overhang}`} allowZero label="Overhang" value={selectedPolyline.roofSettings.overhang} onCommit={(overhang) => updateSelectedRoofPlane({ overhang })} />
                   <PropertyGridRow label="Heel"><span className="property-readout">{formatSignedArchitectural(reference.heelElevation)}</span></PropertyGridRow>
-                  <PropertyGridRow label="High edge"><span className="property-readout">{formatSignedArchitectural(reference.peakElevation)}</span></PropertyGridRow>
+                  <PropertyGridRow label="Highest edge"><span className="property-readout">{formatSignedArchitectural(reference.peakElevation)}</span></PropertyGridRow>
                   <ArchitecturalPropertyField key={`${selectedPolyline.id}:fascia-top:${reference.fasciaTopElevation}`} allowNegative label="Fascia top" value={reference.fasciaTopElevation} onCommit={setSelectedRoofPlaneFasciaTop} />
                   <PropertyGridRow label="Fascia bottom"><span className="property-readout">{formatSignedArchitectural(reference.fasciaBottomElevation)}</span></PropertyGridRow>
                   <RoofPlaneFasciaMatchControl key={`${selectedPolyline.id}:fascia-match:${fasciaMatchOptions.map((option) => option.id).join(":")}`} onMatch={matchSelectedRoofPlaneFascia} options={fasciaMatchOptions} />
                   <PropertyGridRow label="Subfascia"><span className="property-readout">Top {formatSignedArchitectural(reference.subfasciaTopElevation)} · bottom {formatSignedArchitectural(reference.subfasciaBottomElevation)}</span></PropertyGridRow>
+                  <div className="property-action-row">
+                    <button type="button" onClick={addSelectedRoofBoundaryVertex} disabled={!selectedPolylineIsEditable}>Add Edge Point</button>
+                    <button type="button" onClick={simplifySelectedRoofBoundary} disabled={!selectedPolylineIsEditable || selectedPolyline.vertices.length <= 3}>Simplify Boundary</button>
+                  </div>
                   <div className="property-action-row single-action"><button type="button" onClick={convertSelectedRoofPlaneToBoundary} disabled={!selectedPolylineIsEditable}>Convert to Boundary</button></div>
                 </> : <p className="property-grid-note">This Roof Plane footprint needs repair before its calculated elevations can be shown.</p>;
               })() : selectedPolyline.closed ? <div className="property-action-row single-action"><button type="button" onClick={toggleSelectedFloorPlatform} disabled={!selectedPolylineIsEditable}>{selectedPolyline.architecturalRole === "floor-platform" ? "Convert to Boundary" : "Create Floor Platform"}</button></div> : null}
@@ -16294,10 +16323,10 @@ export function ModelBuilderApp() {
           ) : selectedPolyline && !selectedPolylineIsEditable ? (
             <PropertyGridSection className="locked-selection-notice" title="Editing" meta="Read only"><PropertyGridRow label="Status"><span className="property-readout is-locked">{selectedPolyline.shape === "rectangle" ? "Rectangle" : "Polyline"} locked</span></PropertyGridRow><p className="property-grid-note">Unlock the entity or its layer to edit its geometry.</p></PropertyGridSection>
           ) : selectedPolyline?.architecturalRole === "roof-plane" ? (
-            <PropertyGridSection title="Plan Editing" meta="Constrained Roof Plane">
+            <PropertyGridSection title="Plan Editing" meta="Editable Roof Boundary">
               <PropertyGridRow label="Eave grips"><span className="property-readout">Adjust bearing-line start or end</span></PropertyGridRow>
-              <PropertyGridRow label="High-edge grips"><span className="property-readout">Adjust horizontal run</span></PropertyGridRow>
-              <p className="property-grid-note">Roof grips remain parallel and perpendicular to the bearing line. Use Move, Rotate, Mirror, or Copy when you intend to detach a plane from its original Wall.</p>
+              <PropertyGridRow label="Blue grips"><span className="property-readout">Shape hips, valleys, rakes, and clips</span></PropertyGridRow>
+              <p className="property-grid-note">The gold eave edge preserves the bearing reference. Add an edge point, then drag its blue grip to shape the Roof Plane. Horizontal Run scales the full boundary depth. Move, Rotate, Mirror, or Copy detaches a plane from its original Wall.</p>
             </PropertyGridSection>
           ) : selectedPolyline?.shape === "rectangle" && rectangleSupportsConstrainedGrips(selectedPolyline) ? (
             <RectangleGeometryControl elevationLocked={selectedPolyline.architecturalRole === "floor-platform"} key={`${selectedPolyline.id}:${selectedPolyline.elevation}:${selectedPolyline.vertices.map((point) => `${point.x},${point.y}`).join(":")}`} rectangle={selectedPolyline} onUpdate={updateSelectedPolyline} />

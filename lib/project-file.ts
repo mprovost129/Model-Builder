@@ -44,6 +44,7 @@ import {
   roomAnnotationIsValid,
   roomObjectIsValid,
   resolveOpeningComponents,
+  roofPlaneGeometry,
   wallOpeningsAreValid,
   type OpeningComponentOverride,
   type LayerSet,
@@ -1035,7 +1036,7 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
   const roofSettings = supportsRoofPlanes && architecturalRole === "roof-plane" ? readRoofSettings(value.roofSettings) : null;
   if (supportsRoofPlanes && architecturalRole === "roof-plane" && !(value.roofBearingWallId === null || typeof value.roofBearingWallId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.roofBearingWallId))) return null;
   const roofBearingWallId = supportsRoofPlanes && architecturalRole === "roof-plane" ? value.roofBearingWallId as string | null : null;
-  if (architecturalRole === undefined || ((architecturalRole === "floor-platform" || architecturalRole === "roof-plane") && !geometry.closed) || (architecturalRole === "roof-plane" && (!roofSettings || geometry.vertices.length !== 4))) return null;
+  if (architecturalRole === undefined || ((architecturalRole === "floor-platform" || architecturalRole === "roof-plane") && !geometry.closed) || (architecturalRole === "roof-plane" && (!roofSettings || geometry.vertices.length < 3 || (geometry.bulges ?? []).some((bulge) => Math.abs(bulge) > 1e-10)))) return null;
   const fillOverride = readFillOverride(value.fillOverride);
   if (fillOverride === undefined) return null;
   return { ...geometry, architecturalRole, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), roofBearingWallId, roofSettings, shape: value.shape, storyId, type: "polyline" };
@@ -1448,6 +1449,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
       return { ok: false, error: "Drawing polyline identities, names, or layers are invalid." };
     }
     if (polylines.some((polyline) => !storyIds.has(polyline.storyId))) return { ok: false, error: "One or more drawing polylines reference a missing Story." };
+    if (polylines.some((polyline) => polyline.architecturalRole === "roof-plane" && !roofPlaneGeometry(polyline))) return { ok: false, error: "One or more Roof Plane boundaries are invalid." };
     const wallsById = new Map(lines.filter((line) => line.architecturalRole === "wall").map((line) => [line.id, line]));
     if (polylines.some((polyline) => polyline.architecturalRole === "roof-plane" && polyline.roofBearingWallId !== null && wallsById.get(polyline.roofBearingWallId)?.storyId !== polyline.storyId)) return { ok: false, error: "One or more Roof Planes reference a missing bearing Wall." };
     const allIds = [...validObjects.map((object) => object.id), ...lines.map((line) => line.id), ...polylines.map((polyline) => polyline.id)];

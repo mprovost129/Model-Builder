@@ -33,10 +33,12 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [x] Bearing Wall identity and Story retained; removing or changing the source Wall safely detaches the manual plane instead of deleting it.
 - [x] Plan graphics show the footprint, bearing line, and uphill pitch direction; perspective/elevation views show the calculated sloped surface.
 - [x] Per-plane pitch, Height Above Plate, horizontal run, and overhang are editable in Properties.
-- [x] Eave/bearing span is editable numerically or with constrained eave grips; paired high-edge grips edit horizontal run without skewing the plane.
+- [x] Eave/bearing span is editable numerically or with constrained gold eave grips; the remaining blue grips freely shape the roof boundary without changing its bearing reference.
 - [x] Live Top of Plate, heel, high-edge/peak, and fascia-top elevations use the actual plane run.
 - [x] Version-49 project files preserve manual Roof Planes and their per-plane defaults.
-- [ ] Arbitrary polygon-boundary editing for hips, valleys, rakes, and clipped Roof Planes while preserving a valid bearing reference.
+- [x] Arbitrary straight-edged polygon-boundary editing for hips, valleys, rakes, and clipped Roof Planes while preserving a valid eave and bearing reference.
+- [x] Add Edge Point and Simplify Boundary actions provide controlled polygon topology changes; invalid crossings, curved roof edges, and boundaries that cross the eave are rejected.
+- [x] Polygon Roof Planes retain per-vertex slope elevations in 3D and round-trip through version-49 project files.
 - [x] Roof Plane vertical placement by Height Above Plate, direct Fascia Top elevation, or another Roof Plane's matched absolute fascia elevation.
 - [ ] Complete per-plane overrides for rafter/truss size, fascia, subfascia, and birdsmouth inputs; pitch, heel, run, and overhang are complete.
 - [ ] Live editable dimensions in plan and section/elevation views.

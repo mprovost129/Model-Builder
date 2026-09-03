@@ -12,6 +12,7 @@ import {
   addWallOpening,
   createFloorPlatformFromPolyline,
   createRoofPlaneFromWall,
+  addRoofPlaneBoundaryVertex,
   createFoundationWallFromLine,
   createWallFromLine,
   DEFAULT_DOCUMENT,
@@ -1131,12 +1132,15 @@ test("round-trips a manual Roof Plane with its per-plane heel and pitch settings
   assert.ok(wallDocument);
   const created = createRoofPlaneFromWall(wallDocument, line.line.id, 180);
   assert.ok(created);
-  const project = createProjectDocument({ createdAt, document: created.document, name: "Manual Roof", updatedAt });
+  const polygonDocument = addRoofPlaneBoundaryVertex(created.document, created.roofPlane.id);
+  assert.ok(polygonDocument);
+  const project = createProjectDocument({ createdAt, document: polygonDocument, name: "Manual Roof", updatedAt });
   const parsed = parseProjectDocument(serializeProjectDocument(project));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   const restored = projectToDocument(parsed.project);
-  assert.deepEqual(restored.polylines, created.document.polylines);
+  assert.deepEqual(restored.polylines, polygonDocument.polylines);
+  assert.equal(restored.polylines[0].vertices.length, 5);
   assert.equal(restored.polylines[0].architecturalRole, "roof-plane");
   assert.equal(restored.polylines[0].roofSettings?.heightAbovePlate, 9.25);
 });

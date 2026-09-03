@@ -28,6 +28,7 @@ import {
   createBoundaryPolylineObject,
   createFloorPlatformFromPolyline,
   createRoofPlaneFromWall,
+  addRoofPlaneBoundaryVertex,
   createFoundationWallFromLine,
   createWallFromLine,
   DEFAULT_DOCUMENT,
@@ -85,6 +86,7 @@ import {
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
+  simplifyRoofPlaneBoundary,
   savePlanView,
   STANDARD_LAYER_IDS,
   stretchModelEntities,
@@ -179,6 +181,27 @@ test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () 
   const deeperPlane = deeper.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
   assert.equal(roofPlaneGeometry(deeperPlane)?.horizontalRun, 200);
   assert.equal(deeperPlane.roofBearingWallId, line.line.id);
+
+  const withEdgePoint = addRoofPlaneBoundaryVertex(deeper, deeperPlane.id);
+  assert.ok(withEdgePoint);
+  const fivePointPlane = withEdgePoint.polylines.find((polyline) => polyline.id === deeperPlane.id)!;
+  assert.equal(fivePointPlane.vertices.length, 5);
+  const shaped = updatePolylineObjectVertex(withEdgePoint, fivePointPlane.id, 3, {
+    x: fivePointPlane.vertices[3].x + 18,
+    y: fivePointPlane.vertices[3].y - 12,
+  });
+  assert.ok(shaped);
+  const shapedPlane = shaped.polylines.find((polyline) => polyline.id === fivePointPlane.id)!;
+  assert.equal(shapedPlane.vertices.length, 5);
+  assert.ok(roofPlaneGeometry(shapedPlane));
+  const resizedPolygon = updateRoofPlane(shaped, shapedPlane.id, { horizontalRun: 216, overhang: 30 });
+  assert.ok(resizedPolygon);
+  const resizedPolygonPlane = resizedPolygon.polylines.find((polyline) => polyline.id === shapedPlane.id)!;
+  assert.equal(resizedPolygonPlane.vertices.length, 5);
+  assert.equal(roofPlaneGeometry(resizedPolygonPlane)?.horizontalRun, 216);
+  const simplified = simplifyRoofPlaneBoundary(resizedPolygon, resizedPolygonPlane.id);
+  assert.ok(simplified);
+  assert.equal(simplified.polylines.find((polyline) => polyline.id === resizedPolygonPlane.id)?.vertices.length, 4);
 
   const second = createRoofPlaneFromWall(deeper, line.line.id, 96);
   assert.ok(second);
