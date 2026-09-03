@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDefaultBuildingStructure } from "../lib/building-stories.ts";
-import type { LineObject } from "../lib/document-model.ts";
-import { nearestParallelWallClearDimensions } from "../lib/wall-clear-dimensions.ts";
+import { cloneDocument, NEW_PROJECT_DOCUMENT, STANDARD_LAYER_IDS, type LineObject } from "../lib/document-model.ts";
+import { nearestParallelWallClearDimensions, setParallelWallDimension } from "../lib/wall-clear-dimensions.ts";
 
 function wall(id: string, start: [number, number], end: [number, number], overrides: Partial<LineObject> = {}): LineObject {
   return {
@@ -40,10 +40,10 @@ test("finds the nearest overlapping parallel Wall faces on both sides", () => {
     ["left", "left-near"],
     ["right", "right"],
   ]);
-  assert.equal(dimensions[0].distance, 115.0625);
+  assert.equal(dimensions[0].distance, 120);
   assert.equal(dimensions[0].from.x, 60);
   assert.equal(dimensions[0].to.x, 60);
-  assert.equal(dimensions[1].distance, 92);
+  assert.equal(dimensions[1].distance, 100);
 });
 
 test("ignores perpendicular, non-overlapping, other-Story, and unresolved Walls", () => {
@@ -56,4 +56,30 @@ test("ignores perpendicular, non-overlapping, other-Story, and unresolved Walls"
     wall("unknown-type", [0, -80], [120, -80], { wallTypeId: "missing" }),
   ];
   assert.deepEqual(nearestParallelWallClearDimensions(selected, candidates, wallTypes), []);
+});
+
+test("edits an exterior-Main-layer dimension while keeping joined corners closed", () => {
+  const reference = wall("reference", [0, 0], [0, 120], { layerId: STANDARD_LAYER_IDS.wall });
+  const selected = wall("selected", [120, 120], [120, 0], { layerId: STANDARD_LAYER_IDS.wall });
+  const top = wall("top", [0, 120], [120, 120], { layerId: STANDARD_LAYER_IDS.wall });
+  const bottom = wall("bottom", [120, 0], [0, 0], { layerId: STANDARD_LAYER_IDS.wall });
+  const document = cloneDocument(NEW_PROJECT_DOCUMENT);
+  document.lines = [reference, selected, top, bottom];
+
+  const moved = setParallelWallDimension(document, selected.id, reference.id, 144);
+  assert.ok(moved);
+  const movedReference = moved.lines.find((line) => line.id === reference.id)!;
+  const movedSelected = moved.lines.find((line) => line.id === selected.id)!;
+  const movedTop = moved.lines.find((line) => line.id === top.id)!;
+  const movedBottom = moved.lines.find((line) => line.id === bottom.id)!;
+  assert.deepEqual(movedReference.start, reference.start);
+  assert.deepEqual(movedReference.end, reference.end);
+  assert.deepEqual(movedTop.end, movedSelected.start);
+  assert.deepEqual(movedBottom.start, movedSelected.end);
+  assert.deepEqual(movedTop.start, top.start);
+  assert.deepEqual(movedBottom.end, bottom.end);
+  const updatedDimension = nearestParallelWallClearDimensions(movedSelected, moved.lines, moved.building.wallTypes)
+    .find((dimension) => dimension.referenceWallId === reference.id);
+  assert.ok(updatedDimension);
+  assert.equal(updatedDimension.distance, 144);
 });

@@ -397,7 +397,7 @@ import {
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
 import { wallFramingSolids } from "@/lib/wall-framing";
-import { nearestParallelWallClearDimensions } from "@/lib/wall-clear-dimensions";
+import { nearestParallelWallClearDimensions, setParallelWallDimension } from "@/lib/wall-clear-dimensions";
 import {
   automaticFoundationWallJoinCount,
   buildAutomaticFoundationWallJoinPlan,
@@ -1369,6 +1369,7 @@ type ViewportProps = {
   onRoomLabelOpen: (roomId: string) => void;
   onRoomLabelTypeChange: (roomId: string, roomType: string) => void;
   onRoomCeilingHeightChange: (roomId: string, height: number) => boolean;
+  onWallClearanceChange: (selectedWallId: string, referenceWallId: string, distance: number) => boolean;
   onWallLengthChange: (lineId: string, fixedEndpoint: LineFixedEndpoint, length: number) => boolean;
   onViewChange: (view: ViewTarget) => void;
   selectedArcId: string | null;
@@ -1391,14 +1392,16 @@ type ActiveGripInput = {
   y: number;
 };
 
+type TemporaryWallClearDimensionScreen = {
+  distance: number;
+  from: ScreenPoint;
+  referenceWallId: string;
+  side: "left" | "right";
+  to: ScreenPoint;
+};
+
 type TemporaryWallDimensionScreen = {
-  clearDimensions: Array<{
-    distance: number;
-    from: ScreenPoint;
-    referenceWallId: string;
-    side: "left" | "right";
-    to: ScreenPoint;
-  }>;
+  clearDimensions: TemporaryWallClearDimensionScreen[];
   dimensionEnd: ScreenPoint;
   dimensionStart: ScreenPoint;
   label: ScreenPoint;
@@ -1409,10 +1412,12 @@ type TemporaryWallDimensionScreen = {
 
 function TemporaryWallDimension({
   length,
+  onClearanceCommit,
   onCommit,
   screen,
 }: {
   length: number;
+  onClearanceCommit: (referenceWallId: string, distance: number) => boolean;
   onCommit: (fixedEndpoint: LineFixedEndpoint, length: number) => boolean;
   screen: TemporaryWallDimensionScreen;
 }) {
@@ -1420,10 +1425,6 @@ function TemporaryWallDimension({
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
   const [fixedEndpoint, setFixedEndpoint] = useState<LineFixedEndpoint>("start");
-
-  useEffect(() => {
-    if (!editing) setDraft(formatArchitectural(length));
-  }, [editing, length]);
 
   const commit = () => {
     const parsed = parseArchitectural(draft);
@@ -1456,12 +1457,11 @@ function TemporaryWallDimension({
           <circle className="temporary-wall-clear-witness" cx={dimension.to.x} cy={dimension.to.y} r="2.5" />
         </g>)}
       </svg>
-      {screen.clearDimensions.map((dimension) => <output
+      {screen.clearDimensions.map((dimension) => <TemporaryWallClearDimensionInput
         key={`${dimension.side}:${dimension.referenceWallId}`}
-        className="temporary-wall-clear-value"
-        style={{ left: (dimension.from.x + dimension.to.x) / 2, top: (dimension.from.y + dimension.to.y) / 2 }}
-        title="Clear distance between facing Wall finish surfaces"
-      >{formatArchitectural(dimension.distance)}</output>)}
+        dimension={dimension}
+        onCommit={(distance) => onClearanceCommit(dimension.referenceWallId, distance)}
+      />)}
       <button
         type="button"
         className={fixedEndpoint === "start" ? "temporary-wall-anchor is-fixed" : "temporary-wall-anchor"}
@@ -1488,15 +1488,15 @@ function TemporaryWallDimension({
       >
         <span>{fixedEndpoint === "start" ? "S" : "E"} FIXED</span>
         <input
-          value={draft}
+          value={editing ? draft : formatArchitectural(length)}
           onChange={(event) => { setDraft(event.target.value); setError(""); }}
-          onFocus={(event) => { setEditing(true); event.currentTarget.select(); }}
-          onBlur={() => { setEditing(false); setError(""); setDraft(formatArchitectural(length)); }}
+          onFocus={(event) => { setDraft(formatArchitectural(length)); setEditing(true); event.currentTarget.select(); }}
+          onBlur={() => { setEditing(false); setError(""); }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
               setError("");
-              setDraft(formatArchitectural(length));
+              setEditing(false);
               event.currentTarget.blur();
             }
           }}
@@ -1507,6 +1507,61 @@ function TemporaryWallDimension({
         {error ? <small role="alert">{error}</small> : null}
       </form>
     </div>
+  );
+}
+
+function TemporaryWallClearDimensionInput({
+  dimension,
+  onCommit,
+}: {
+  dimension: TemporaryWallClearDimensionScreen;
+  onCommit: (distance: number) => boolean;
+}) {
+  const [draft, setDraft] = useState(formatArchitectural(dimension.distance));
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState("");
+
+  const commit = () => {
+    const parsed = parseArchitectural(draft);
+    if (parsed === null || parsed < 1 / 16) {
+      setError("Enter a distance of at least 1/16 inch.");
+      return;
+    }
+    if (!onCommit(snapToSixteenth(parsed))) {
+      setError("That distance conflicts with a connected Wall, opening, or lock.");
+      return;
+    }
+    setError("");
+    setEditing(false);
+  };
+
+  return (
+    <form
+      className={error ? "temporary-wall-clear-input has-error" : "temporary-wall-clear-input"}
+      style={{ left: (dimension.from.x + dimension.to.x) / 2, top: (dimension.from.y + dimension.to.y) / 2 }}
+      onSubmit={(event) => { event.preventDefault(); commit(); }}
+      title="Dimensions use the exterior face of each Wall Main layer; the reference Wall stays fixed"
+    >
+      <span>DIM</span>
+      <input
+        value={editing ? draft : formatArchitectural(dimension.distance)}
+        onChange={(event) => { setDraft(event.target.value); setError(""); }}
+        onFocus={(event) => { setDraft(formatArchitectural(dimension.distance)); setEditing(true); event.currentTarget.select(); }}
+        onBlur={() => { setEditing(false); setError(""); }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setError("");
+            setEditing(false);
+            event.currentTarget.blur();
+          }
+        }}
+        aria-label="Temporary Wall-to-Wall dimension"
+        spellCheck={false}
+      />
+      <b>↵</b>
+      {error ? <small role="alert">{error}</small> : null}
+    </form>
   );
 }
 
@@ -2704,6 +2759,7 @@ function Viewport({
   onRoomLabelOpen,
   onRoomLabelTypeChange,
   onRoomCeilingHeightChange,
+  onWallClearanceChange,
   onWallLengthChange,
   onViewChange,
   selectedArcId,
@@ -7585,6 +7641,7 @@ function Viewport({
           key={temporarilyDimensionedWall.id}
           length={lineLength(temporarilyDimensionedWall)}
           screen={temporaryWallDimensionScreen}
+          onClearanceCommit={(referenceWallId, distance) => onWallClearanceChange(temporarilyDimensionedWall.id, referenceWallId, distance)}
           onCommit={(fixedEndpoint, length) => onWallLengthChange(temporarilyDimensionedWall.id, fixedEndpoint, length)}
         />
       ) : null}
@@ -7722,7 +7779,7 @@ function Viewport({
       {arcMode && !dragStatus ? <div className="move-grip-hint is-drawing">ARC · start point · second point · endpoint · exact coordinates accepted</div> : null}
       {lineMode && !dragStatus ? <div className="move-grip-hint is-drawing">LINE · click or type X,Y,Z · type a distance · U undoes · C closes</div> : null}
       {circleMode && !dragStatus ? <div className="move-grip-hint is-drawing">CIRCLE · click or type center · click edge or type radius · Escape exits</div> : null}
-      {selectedLineId && !lineMode && !dragStatus ? <div className="move-grip-hint">{temporarilyDimensionedWall?.architecturalRole === "wall" ? "Wall selected · edit blue length · S/E holds an endpoint · green values show nearest clearances" : "Line selected · blue endpoints reshape · green midpoint moves"}</div> : null}
+      {selectedLineId && !lineMode && !dragStatus ? <div className="move-grip-hint">{temporarilyDimensionedWall?.architecturalRole === "wall" ? "Wall selected · edit blue length · S/E holds an endpoint · edit green Wall-to-Wall dimensions" : "Line selected · blue endpoints reshape · green midpoint moves"}</div> : null}
       {selectedCircleId && !circleMode && !dragStatus ? <div className="move-grip-hint">Circle selected · green center moves · blue quadrant grips resize</div> : null}
       {selectedArcId && !arcMode && !dragStatus ? <div className="move-grip-hint">Arc selected · blue endpoints and midpoint reshape · green center moves</div> : null}
       {polylineMode && !dragStatus ? <div className="move-grip-hint is-drawing">POLYLINE · click or type points · distance follows cursor · U undoes · C closes</div> : null}
@@ -13617,6 +13674,20 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present]);
 
+  const setWallClearanceFromTemporaryDimension = useCallback((selectedWallId: string, referenceWallId: string, distance: number) => {
+    const selected = findLineObject(editor.present, selectedWallId);
+    const reference = findLineObject(editor.present, referenceWallId);
+    if (!selected || !reference) return false;
+    const next = setParallelWallDimension(editor.present, selectedWallId, referenceWallId, distance);
+    if (!next) {
+      setFileNotice({ text: "That clearance conflicts with a connected Wall, hosted opening, or locked object.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${selected.name} moved to ${formatArchitectural(distance)} from ${reference.name}; automatically joined corners stayed connected.`, tone: "success" });
+    return true;
+  }, [editor.present]);
+
   const renameSelectedLine = useCallback((name: string) => {
     if (!selectedLineId) return false;
     const next = renameLineObject(editor.present, selectedLineId, name);
@@ -15754,6 +15825,7 @@ export function ModelBuilderApp() {
           onRoomLabelOpen={openRoomFromLabel}
           onRoomLabelTypeChange={changeRoomTypeFromLabel}
           onRoomCeilingHeightChange={changeRoomCeilingFromLabel}
+          onWallClearanceChange={setWallClearanceFromTemporaryDimension}
           onWallLengthChange={resizeWallFromTemporaryDimension}
           onViewChange={changeViewTarget}
           onDragStatus={setDragStatus}
