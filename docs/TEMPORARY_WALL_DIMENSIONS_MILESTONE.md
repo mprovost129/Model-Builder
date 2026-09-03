@@ -13,6 +13,7 @@ This control point introduces the first editable on-canvas dimension in Slater W
 - A selected Wall also reports the nearest dimension to an overlapping parallel Wall on each side. Every Wall reference uses the exterior face of its Main layer, so finishes do not change the structural plan dimension.
 - Clear-distance candidates must be visible Walls on the same Story, parallel within one degree, and overlap the selected Wall along its length. Perpendicular, non-overlapping, crossing, unresolved-Type, and other-Story Walls are excluded.
 - A green dimension is editable. Its reference Wall remains fixed, the selected Wall moves parallel, and any automatically joined Wall endpoints coincident with the selected Wall endpoints follow the move so ordinary rectangular corners remain closed.
+- Each editable dimension box runs parallel to its dimension line. Vertical text is normalized to a readable bottom-to-top orientation.
 - Manually squared/disconnected endpoints do not follow the move. If a connected Wall, hosted opening, object lock, or layer lock makes the requested result invalid, the complete edit is rejected without a partial change.
 - Temporary dimensions are editing aids. They are separate from future persistent dimension objects, annotation layers, and printed dimension chains.
 
@@ -27,6 +28,7 @@ This control point introduces the first editable on-canvas dimension in Slater W
 - [x] The control is available in both light and dark interface themes.
 - [x] Show nearest same-Story dimensions using the exterior face of each Wall Main layer.
 - [x] Edit a green dimension while keeping its reference Wall fixed and maintaining ordinary automatic corner joins.
+- [x] Orient horizontal and vertical edit boxes parallel to their dimension lines.
 - [ ] Extend temporary clear dimensions to selected Door and Window opening edges.
 - [ ] Add persistent dimension objects with styles, layers, witnesses, text placement, and print-scale behavior.
 - [ ] Add chained exterior dimensions after object references and witness associations are stable.

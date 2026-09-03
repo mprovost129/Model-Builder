@@ -1410,6 +1410,13 @@ type TemporaryWallDimensionScreen = {
   wallStart: ScreenPoint;
 };
 
+function readableScreenDimensionAngle(from: ScreenPoint, to: ScreenPoint): number {
+  let angle = Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI;
+  if (angle >= 90) angle -= 180;
+  if (angle < -90) angle += 180;
+  return angle;
+}
+
 function TemporaryWallDimension({
   length,
   onClearanceCommit,
@@ -1482,7 +1489,11 @@ function TemporaryWallDimension({
       >E</button>
       <form
         className={error ? "temporary-wall-dimension-input has-error" : "temporary-wall-dimension-input"}
-        style={{ left: screen.label.x, top: screen.label.y }}
+        style={{
+          left: screen.label.x,
+          top: screen.label.y,
+          transform: `translate(-50%, -50%) rotate(${readableScreenDimensionAngle(screen.dimensionStart, screen.dimensionEnd)}deg)`,
+        }}
         onSubmit={(event) => { event.preventDefault(); commit(); }}
         title={`${fixedEndpoint === "start" ? "Start" : "End"} endpoint stays fixed`}
       >
@@ -1538,7 +1549,11 @@ function TemporaryWallClearDimensionInput({
   return (
     <form
       className={error ? "temporary-wall-clear-input has-error" : "temporary-wall-clear-input"}
-      style={{ left: (dimension.from.x + dimension.to.x) / 2, top: (dimension.from.y + dimension.to.y) / 2 }}
+      style={{
+        left: (dimension.from.x + dimension.to.x) / 2,
+        top: (dimension.from.y + dimension.to.y) / 2,
+        transform: `translate(-50%, -50%) rotate(${readableScreenDimensionAngle(dimension.from, dimension.to)}deg)`,
+      }}
       onSubmit={(event) => { event.preventDefault(); commit(); }}
       title="Dimensions use the exterior face of each Wall Main layer; the reference Wall stays fixed"
     >
