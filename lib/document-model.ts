@@ -2790,6 +2790,27 @@ export function updateRoofPlane(document: ModelDocument, polylineId: string, cha
   return withPolylines(document, document.polylines.map((polyline) => polyline.id === polylineId ? candidate : polyline));
 }
 
+/** Sets the roof surface at the eave by solving the plane's Height Above Plate. */
+export function updateRoofPlaneFasciaTop(document: ModelDocument, polylineId: string, fasciaTopElevation: number): ModelDocument | null {
+  const source = findPolylineObject(document, polylineId);
+  const reference = source ? roofPlaneReferenceDimensions(document, source) : null;
+  if (!source || !reference || !source.roofSettings || !Number.isFinite(fasciaTopElevation) || Math.abs(fasciaTopElevation) > MAXIMUM_COORDINATE) return null;
+  const heightAbovePlate = snapToSixteenth(
+    fasciaTopElevation - reference.topOfPlateElevation + source.roofSettings.overhang * source.roofSettings.pitchRise / 12,
+  );
+  return updateRoofPlane(document, polylineId, { heightAbovePlate });
+}
+
+/** Matches absolute fascia-top elevation while preserving the target plane's pitch and overhang. */
+export function matchRoofPlaneFascia(document: ModelDocument, targetPolylineId: string, sourcePolylineId: string): ModelDocument | null {
+  if (targetPolylineId === sourcePolylineId) return null;
+  const source = findPolylineObject(document, sourcePolylineId);
+  const target = findPolylineObject(document, targetPolylineId);
+  const sourceReference = source ? roofPlaneReferenceDimensions(document, source) : null;
+  if (!source || !target || source.architecturalRole !== "roof-plane" || target.architecturalRole !== "roof-plane" || !sourceReference) return null;
+  return updateRoofPlaneFasciaTop(document, targetPolylineId, sourceReference.fasciaTopElevation);
+}
+
 /**
  * Constrains Roof Plane corner grips to meaningful architectural edits. Eave
  * grips adjust the bearing span along its existing baseline. High-edge grips

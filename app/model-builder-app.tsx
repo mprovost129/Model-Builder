@@ -292,7 +292,9 @@ import {
   roomHorizontalPlatformSolution,
   roofPlaneGeometry,
   roofPlaneReferenceDimensions,
+  matchRoofPlaneFascia,
   updateRoofPlane,
+  updateRoofPlaneFasciaTop,
   updatePlatformOpening,
   foundationSillOffsetFromReference,
   foundationWallVerticalExtent,
@@ -8021,21 +8023,24 @@ function DimensionField({
 }
 
 function ArchitecturalPropertyField({
+  allowNegative = false,
   allowZero = false,
   label,
   onCommit,
   value,
 }: {
+  allowNegative?: boolean;
   allowZero?: boolean;
   label: string;
   onCommit: (value: number) => void;
   value: number;
 }) {
-  const [draft, setDraft] = useState(formatArchitectural(value));
+  const formatValue = allowNegative ? formatSignedArchitectural : formatArchitectural;
+  const [draft, setDraft] = useState(formatValue(value));
   const [error, setError] = useState(false);
   const commit = () => {
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || (allowZero ? parsed < 0 : parsed <= 0)) {
+    const parsed = allowNegative ? parseSignedArchitectural(draft) : parseArchitectural(draft);
+    if (parsed === null || Math.abs(parsed) > MAXIMUM_COORDINATE || (!allowNegative && (allowZero ? parsed < 0 : parsed <= 0))) {
       setError(true);
       return;
     }
@@ -8046,7 +8051,7 @@ function ArchitecturalPropertyField({
     <label className="property-table-row property-input-row">
       <span className="property-table-label">{label}</span>
       <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-        <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatArchitectural(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} spellCheck={false} />
+        <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatValue(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} spellCheck={false} />
         <span>ft-in</span>
       </div>
     </label>
@@ -8063,6 +8068,27 @@ function NumberPropertyField({ label, max, min, onCommit, step = 0.0625, value }
     onCommit(snapToSixteenth(parsed));
   };
   return <label className="property-table-row property-input-row"><span className="property-table-label">{label}</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input type="number" min={min} max={max} step={step} value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(String(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} /><span>:12</span></div></label>;
+}
+
+function RoofPlaneFasciaMatchControl({
+  onMatch,
+  options,
+}: {
+  onMatch: (roofPlaneId: string) => void;
+  options: { fasciaTopElevation: number; id: string; name: string }[];
+}) {
+  const [sourceId, setSourceId] = useState(options[0]?.id ?? "");
+  if (!options.length) return <PropertyGridRow label="Match fascia"><span className="property-readout">Create another Roof Plane first</span></PropertyGridRow>;
+  return (
+    <PropertyGridRow label="Match fascia">
+      <span className="roof-fascia-match-field">
+        <select className="property-cell-select" value={sourceId} onChange={(event) => setSourceId(event.target.value)} aria-label="Roof Plane to match">
+          {options.map((option) => <option key={option.id} value={option.id}>{option.name} · {formatSignedArchitectural(option.fasciaTopElevation)}</option>)}
+        </select>
+        <button type="button" onClick={() => onMatch(sourceId)}>Match</button>
+      </span>
+    </PropertyGridRow>
+  );
 }
 
 function PositionField({
@@ -14567,6 +14593,29 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next });
   }, [editor.present, selectedPolyline]);
 
+  const setSelectedRoofPlaneFasciaTop = useCallback((fasciaTopElevation: number) => {
+    if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
+    const next = updateRoofPlaneFasciaTop(editor.present, selectedPolyline.id, fasciaTopElevation);
+    if (!next) {
+      setFileNotice({ text: "That fascia elevation would create an unsupported Height Above Plate.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: "Updated Fascia Top and recalculated Height Above Plate.", tone: "success" });
+  }, [editor.present, selectedPolyline]);
+
+  const matchSelectedRoofPlaneFascia = useCallback((sourceRoofPlaneId: string) => {
+    if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
+    const source = findPolylineObject(editor.present, sourceRoofPlaneId);
+    const next = matchRoofPlaneFascia(editor.present, selectedPolyline.id, sourceRoofPlaneId);
+    if (!next || !source) {
+      setFileNotice({ text: "Select another valid Roof Plane to match.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `Matched ${selectedPolyline.name} fascia elevation to ${source.name}.`, tone: "success" });
+  }, [editor.present, selectedPolyline]);
+
   const convertSelectedRoofPlaneToBoundary = useCallback(() => {
     if (!selectedPolyline || selectedPolyline.architecturalRole !== "roof-plane") return;
     const next = removeRoofPlaneRole(editor.present, selectedPolyline.id);
@@ -16103,6 +16152,11 @@ export function ModelBuilderApp() {
               {selectedPolyline.architecturalRole === "roof-plane" ? (() => {
                 const geometry = roofPlaneGeometry(selectedPolyline);
                 const reference = roofPlaneReferenceDimensions(editor.present, selectedPolyline);
+                const fasciaMatchOptions = editor.present.polylines.flatMap((candidate) => {
+                  if (candidate.id === selectedPolyline.id || candidate.architecturalRole !== "roof-plane") return [];
+                  const candidateReference = roofPlaneReferenceDimensions(editor.present, candidate);
+                  return candidateReference ? [{ fasciaTopElevation: candidateReference.fasciaTopElevation, id: candidate.id, name: candidate.name }] : [];
+                });
                 return geometry && reference && selectedPolyline.roofSettings ? <>
                   <PropertyGridRow label="Bearing"><span className="property-readout">{selectedPolyline.roofBearingWallId ? `${findLineObject(editor.present, selectedPolyline.roofBearingWallId)?.name ?? "Missing Wall"} · exterior Main face` : "Detached manual plane"}</span></PropertyGridRow>
                   <PropertyGridRow label="Top of plate"><span className="property-readout">{formatSignedArchitectural(reference.topOfPlateElevation)}</span></PropertyGridRow>
@@ -16113,7 +16167,9 @@ export function ModelBuilderApp() {
                   <ArchitecturalPropertyField key={`${selectedPolyline.id}:overhang:${selectedPolyline.roofSettings.overhang}`} allowZero label="Overhang" value={selectedPolyline.roofSettings.overhang} onCommit={(overhang) => updateSelectedRoofPlane({ overhang })} />
                   <PropertyGridRow label="Heel"><span className="property-readout">{formatSignedArchitectural(reference.heelElevation)}</span></PropertyGridRow>
                   <PropertyGridRow label="High edge"><span className="property-readout">{formatSignedArchitectural(reference.peakElevation)}</span></PropertyGridRow>
-                  <PropertyGridRow label="Fascia"><span className="property-readout">Top {formatSignedArchitectural(reference.fasciaTopElevation)} · bottom {formatSignedArchitectural(reference.fasciaBottomElevation)}</span></PropertyGridRow>
+                  <ArchitecturalPropertyField key={`${selectedPolyline.id}:fascia-top:${reference.fasciaTopElevation}`} allowNegative label="Fascia top" value={reference.fasciaTopElevation} onCommit={setSelectedRoofPlaneFasciaTop} />
+                  <PropertyGridRow label="Fascia bottom"><span className="property-readout">{formatSignedArchitectural(reference.fasciaBottomElevation)}</span></PropertyGridRow>
+                  <RoofPlaneFasciaMatchControl key={`${selectedPolyline.id}:fascia-match:${fasciaMatchOptions.map((option) => option.id).join(":")}`} onMatch={matchSelectedRoofPlaneFascia} options={fasciaMatchOptions} />
                   <PropertyGridRow label="Subfascia"><span className="property-readout">Top {formatSignedArchitectural(reference.subfasciaTopElevation)} · bottom {formatSignedArchitectural(reference.subfasciaBottomElevation)}</span></PropertyGridRow>
                   <div className="property-action-row single-action"><button type="button" onClick={convertSelectedRoofPlaneToBoundary} disabled={!selectedPolylineIsEditable}>Convert to Boundary</button></div>
                 </> : <p className="property-grid-note">This Roof Plane footprint needs repair before its calculated elevations can be shown.</p>;

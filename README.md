@@ -159,7 +159,8 @@ polylines, rectangles, Circles, and Arcs.
   separate underside bearing reference, exterior heel, peak at a reference run,
   fascia/subfascia elevations, roof angle, and notch limit. Manual Roof Planes
   can be created from a Wall Main-layer exterior face, viewed in plan or 3D, and
-  edited by eave span, horizontal run, pitch, heel, and overhang; automatic roof
+  edited by eave span, horizontal run, pitch, heel, overhang, direct Fascia Top
+  elevation, or a matched fascia elevation from another plane; automatic roof
   generation remains a later phase
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager

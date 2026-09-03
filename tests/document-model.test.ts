@@ -67,6 +67,7 @@ import {
   moveBoxObject,
   moveBoxObjects,
   moveModelEntities,
+  matchRoofPlaneFascia,
   modelSelectionRotationBase,
   modelSelectionScaleBase,
   renameGroup,
@@ -112,6 +113,7 @@ import {
   type ModelDocument,
   ungroupBoxObjects,
   updateBoxObject,
+  updateRoofPlaneFasciaTop,
   updateModelEntityFillOverride,
 } from "../lib/document-model.ts";
 import { addBuildingStory, calculateStoryElevations, cloneBuildingStructure } from "../lib/building-stories.ts";
@@ -177,6 +179,24 @@ test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () 
   const deeperPlane = deeper.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
   assert.equal(roofPlaneGeometry(deeperPlane)?.horizontalRun, 200);
   assert.equal(deeperPlane.roofBearingWallId, line.line.id);
+
+  const second = createRoofPlaneFromWall(deeper, line.line.id, 96);
+  assert.ok(second);
+  const targetWithDifferentPitch = updateRoofPlane(second.document, second.roofPlane.id, { heightAbovePlate: 20, pitchRise: 8 });
+  assert.ok(targetWithDifferentPitch);
+  const fasciaDriven = updateRoofPlaneFasciaTop(targetWithDifferentPitch, second.roofPlane.id, 144);
+  assert.ok(fasciaDriven);
+  const fasciaDrivenPlane = fasciaDriven.polylines.find((polyline) => polyline.id === second.roofPlane.id)!;
+  assert.equal(roofPlaneReferenceDimensions(fasciaDriven, fasciaDrivenPlane)?.fasciaTopElevation, 144);
+  assert.equal(fasciaDrivenPlane.roofSettings?.pitchRise, 8);
+
+  const matched = matchRoofPlaneFascia(fasciaDriven, second.roofPlane.id, created.roofPlane.id);
+  assert.ok(matched);
+  const matchedTarget = matched.polylines.find((polyline) => polyline.id === second.roofPlane.id)!;
+  const matchedSource = matched.polylines.find((polyline) => polyline.id === created.roofPlane.id)!;
+  assert.equal(roofPlaneReferenceDimensions(matched, matchedTarget)?.fasciaTopElevation, roofPlaneReferenceDimensions(matched, matchedSource)?.fasciaTopElevation);
+  assert.equal(matchedTarget.roofSettings?.pitchRise, 8);
+  assert.equal(matchRoofPlaneFascia(matched, second.roofPlane.id, second.roofPlane.id), null);
 
   const copied = copyModelEntities(updated, [{ id: updatedPlane.id, kind: "polyline" }], { x: 300, y: 0, z: 0 });
   assert.ok(copied);

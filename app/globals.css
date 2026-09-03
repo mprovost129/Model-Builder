@@ -2240,6 +2240,11 @@ button { color: inherit; }
 }
 .property-cell-select:focus { box-shadow: inset 0 0 0 1px var(--accent); }
 .property-cell-select:disabled { color: #7e8993; cursor: not-allowed; }
+.roof-fascia-match-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; min-width: 0; }
+.roof-fascia-match-field .property-cell-select { min-width: 0; border-right: 1px solid #3a4651; }
+.roof-fascia-match-field button { min-width: 43px; padding: 0 7px; border: 0; background: #24394a; color: #dce9f1; font-size: 8px; cursor: pointer; }
+.roof-fascia-match-field button:hover,
+.roof-fascia-match-field button:focus-visible { background: #31556e; outline: 0; }
 .property-checkbox {
   display: flex;
   align-items: center;
@@ -2871,6 +2876,10 @@ button { color: inherit; }
   background: var(--ui-selected);
   box-shadow: inset 0 0 0 1px #7fa0b3;
 }
+.theme-light .roof-fascia-match-field .property-cell-select { border-color: var(--ui-border); }
+.theme-light .roof-fascia-match-field button { background: #d8e7ee; color: #27536d; }
+.theme-light .roof-fascia-match-field button:hover,
+.theme-light .roof-fascia-match-field button:focus-visible { background: #c6dce6; }
 .theme-light .property-cell-button:disabled { color: #8a99a2; background: #f0f2f1; }
 .theme-light .property-grid-note { border-color: var(--ui-border); background: #f0f3f3; color: #667b89; }
 .theme-light .property-action-row { border-color: var(--ui-border); background: var(--ui-panel); }

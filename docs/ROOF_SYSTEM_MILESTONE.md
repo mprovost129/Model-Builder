@@ -37,7 +37,7 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [x] Live Top of Plate, heel, high-edge/peak, and fascia-top elevations use the actual plane run.
 - [x] Version-49 project files preserve manual Roof Planes and their per-plane defaults.
 - [ ] Arbitrary polygon-boundary editing for hips, valleys, rakes, and clipped Roof Planes while preserving a valid bearing reference.
-- [ ] Roof Plane input methods based on Height Above Plate, fascia height, or an existing plane's matched fascia.
+- [x] Roof Plane vertical placement by Height Above Plate, direct Fascia Top elevation, or another Roof Plane's matched absolute fascia elevation.
 - [ ] Complete per-plane overrides for rafter/truss size, fascia, subfascia, and birdsmouth inputs; pitch, heel, run, and overhang are complete.
 - [ ] Live editable dimensions in plan and section/elevation views.
 - [ ] Complete exact ridge/eave/fascia/subfascia component solids; the current structural surface and reference elevations are calculated.
