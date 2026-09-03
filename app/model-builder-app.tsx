@@ -157,6 +157,7 @@ import {
   addWallOpening,
   addLayer,
   addBoxObject,
+  addProductObject,
   alignBoxObjects,
   assignObjectToLayer,
   assignArcToLayer,
@@ -317,6 +318,7 @@ import {
   FOUNDATION_WALL_CONDITIONS,
   MAXIMUM_WALL_OPENING_TYPE_COUNT,
   MAXIMUM_WALL_HEADER_TYPE_COUNT,
+  MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT,
   removeBuildingStory,
   recommendedWallHeaderTypeId,
   resolveWallHeaderType,
@@ -340,6 +342,7 @@ import {
   type OpeningAssemblyComponent,
   type ManufacturerProductSource,
   type ProductAssetReference,
+  type ProductObjectCategory,
   type WindowLitePattern,
   type WindowSashArrangement,
   type WallExteriorSide,
@@ -354,6 +357,7 @@ import {
   type WallReferenceLine,
   type WallStructuralRole,
 } from "@/lib/building-stories";
+import type { ProductLibraryTarget } from "@/lib/product-library";
 import {
   automaticWallJoinCount,
   buildAutomaticWallJoinPlan,
@@ -13101,12 +13105,13 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present]);
 
-  const activateLibraryProduct = useCallback((typeId: string) => {
-    const openingType = editor.present.building.openingTypes.find((type) => type.id === typeId);
+  const activateLibraryProduct = useCallback((target: ProductLibraryTarget) => {
+    if (target.kind !== "opening") return;
+    const openingType = editor.present.building.openingTypes.find((type) => type.id === target.typeId);
     if (!openingType) return;
     const building = cloneBuildingStructure(editor.present.building);
-    if (openingType.kind === "door") building.activeDoorTypeId = typeId;
-    else building.activeWindowTypeId = typeId;
+    if (openingType.kind === "door") building.activeDoorTypeId = target.typeId;
+    else building.activeWindowTypeId = target.typeId;
     const next = updateDocumentBuilding(editor.present, building);
     if (!next) {
       setFileNotice({ text: "That product could not be made active because its project Type is invalid.", tone: "error" });
@@ -13116,33 +13121,37 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${openingType.name} is active for new ${openingType.kind === "door" ? "Doors" : "Windows"}.`, tone: "success" });
   }, [editor.present]);
 
-  const attachLibraryProductAsset = useCallback((typeId: string, asset: ProductAssetReference) => {
+  const attachLibraryProductAsset = useCallback((target: ProductLibraryTarget, asset: ProductAssetReference) => {
     const building = cloneBuildingStructure(editor.present.building);
-    const openingType = building.openingTypes.find((type) => type.id === typeId);
-    if (!openingType || openingType.productAssets.length >= 16) {
+    const productType = target.kind === "opening"
+      ? building.openingTypes.find((type) => type.id === target.typeId)
+      : building.productObjectTypes.find((type) => type.id === target.typeId);
+    if (!productType || productType.productAssets.length >= 16) {
       setFileNotice({ text: "That product cannot accept another representation.", tone: "error" });
       return false;
     }
-    openingType.productAssets.push({ ...asset });
+    productType.productAssets.push({ ...asset, alignment: { ...asset.alignment } });
     const next = updateDocumentBuilding(editor.present, building);
     if (!next) {
       setFileNotice({ text: "The stored representation did not produce a valid product record.", tone: "error" });
       return false;
     }
     dispatch({ type: "commit", next });
-    setFileNotice({ text: `${asset.name} was validated, stored privately, and attached to ${openingType.name}.`, tone: "success" });
+    setFileNotice({ text: `${asset.name} was validated, stored privately, and attached to ${productType.name}.`, tone: "success" });
     return true;
   }, [editor.present]);
 
-  const updateLibraryProductAsset = useCallback((typeId: string, asset: ProductAssetReference) => {
+  const updateLibraryProductAsset = useCallback((target: ProductLibraryTarget, asset: ProductAssetReference) => {
     const building = cloneBuildingStructure(editor.present.building);
-    const openingType = building.openingTypes.find((type) => type.id === typeId);
-    const assetIndex = openingType?.productAssets.findIndex((candidate) => candidate.id === asset.id) ?? -1;
-    if (!openingType || assetIndex < 0) {
+    const productType = target.kind === "opening"
+      ? building.openingTypes.find((type) => type.id === target.typeId)
+      : building.productObjectTypes.find((type) => type.id === target.typeId);
+    const assetIndex = productType?.productAssets.findIndex((candidate) => candidate.id === asset.id) ?? -1;
+    if (!productType || assetIndex < 0) {
       setFileNotice({ text: "That product representation is no longer available.", tone: "error" });
       return false;
     }
-    openingType.productAssets = openingType.productAssets.map((candidate, index) => ({
+    productType.productAssets = productType.productAssets.map((candidate, index) => ({
       ...(asset.usage === "preferred" && candidate.role === asset.role ? { ...candidate, usage: "reference" as const } : candidate),
       ...(index === assetIndex ? { ...asset, alignment: { ...asset.alignment } } : {}),
     }));
@@ -13156,16 +13165,62 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present]);
 
-  const placeLibraryProduct = useCallback((typeId: string) => {
+  const createLibraryObjectType = useCallback((definition: { category: ProductObjectCategory; dimensions: { height: number; length: number; width: number }; name: string }) => {
+    if (editor.present.building.productObjectTypes.length >= MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT) {
+      setFileNotice({ text: "This project has reached the reusable object Type limit.", tone: "error" });
+      return false;
+    }
+    const name = definition.name.trim();
+    if (!name || editor.present.building.productObjectTypes.some((type) => type.name.toLowerCase() === name.toLowerCase())) {
+      setFileNotice({ text: "Use a unique name for the new object Type.", tone: "error" });
+      return false;
+    }
+    const usedIds = new Set(editor.present.building.productObjectTypes.map((type) => type.id));
+    let number = editor.present.building.productObjectTypes.length + 1;
+    while (usedIds.has(`product-object-type-${String(number).padStart(2, "0")}`)) number += 1;
+    const building = cloneBuildingStructure(editor.present.building);
+    building.productObjectTypes.push({
+      category: definition.category,
+      dimensions: { ...definition.dimensions },
+      id: `product-object-type-${String(number).padStart(2, "0")}`,
+      name,
+      productAssets: [],
+      productSource: null,
+    });
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "Check the object Type name and dimensions.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${name} is now available in this project's Product Library.`, tone: "success" });
+    return true;
+  }, [editor.present]);
+
+  const placeLibraryProduct = useCallback((target: ProductLibraryTarget) => {
+    if (target.kind === "object") {
+      const productType = editor.present.building.productObjectTypes.find((type) => type.id === target.typeId);
+      if (!productType) return;
+      const result = addProductObject(editor.present, productType);
+      if (!result) {
+        setFileNotice({ text: "That object could not be placed on the current Story and Layer.", tone: "error" });
+        return;
+      }
+      dispatch({ type: "commit", next: result.document });
+      setSelectionForDocument(result.document, result.object.id);
+      setProductLibraryOpen(false);
+      setFileNotice({ text: `Placed ${result.object.name} on the current Layer. Its Type remains linked for product identity.`, tone: "success" });
+      return;
+    }
     if (!selectedLine || selectedLine.architecturalRole !== "wall") {
       setFileNotice({ text: "Select a Wall before placing a Door or Window product.", tone: "error" });
       return;
     }
-    const openingType = editor.present.building.openingTypes.find((type) => type.id === typeId);
+    const openingType = editor.present.building.openingTypes.find((type) => type.id === target.typeId);
     if (!openingType) return;
     const building = cloneBuildingStructure(editor.present.building);
-    if (openingType.kind === "door") building.activeDoorTypeId = typeId;
-    else building.activeWindowTypeId = typeId;
+    if (openingType.kind === "door") building.activeDoorTypeId = target.typeId;
+    else building.activeWindowTypeId = target.typeId;
     const withActiveProduct = updateDocumentBuilding(editor.present, building);
     if (!withActiveProduct) {
       setFileNotice({ text: "That product could not be activated for placement.", tone: "error" });
@@ -13179,7 +13234,7 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next: result.document });
     setProductLibraryOpen(false);
     setFileNotice({ text: `Placed ${openingType.name} in ${selectedLine.name}; its rough opening cuts every Wall layer.`, tone: "success" });
-  }, [editor.present, selectedLine]);
+  }, [editor.present, selectedLine, setSelectionForDocument]);
 
   const applyWallFraming = useCallback((building: BuildingStructure) => {
     const next = updateDocumentBuilding(editor.present, building);
@@ -14293,7 +14348,7 @@ export function ModelBuilderApp() {
             </PropertyGridSection>
           ) : selectedBox ? (
             <PropertyGridSection ariaLabel="Selection organization" title="General" meta={selectedGroup ? "Group" : selectedObjectIds.length > 1 ? "Selection" : "Object"}>
-              <PropertyGridRow label="Type"><span className="property-readout">{selectedGroup ? "Named group" : selectedObjectIds.length > 1 ? "Selection set" : "Parametric box"}</span></PropertyGridRow>
+              <PropertyGridRow label="Type"><span className="property-readout">{selectedGroup ? "Named group" : selectedObjectIds.length > 1 ? "Selection set" : selectedBox.productObjectTypeId ? editor.present.building.productObjectTypes.find((type) => type.id === selectedBox.productObjectTypeId)?.name ?? "Missing product Type" : "Parametric box"}</span></PropertyGridRow>
               {selectedObjectIds.length > 1 ? <PropertyGridRow label="Objects"><span className="property-readout">{selectedObjectIds.length}</span></PropertyGridRow> : null}
               {selectedObjectIds.length > 1 ? <PropertyGridRow label="Primary"><span className="property-readout">{selectedBox.name}</span></PropertyGridRow> : null}
               {selectedObjectIds.length === 1 ? (
@@ -14795,7 +14850,7 @@ export function ModelBuilderApp() {
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
       {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
-      {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onAssetUpdated={updateLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onManageTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
+      {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onAssetUpdated={updateLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onCreateObjectType={createLibraryObjectType} onManageOpeningTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
     </main>

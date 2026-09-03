@@ -309,6 +309,14 @@ unsupported formats, or view mismatches automatically preserve the native displa
 Wall cuts, finish returns, framing, dimensions, schedules, and selection remain
 driven by the native parametric opening in every case.
 
+Version-42 files add reusable non-hosted product object Types and explicit links from
+placed native box instances. The project registry separates product identity and native
+size from each instance's Story, Layer, position, rotation, and editable dimensions.
+The Product Library can create and search ordinary object Types, attach the same validated
+SVG/GLB manifests, and place them on the current Layer. Ordinary products intentionally
+do not inherit Door/Window hosting, Wall-cut, rough-opening, header, or framing behavior.
+Version-41 and earlier files open with an empty ordinary-object registry and unlinked boxes.
+
 The Door & Window Type Manager renders a live exterior-elevation preview from the
 same host-aware component solids used by placed openings. It shows the structural
 rough-opening boundary, unit boundary, generated component geometry, rough and unit
@@ -392,8 +400,8 @@ junction framing.
 
 ## Next Steps
 
-1. Generalize the Product Library registry for ordinary placed Objects, including unit
-   normalization, independent layer assignment, thumbnails, and update tracking.
+1. Render preferred SVG/GLB representations for placed ordinary objects while preserving
+   their native editable fallback, then add thumbnail selection and manufacturer update tracking.
 2. Add asset removal and orphan cleanup without deleting representations still referenced
    by another project or catalog record.
 3. Add manual per-junction framing overrides without making unsafe engineering assumptions.

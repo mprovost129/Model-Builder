@@ -131,6 +131,7 @@ import {
   type LayeredAssembly,
   type OpeningAssemblyComponent,
   type OpeningComponentDepthAnchor,
+  type ProductObjectType,
   type WallOpeningKind,
   type WallOpeningType,
   type WallExteriorSide,
@@ -144,6 +145,8 @@ export type BoxObject = BoxModel & {
   layerId: string;
   locked: boolean;
   name: string;
+  /** Reusable non-hosted product Type; null denotes a freeform native box. */
+  productObjectTypeId: string | null;
   storyId: string;
   type: "box";
 };
@@ -399,6 +402,7 @@ export const DEFAULT_DOCUMENT: ModelDocument = {
       layerId: DEFAULT_LAYER_ID,
       locked: false,
       name: "Box 01",
+      productObjectTypeId: null,
       storyId: "story-01",
       type: "box",
     },
@@ -570,6 +574,7 @@ export function cloneBoxObject(object: BoxObject): BoxObject {
     layerId: object.layerId,
     locked: object.locked,
     name: object.name,
+    productObjectTypeId: object.productObjectTypeId,
     storyId: object.storyId,
     type: "box",
   };
@@ -1805,7 +1810,7 @@ export function updateBoxObject(
     document,
     document.objects.map((object) =>
       object.id === objectId
-        ? { ...cloneBoxModel(model), groupId: object.groupId, id: object.id, layerId: object.layerId, locked: object.locked, name: object.name, storyId: object.storyId, type: "box" }
+        ? { ...cloneBoxModel(model), groupId: object.groupId, id: object.id, layerId: object.layerId, locked: object.locked, name: object.name, productObjectTypeId: object.productObjectTypeId, storyId: object.storyId, type: "box" }
         : cloneBoxObject(object),
     ),
   );
@@ -2050,6 +2055,7 @@ export function addBoxObject(document: ModelDocument): {
     layerId: document.activeLayerId,
     locked: false,
     name: `Box ${String(number).padStart(2, "0")}`,
+    productObjectTypeId: null,
     position: { x: rightEdge + 24, y: 0, z: activeStoryRoughFloorElevation(document) },
     storyId: document.building.activeStoryId,
     type: "box",
@@ -2058,6 +2064,29 @@ export function addBoxObject(document: ModelDocument): {
     document: withObjects(document, [...document.objects, object]),
     object: cloneBoxObject(object),
   };
+}
+
+export function addProductObject(document: ModelDocument, productType: ProductObjectType): {
+  document: ModelDocument;
+  object: BoxObject;
+} | null {
+  if (document.objects.length >= MAXIMUM_OBJECT_COUNT || !document.building.productObjectTypes.some((type) => type.id === productType.id)) return null;
+  const number = nextObjectNumber(document);
+  const rightEdge = Math.max(0, ...document.objects.map((object) => boxWorldBounds(object).maximum.x));
+  const object: BoxObject = {
+    dimensions: { ...productType.dimensions },
+    groupId: null,
+    id: `box-${String(number).padStart(2, "0")}`,
+    layerId: document.activeLayerId,
+    locked: false,
+    name: uniqueObjectName(document, productType.name),
+    position: { x: snapToSixteenth(rightEdge + productType.dimensions.length / 2 + 12), y: 0, z: activeStoryRoughFloorElevation(document) },
+    productObjectTypeId: productType.id,
+    rotationZ: 0,
+    storyId: document.building.activeStoryId,
+    type: "box",
+  };
+  return { document: withObjects(document, [...document.objects, object]), object: cloneBoxObject(object) };
 }
 
 function nextLineNumber(document: ModelDocument): number {

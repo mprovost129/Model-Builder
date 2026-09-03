@@ -66,6 +66,7 @@ import {
   PRODUCT_ASSET_SOURCE_UNITS,
   PRODUCT_ASSET_USAGE_MODES,
   PRODUCT_SOURCE_FORMATS,
+  PRODUCT_OBJECT_CATEGORIES,
   WALL_CORNER_FRAMING_STYLES,
   WALL_HEADER_ALIGNMENTS,
   WALL_HEADER_FILL_METHODS,
@@ -100,6 +101,8 @@ import {
   type ProductAssetRole,
   type ProductAssetSourceUnit,
   type ProductSourceFormat,
+  type ProductObjectCategory,
+  type ProductObjectType,
   type WallExteriorSide,
   type WallJoinMode,
   type WallOpeningKind,
@@ -118,7 +121,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 41;
+export const PROJECT_FILE_VERSION = 42;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -446,6 +449,25 @@ function readWallOpeningType(value: unknown, supportsOpeningFraming: boolean, fa
   };
 }
 
+function readProductObjectType(value: unknown): ProductObjectType | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string" ||
+    typeof value.category !== "string" || !PRODUCT_OBJECT_CATEGORIES.includes(value.category as ProductObjectCategory) ||
+    !isRecord(value.dimensions) || !isFiniteNumber(value.dimensions.length) || !isFiniteNumber(value.dimensions.width) || !isFiniteNumber(value.dimensions.height) ||
+    value.productSource !== null && !isRecord(value.productSource) || !Array.isArray(value.productAssets)) return null;
+  const productSource = readManufacturerProductSource(value.productSource);
+  if (productSource === undefined) return null;
+  const productAssets = value.productAssets.map((asset) => readProductAssetReference(asset, true));
+  if (productAssets.some((asset) => asset === null)) return null;
+  return {
+    category: value.category as ProductObjectCategory,
+    dimensions: { height: value.dimensions.height, length: value.dimensions.length, width: value.dimensions.width },
+    id: value.id,
+    name: value.name.trim(),
+    productAssets: productAssets as ProductAssetReference[],
+    productSource,
+  };
+}
+
 function readWallFramingSettings(value: unknown, supportsJunctionSettings: boolean): WallFramingSettings | null {
   if (!isRecord(value) ||
     typeof value.enabled !== "boolean" || typeof value.showInModel !== "boolean" || typeof value.material !== "string" ||
@@ -500,7 +522,7 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -534,6 +556,11 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     ? (value.openingTypes as unknown[]).map((type) => readWallOpeningType(type, supportsOpeningFraming, wallFraming.headerHeight, supportsHeaderTypes, fallbackHeaderTypeId, supportsHostAwareHeaders, supportsAssemblyComponents, supportsProductSources, supportsProductAssets, supportsProductAssetAlignment))
     : defaults.openingTypes;
   if (openingTypes.some((openingType) => openingType === null)) return null;
+  if (supportsProductObjectTypes && !Array.isArray(value.productObjectTypes)) return null;
+  const productObjectTypes = supportsProductObjectTypes
+    ? (value.productObjectTypes as unknown[]).map(readProductObjectType)
+    : [];
+  if (productObjectTypes.some((productObjectType) => productObjectType === null)) return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : legacyWallType.id;
   if (typeof activeWallTypeId !== "string") return null;
   const activeFoundationWallTypeId = supportsFoundationWallTypes ? value.activeFoundationWallTypeId : defaults.activeFoundationWallTypeId;
@@ -552,6 +579,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     foundationWallTypes: foundationWallTypes as FoundationWallType[],
     headerTypes: headerTypes as WallHeaderType[],
     openingTypes: openingTypes as WallOpeningType[],
+    productObjectTypes: productObjectTypes as ProductObjectType[],
     stories: stories as BuildingStory[],
     wallFraming,
     wallTypes: wallTypes as LayeredAssembly[],
@@ -566,6 +594,7 @@ function readBoxObject(
   supportsRotation: boolean,
   supportsStories: boolean,
   fallbackStoryId: string,
+  supportsProductObjectTypes: boolean,
 ): BoxObject | null {
   if (!isRecord(value) || value.type !== "box") return null;
   if (!isRecord(value.dimensions) || !isRecord(value.position)) return null;
@@ -606,8 +635,16 @@ function readBoxObject(
   if (groupId === undefined || (supportsGroupsAndLocks && typeof value.locked !== "boolean")) return null;
   const rotationZ = supportsRotation ? value.rotationZ : 0;
   const storyId = readStoryId(value, supportsStories, fallbackStoryId);
+  const productObjectTypeId = supportsProductObjectTypes
+    ? value.productObjectTypeId === null
+      ? null
+      : typeof value.productObjectTypeId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.productObjectTypeId)
+        ? value.productObjectTypeId
+        : undefined
+    : null;
   if (
     !storyId ||
+    productObjectTypeId === undefined ||
     !isFiniteNumber(rotationZ) ||
     rotationZ < -180 ||
     rotationZ >= 180 ||
@@ -623,6 +660,7 @@ function readBoxObject(
     layerId,
     locked: supportsGroupsAndLocks ? value.locked as boolean : false,
     name: value.name.trim(),
+    productObjectTypeId,
     position: { x: numericX, y: numericY, z: numericZ },
     rotationZ: normalizeRotationZ(rotationZ),
     storyId,
@@ -1017,7 +1055,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }
@@ -1087,7 +1125,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   }
 
   const objects = value.objects.map((object) =>
-    readBoxObject(object, version >= 3 ? null : DEFAULT_LAYER_ID, version >= 4, version >= 5, version >= 14, fallbackStoryId),
+    readBoxObject(object, version >= 3 ? null : DEFAULT_LAYER_ID, version >= 4, version >= 5, version >= 14, fallbackStoryId, version >= 42),
   );
   if (objects.some((object) => object === null)) {
     return { ok: false, error: "One or more boxes in this project are invalid." };
@@ -1099,6 +1137,10 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   }
   if (validObjects.some((object) => !storyIds.has(object.storyId))) {
     return { ok: false, error: "One or more boxes reference a missing Story." };
+  }
+  const productObjectTypeIds = new Set(building.productObjectTypes.map((type) => type.id));
+  if (validObjects.some((object) => object.productObjectTypeId !== null && !productObjectTypeIds.has(object.productObjectTypeId))) {
+    return { ok: false, error: "One or more objects reference a missing product Type." };
   }
   const groupIds = new Set(groups.map((group) => group.id));
   if (validObjects.some((object) => object.groupId && !groupIds.has(object.groupId))) {

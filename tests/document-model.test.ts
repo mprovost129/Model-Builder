@@ -13,6 +13,7 @@ import {
   assignWallOpeningType,
   addLayer,
   addBoxObject,
+  addProductObject,
   alignBoxObjects,
   assignObjectToLayer,
   assignModelEntityToStory,
@@ -116,6 +117,25 @@ test("adds a uniquely named box beyond the current document bounds", () => {
   assert.equal(result.object.name, "Box 02");
   assert.equal(result.object.position.x, 168);
   assert.equal(findBoxObject(result.document, "box-02")?.id, "box-02");
+});
+
+test("places a reusable product object on the active Story and Layer", () => {
+  const document = cloneDocument(NEW_PROJECT_DOCUMENT);
+  document.building.productObjectTypes.push({
+    category: "furniture",
+    dimensions: { height: 30, length: 72, width: 36 },
+    id: "product-object-type-01",
+    name: "Dining Table",
+    productAssets: [],
+    productSource: null,
+  });
+  const result = addProductObject(document, document.building.productObjectTypes[0]);
+  assert.ok(result);
+  assert.equal(result.object.productObjectTypeId, "product-object-type-01");
+  assert.equal(result.object.name, "Dining Table");
+  assert.deepEqual(result.object.dimensions, { height: 30, length: 72, width: 36 });
+  assert.equal(result.object.layerId, document.activeLayerId);
+  assert.equal(result.object.storyId, document.building.activeStoryId);
 });
 
 test("updates only the selected box geometry", () => {

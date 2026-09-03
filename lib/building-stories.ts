@@ -34,6 +34,8 @@ export const PRODUCT_ASSET_ORIGINS = ["source-origin", "bounds-center", "bottom-
 export type ProductAssetOrigin = (typeof PRODUCT_ASSET_ORIGINS)[number];
 export const PRODUCT_ASSET_USAGE_MODES = ["reference", "preferred"] as const;
 export type ProductAssetUsageMode = (typeof PRODUCT_ASSET_USAGE_MODES)[number];
+export const PRODUCT_OBJECT_CATEGORIES = ["appliance", "cabinetry", "electrical", "furniture", "mechanical", "plumbing", "site", "specialty", "other"] as const;
+export type ProductObjectCategory = (typeof PRODUCT_OBJECT_CATEGORIES)[number];
 export const WALL_HEADER_LAYOUTS = ["solid", "on-edge", "flat-stack"] as const;
 export type WallHeaderLayout = (typeof WALL_HEADER_LAYOUTS)[number];
 export const WALL_HEADER_FILL_METHODS = ["none", "interior-insulation", "between-plies"] as const;
@@ -279,6 +281,16 @@ export type WallOpeningType = {
   windowSillPlateCount: number;
 };
 
+/** Reusable, non-hosted product definition. Placed instances retain independent layer and transform data. */
+export type ProductObjectType = {
+  category: ProductObjectCategory;
+  dimensions: { height: number; length: number; width: number };
+  id: string;
+  name: string;
+  productAssets: ProductAssetReference[];
+  productSource: ManufacturerProductSource | null;
+};
+
 export type WallFramingSettings = {
   bottomPlateCount: number;
   cornerStyle: WallCornerFramingStyle;
@@ -305,6 +317,7 @@ export type BuildingStructure = {
   foundationWallTypes: FoundationWallType[];
   headerTypes: WallHeaderType[];
   openingTypes: WallOpeningType[];
+  productObjectTypes: ProductObjectType[];
   stories: BuildingStory[];
   wallFraming: WallFramingSettings;
   wallTypes: LayeredAssembly[];
@@ -330,6 +343,7 @@ export const MAXIMUM_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_FOUNDATION_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_WALL_OPENING_TYPE_COUNT = 64;
 export const MAXIMUM_WALL_HEADER_TYPE_COUNT = 32;
+export const MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT = 128;
 export const MAXIMUM_OPENING_COMPONENT_COUNT = 48;
 export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
 export const MAXIMUM_ASSEMBLY_THICKNESS = 240;
@@ -740,6 +754,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     foundationWallTypes: [createDefaultFoundationWallType()],
     headerTypes: createDefaultWallHeaderTypes(),
     openingTypes,
+    productObjectTypes: [],
     stories: [createBuildingStory("story-01", "First Floor")],
     wallFraming: createDefaultWallFramingSettings(),
     wallTypes: createDefaultWallTypes(),
@@ -752,6 +767,10 @@ export function cloneFoundationWallType(type: FoundationWallType): FoundationWal
 
 export function cloneWallOpeningType(type: WallOpeningType): WallOpeningType {
   return { ...type, components: type.components.map((component) => ({ ...component })), productAssets: type.productAssets.map((asset) => ({ ...asset, alignment: { ...asset.alignment } })), productSource: type.productSource === null ? null : { ...type.productSource } };
+}
+
+export function cloneProductObjectType(type: ProductObjectType): ProductObjectType {
+  return { ...type, dimensions: { ...type.dimensions }, productAssets: type.productAssets.map((asset) => ({ ...asset, alignment: { ...asset.alignment } })), productSource: type.productSource === null ? null : { ...type.productSource } };
 }
 
 export function cloneWallHeaderType(type: WallHeaderType): WallHeaderType {
@@ -779,7 +798,7 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), productObjectTypes: building.productObjectTypes.map(cloneProductObjectType), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
 }
 
 export function foundationSillStackHeight(type: FoundationWallType): number {
@@ -875,6 +894,16 @@ export function wallOpeningTypeIsValid(type: WallOpeningType): boolean {
     Number.isInteger(type.jackStudCountPerSide) && type.jackStudCountPerSide >= 0 && type.jackStudCountPerSide <= 4 &&
     Number.isInteger(type.windowSillPlateCount) && type.windowSillPlateCount >= 0 && type.windowSillPlateCount <= 2 &&
     (type.kind !== "door" || (type.defaultHeaderBottomHeight === type.roughHeight && type.windowSillPlateCount === 0));
+}
+
+export function productObjectTypeIsValid(type: ProductObjectType): boolean {
+  const dimensions = [type.dimensions.length, type.dimensions.width, type.dimensions.height];
+  return IDENTIFIER_PATTERN.test(type.id) &&
+    stringsAreValid([{ value: type.name, limit: ASSEMBLY_NAME_LIMIT }]) &&
+    PRODUCT_OBJECT_CATEGORIES.includes(type.category) &&
+    dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= 600 && isSixteenth(value)) &&
+    productAssetReferencesAreValid(type.productAssets) &&
+    manufacturerProductSourceIsValid(type.productSource);
 }
 
 export function manufacturerProductSourceIsValid(source: ManufacturerProductSource | null): boolean {
@@ -1083,6 +1112,8 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.openingTypes.length > MAXIMUM_WALL_OPENING_TYPE_COUNT ||
     building.headerTypes.length < 1 ||
     building.headerTypes.length > MAXIMUM_WALL_HEADER_TYPE_COUNT ||
+    !Array.isArray(building.productObjectTypes) ||
+    building.productObjectTypes.length > MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT ||
     !wallFramingSettingsAreValid(building.wallFraming)
   ) {
     return false;
@@ -1132,6 +1163,14 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     if (openingTypeIds.has(openingType.id) || openingTypeNames.has(normalizedName) || !wallOpeningTypeIsValid(openingType) || (openingType.headerTypeId !== null && !headerTypeIds.has(openingType.headerTypeId))) return false;
     openingTypeIds.add(openingType.id);
     openingTypeNames.add(normalizedName);
+  }
+  const productObjectTypeIds = new Set<string>();
+  const productObjectTypeNames = new Set<string>();
+  for (const productObjectType of building.productObjectTypes) {
+    const normalizedName = productObjectType.name.trim().toLowerCase();
+    if (productObjectTypeIds.has(productObjectType.id) || productObjectTypeNames.has(normalizedName) || !productObjectTypeIsValid(productObjectType)) return false;
+    productObjectTypeIds.add(productObjectType.id);
+    productObjectTypeNames.add(normalizedName);
   }
   const storyIds = new Set<string>();
   const storyNames = new Set<string>();

@@ -16,6 +16,7 @@ import {
   foundationSillStackHeight,
   productAssetReferencesAreValid,
   productAssetSourceUnitScale,
+  productObjectTypeIsValid,
   resolveWallHeaderType,
   wallOpeningTypeIsValid,
   wallFramingSettingsAreValid,
@@ -47,6 +48,22 @@ test("defines deterministic product representation units, alignment, and preferr
   assert.equal(productAssetReferencesAreValid([baseAsset]), true);
   assert.equal(productAssetReferencesAreValid([baseAsset, { ...baseAsset, id: "asset-window-secondary" }]), false);
   assert.equal(productAssetReferencesAreValid([baseAsset, { ...baseAsset, id: "asset-window-plan", role: "plan-symbol" }]), true);
+});
+
+test("validates reusable non-hosted product object Types independently from openings", () => {
+  const building = createDefaultBuildingStructure();
+  building.productObjectTypes.push({
+    category: "plumbing",
+    dimensions: { height: 34, length: 30, width: 21 },
+    id: "product-object-type-01",
+    name: "30 in. Vanity",
+    productAssets: [],
+    productSource: null,
+  });
+  assert.equal(productObjectTypeIsValid(building.productObjectTypes[0]), true);
+  assert.equal(buildingStructureIsValid(building), true);
+  building.productObjectTypes[0].dimensions.width = 21.01;
+  assert.equal(buildingStructureIsValid(building), false);
 });
 
 test("uses rough framing rather than finishes to calculate the next Story datum", () => {

@@ -134,6 +134,9 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.doesNotMatch(component, /function ProductLibraryDialog/);
   assert.match(productLibraryDialog, /export function ProductLibraryDialog/);
   assert.match(productLibraryDialog, /Representation Alignment/);
+  assert.match(productLibraryDialog, /New Object Type/);
+  assert.match(productLibraryDialog, /Place on Current Layer/);
+  assert.match(component, /addProductObject/);
   assert.match(productRepresentationRenderer, /applyPreferredProductRepresentations/);
   assert.match(productRepresentationRenderer, /native parametric components remain visible/);
   assert.match(productRepresentations, /preferredProductAssetForView/);

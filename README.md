@@ -374,6 +374,12 @@ now cut those derived floor and ceiling assemblies for stairwells, shafts, and
   follow each placed opening and host Wall, and replace only the native visible
   Door or Window components after loading succeeds. Missing, incompatible,
   catalog-only, or failed files leave the native assembly visible and editable.
+  The same Project Product Library now has a separate non-hosted object registry for
+  appliances, cabinetry, electrical, furniture, mechanical, plumbing, site, specialty,
+  and other products. Users can create a reusable object Type with native length, width,
+  and height, attach SVG/GLB representations, and place a Type-linked native fallback on
+  the current Story and Layer. These ordinary objects do not receive Wall cuts, headers,
+  or framing behavior, and each placed instance retains independent layer and transform data.
   Proprietary CAD/BIM formats require conversion or dedicated adapters.
   structural openings now drive an initial conventional light-frame member layout,
   with project settings for spacing, member size, plate counts, and 3D framing
@@ -404,7 +410,7 @@ Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
 the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-39 files open and upgrade
+Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, ordinary product object Types and instance links, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-41 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.
