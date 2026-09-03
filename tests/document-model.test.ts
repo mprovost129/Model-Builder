@@ -10,6 +10,8 @@ import {
   addPlatformOpening,
   addRectangleObject,
   addWallOpening,
+  activateLayerSet,
+  activateSavedPlanView,
   assignWallOpeningType,
   addLayer,
   addBoxObject,
@@ -38,6 +40,7 @@ import {
   disconnectPlatformOpeningContinuity,
   deleteWallOpening,
   documentsEqual,
+  duplicateLayerSet,
   discoverDocumentBoundary,
   effectiveRoomSettings,
   foundationWallVerticalExtent,
@@ -67,6 +70,7 @@ import {
   modelSelectionScaleBase,
   renameGroup,
   renameLayer,
+  renameLayerSet,
   renameBoxObject,
   removeWallRole,
   refreshRoomsForStory,
@@ -77,12 +81,16 @@ import {
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
+  savePlanView,
+  STANDARD_LAYER_IDS,
   stretchModelEntities,
   updateLineGrip,
   updateLineObject,
   updateWallPlacement,
   updateWallOpening,
   updateRoomObject,
+  updateRoomAnnotation,
+  updateLayerAppearance,
   updatePlatformOpening,
   wallOpeningRoughBottom,
   wallVerticalExtent,
@@ -252,16 +260,16 @@ test("assigns objects and manages layer visibility, locking, names, and deletion
   assert.ok(defaultActive);
   const hidden = toggleLayerVisibility(defaultActive, addedLayer.layer.id);
   assert.ok(hidden);
-  assert.equal(hidden.layers[1].visible, false);
+  assert.equal(hidden.layers.find((layer) => layer.id === addedLayer.layer.id)?.visible, false);
   const locked = toggleLayerLock(hidden, addedLayer.layer.id);
   assert.ok(locked);
-  assert.equal(locked.layers[1].locked, true);
+  assert.equal(locked.layers.find((layer) => layer.id === addedLayer.layer.id)?.locked, true);
   assert.equal(toggleLayerVisibility(defaultActive, "layer-default"), null);
   assert.equal(toggleLayerLock(defaultActive, "layer-default"), null);
 
-  const renamed = renameLayer(defaultActive, addedLayer.layer.id, "Walls");
+  const renamed = renameLayer(defaultActive, addedLayer.layer.id, "Electrical");
   assert.ok(renamed);
-  assert.equal(renamed.layers[1].name, "Walls");
+  assert.equal(renamed.layers.find((layer) => layer.id === addedLayer.layer.id)?.name, "Electrical");
   assert.equal(deleteLayer(renamed, addedLayer.layer.id), null);
 
   const emptyLayer = addLayer(DEFAULT_DOCUMENT);
@@ -270,7 +278,28 @@ test("assigns objects and manages layer visibility, locking, names, and deletion
   assert.ok(currentDefault);
   const deleted = deleteLayer(currentDefault, emptyLayer.layer.id);
   assert.ok(deleted);
-  assert.equal(deleted.layers.length, 1);
+  assert.equal(deleted.layers.length, NEW_PROJECT_DOCUMENT.layers.length);
+});
+
+test("stores complete layer appearance in reusable Layer Sets and Saved Plan Views", () => {
+  assert.ok(NEW_PROJECT_DOCUMENT.layers.some((layer) => layer.id === STANDARD_LAYER_IDS.wall));
+  const copied = duplicateLayerSet(NEW_PROJECT_DOCUMENT);
+  assert.ok(copied);
+  const renamed = renameLayerSet(copied, copied.activeLayerSetId, "Permit Plan");
+  assert.ok(renamed);
+  const styled = updateLayerAppearance(renamed, STANDARD_LAYER_IDS.wall, { color: "#123456", lineStyle: "dashed", lineWeight: 5, printColor: "#101010" });
+  assert.ok(styled);
+  const original = activateLayerSet(styled, "layer-set-working-plan");
+  assert.ok(original);
+  assert.notEqual(original.layers.find((layer) => layer.id === STANDARD_LAYER_IDS.wall)?.color, "#123456");
+  const permit = activateLayerSet(original, styled.activeLayerSetId);
+  assert.ok(permit);
+  assert.equal(permit.layers.find((layer) => layer.id === STANDARD_LAYER_IDS.wall)?.lineWeight, 5);
+  const saved = savePlanView(permit, { activeLayerId: permit.activeLayerId, annotationScale: 48, layerSetId: permit.activeLayerSetId, name: "First Floor Permit", referenceStoryId: null, storyId: permit.building.activeStoryId, viewMode: "top" });
+  assert.ok(saved);
+  const restored = activateSavedPlanView(saved, saved.activeSavedPlanViewId);
+  assert.ok(restored);
+  assert.equal(restored.building.activeStoryId, permit.building.activeStoryId);
 });
 
 test("snaps direct object movement to nearby aligned faces", () => {
@@ -1504,6 +1533,14 @@ test("detects enclosed Rooms and preserves Story-default overrides across topolo
   const detected = refreshRoomsForStory(document, "story-01");
   assert.ok(detected);
   assert.equal(detected.rooms.length, 2);
+  assert.ok(detected.rooms.every((room) => room.name === "Unassigned" && room.roomType === "Unassigned" && room.layerId === STANDARD_LAYER_IDS.room));
+  assert.equal(detected.roomAnnotations.length, 8);
+  assert.ok(detected.roomAnnotations.every((annotation) => annotation.roomId && annotation.storyId === "story-01"));
+  const ceilingAnnotation = detected.roomAnnotations.find((annotation) => annotation.roomId === detected.rooms[0].id && annotation.kind === "rough-ceiling-height");
+  assert.ok(ceilingAnnotation);
+  const hiddenCeiling = updateRoomAnnotation(detected, ceilingAnnotation.id, { visible: false });
+  assert.ok(hiddenCeiling);
+  assert.equal(hiddenCeiling.roomAnnotations.find((annotation) => annotation.id === ceilingAnnotation.id)?.visible, false);
   assert.deepEqual(detected.rooms.map((room) => room.boundaryWallIds.length), [4, 4]);
   assert.deepEqual(detected.rooms.map((room) => room.roughCeilingHeightOverride), [null, null]);
 

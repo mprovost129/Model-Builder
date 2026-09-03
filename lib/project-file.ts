@@ -5,6 +5,7 @@ import {
   cloneDocument,
   cloneGroup,
   cloneLayer,
+  cloneLayerSet,
   cloneLineObject,
   clonePolylineObject,
   DEFAULT_LAYER,
@@ -33,15 +34,33 @@ import {
   type PlatformOpening,
   type RoomObject,
   cloneRoomObject,
+  cloneRoomAnnotation,
+  cloneSavedPlanView,
   platformOpeningContinuityIsValid,
+  roomAnnotationIsValid,
   roomObjectIsValid,
   resolveOpeningComponents,
   wallOpeningsAreValid,
   type OpeningComponentOverride,
+  type LayerSet,
+  type RoomAnnotationObject,
+  type SavedPlanView,
 } from "./document-model.ts";
+import {
+  DEFAULT_LAYER_SET_ID,
+  DEFAULT_SAVED_PLAN_VIEW_ID,
+  MODEL_LINE_STYLES,
+  ROOM_ANNOTATION_KINDS,
+  STANDARD_LAYER_IDS,
+  STANDARD_LAYERS,
+  createDefaultLayerSet,
+  createDefaultSavedPlanView,
+  mergeStandardLayers,
+  type LayerSetState,
+} from "../features/project-presentation.ts";
 import { arcGeometryIsValid } from "./cad-arc.ts";
 import { circleGeometryIsValid } from "./cad-circle.ts";
-import { polylineGeometryIsValid, type PolylineGeometry } from "./cad-polyline.ts";
+import { polylineCentroid, polylineGeometryIsValid, type PolylineGeometry } from "./cad-polyline.ts";
 import {
   MAXIMUM_COORDINATE,
   MINIMUM_DIMENSION,
@@ -121,11 +140,13 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 42;
+export const PROJECT_FILE_VERSION = 43;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
+  activeLayerSetId: string;
   activeLayerId: string;
+  activeSavedPlanViewId: string;
   arcs: ArcObject[];
   building: BuildingStructure;
   circles: CircleObject[];
@@ -133,18 +154,21 @@ export type ModelBuilderProject = {
   format: typeof PROJECT_FILE_FORMAT;
   groups: ModelGroup[];
   layers: ModelLayer[];
+  layerSets: LayerSet[];
   lines: LineObject[];
   name: string;
   objects: BoxObject[];
   polylines: PolylineObject[];
   rooms: RoomObject[];
+  roomAnnotations: RoomAnnotationObject[];
+  savedPlanViews: SavedPlanView[];
   units: {
     display: "us-architectural";
     internal: "inch";
     precision: "1/16-inch";
   };
   updatedAt: string;
-  version: typeof PROJECT_FILE_VERSION;
+  version: number;
 };
 
 export type ProjectParseResult =
@@ -682,7 +706,7 @@ function readGroup(value: unknown): ModelGroup | null {
   return { id: value.id, name: value.name.trim() };
 }
 
-function readLayer(value: unknown): ModelLayer | null {
+function readLayer(value: unknown, supportsPresentationProperties: boolean): ModelLayer | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.id !== "string" ||
@@ -692,6 +716,7 @@ function readLayer(value: unknown): ModelLayer | null {
     value.name.trim().length > 80 ||
     typeof value.color !== "string" ||
     !/^#[0-9A-F]{6}$/i.test(value.color) ||
+    (supportsPresentationProperties && (typeof value.printColor !== "string" || !/^#[0-9A-F]{6}$/i.test(value.printColor) || typeof value.lineStyle !== "string" || !MODEL_LINE_STYLES.includes(value.lineStyle as ModelLayer["lineStyle"]) || typeof value.lineWeight !== "number" || !Number.isInteger(value.lineWeight) || value.lineWeight < 1 || value.lineWeight > 10)) ||
     typeof value.visible !== "boolean" ||
     typeof value.locked !== "boolean"
   ) {
@@ -700,8 +725,11 @@ function readLayer(value: unknown): ModelLayer | null {
   return {
     color: value.color.toLowerCase(),
     id: value.id,
+    lineStyle: supportsPresentationProperties ? value.lineStyle as ModelLayer["lineStyle"] : "solid",
+    lineWeight: supportsPresentationProperties ? value.lineWeight as number : 1,
     locked: value.locked,
     name: value.name.trim(),
+    printColor: supportsPresentationProperties ? (value.printColor as string).toLowerCase() : value.color.toLowerCase(),
     visible: value.visible,
   };
 }
@@ -729,12 +757,13 @@ function readOpeningComponentOverride(value: unknown): OpeningComponentOverride 
   };
 }
 
-function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, defaults: BuildingStructure): WallOpening | null {
+function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, supportsObjectLayers: boolean, defaults: BuildingStructure): WallOpening | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
     typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120 ||
     (value.kind !== "door" && value.kind !== "window") ||
+    (supportsObjectLayers && (typeof value.layerId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.layerId))) ||
     !isFiniteNumber(value.centerOffset) || !isFiniteNumber(value.headerBottomHeight) ||
     !isFiniteNumber(value.roughHeight) || !isFiniteNumber(value.roughWidth) ||
     !isFiniteNumber(value.unitHeight) || !isFiniteNumber(value.unitWidth) ||
@@ -751,6 +780,7 @@ function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supports
     headerTypeIdOverride: supportsHostAwareHeaders ? value.headerTypeIdOverride as string | null : null,
     id: value.id,
     kind: value.kind,
+    layerId: supportsObjectLayers ? value.layerId as string : STANDARD_LAYER_IDS[value.kind],
     name: value.name.trim(),
     roughHeight: value.roughHeight,
     roughWidth: value.roughWidth,
@@ -762,7 +792,7 @@ function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supports
   };
 }
 
-function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean, supportsWallOpenings: boolean, supportsFoundationWalls: boolean, supportsFoundationSupportLinks: boolean, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, building: BuildingStructure): LineObject | null {
+function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boolean, fallbackStoryId: string, supportsWalls: boolean, supportsWallPlacement: boolean, supportsWallJunctionOverrides: boolean, supportsWallOpenings: boolean, supportsFoundationWalls: boolean, supportsFoundationSupportLinks: boolean, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, supportsObjectLayers: boolean, building: BuildingStructure): LineObject | null {
   if (!isRecord(value) || value.type !== "line" || !isRecord(value.start) || !isRecord(value.end)) return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -802,7 +832,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   const wallEndJoinMode = supportsWallJunctionOverrides ? readJoinMode(value.wallEndJoinMode) : architecturalRole === "wall" ? "auto" : null;
   const wallOpenings = supportsWallOpenings
     ? Array.isArray(value.wallOpenings) && value.wallOpenings.length <= MAXIMUM_WALL_OPENING_COUNT
-      ? value.wallOpenings.map((opening) => readWallOpening(opening, supportsOpeningTypes, supportsHostAwareHeaders, supportsComponentOverrides, building))
+      ? value.wallOpenings.map((opening) => readWallOpening(opening, supportsOpeningTypes, supportsHostAwareHeaders, supportsComponentOverrides, supportsObjectLayers, building))
       : null
     : [];
   if (
@@ -891,11 +921,12 @@ function readPlatformOpening(value: unknown, supportsVerticalOpeningContinuity: 
   return { boundary, cuts: value.cuts as PlatformOpening["cuts"], id: value.id, kind: value.kind as PlatformOpening["kind"], name: value.name.trim(), verticalOpeningId: supportsVerticalOpeningContinuity ? value.verticalOpeningId as string | null : null };
 }
 
-function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, supportsVerticalOpeningContinuity: boolean): RoomObject | null {
+function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, supportsVerticalOpeningContinuity: boolean, supportsPresentation: boolean): RoomObject | null {
   if (
     !isRecord(value) || !isRecord(value.boundary) || !Array.isArray(value.boundary.vertices) ||
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
     typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120 ||
+    (supportsPresentation && (typeof value.layerId !== "string" || typeof value.roomType !== "string" || !value.roomType.trim() || value.roomType.trim().length > 80)) ||
     typeof value.storyId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.storyId) ||
     !Array.isArray(value.boundaryWallIds) || value.boundaryWallIds.some((id) => typeof id !== "string") ||
     !isFiniteNumber(value.roughFloorOffset) ||
@@ -925,12 +956,35 @@ function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, suppo
     floorFinishOverride,
     floorStructureOverride,
     id: value.id,
+    layerId: supportsPresentation ? value.layerId as string : STANDARD_LAYER_IDS.room,
     name: value.name.trim(),
     platformOpenings: platformOpenings as PlatformOpening[],
     roughCeilingHeightOverride: value.roughCeilingHeightOverride as number | null,
     roughFloorOffset: value.roughFloorOffset,
+    roomType: supportsPresentation ? (value.roomType as string).trim() : value.name.trim() === "Unassigned" ? "Unassigned" : value.name.trim(),
     storyId: value.storyId,
   };
+}
+
+function readRoomAnnotation(value: unknown): RoomAnnotationObject | null {
+  if (!isRecord(value) || !isRecord(value.position) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(value.id) || typeof value.kind !== "string" || !ROOM_ANNOTATION_KINDS.includes(value.kind as RoomAnnotationObject["kind"]) || typeof value.layerId !== "string" || typeof value.roomId !== "string" || typeof value.storyId !== "string" || typeof value.visible !== "boolean" || !isFiniteNumber(value.position.x) || !isFiniteNumber(value.position.y)) return null;
+  return { id: value.id, kind: value.kind as RoomAnnotationObject["kind"], layerId: value.layerId, position: { x: value.position.x, y: value.position.y }, roomId: value.roomId, storyId: value.storyId, visible: value.visible };
+}
+
+function readLayerSetState(value: unknown): LayerSetState | null {
+  const parsed = readLayer({ ...(isRecord(value) ? value : {}), name: "Layer Set State" }, true);
+  return parsed ? { color: parsed.color, id: parsed.id, lineStyle: parsed.lineStyle, lineWeight: parsed.lineWeight, locked: parsed.locked, printColor: parsed.printColor, visible: parsed.visible } : null;
+}
+
+function readLayerSet(value: unknown): LayerSet | null {
+  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 80 || !Array.isArray(value.layers)) return null;
+  const layers = value.layers.map(readLayerSetState);
+  return layers.some((layer) => layer === null) ? null : { id: value.id, layers: layers as LayerSetState[], name: value.name.trim() };
+}
+
+function readSavedPlanView(value: unknown): SavedPlanView | null {
+  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 80 || typeof value.activeLayerId !== "string" || typeof value.layerSetId !== "string" || typeof value.storyId !== "string" || !(value.referenceStoryId === null || typeof value.referenceStoryId === "string") || !isFiniteNumber(value.annotationScale) || value.annotationScale < 1 || value.annotationScale > 1200 || !["front", "perspective", "right", "top"].includes(String(value.viewMode))) return null;
+  return { activeLayerId: value.activeLayerId, annotationScale: value.annotationScale, id: value.id, layerSetId: value.layerSetId, name: value.name.trim(), referenceStoryId: value.referenceStoryId as string | null, storyId: value.storyId, viewMode: value.viewMode as SavedPlanView["viewMode"] };
 }
 
 function readCircleObject(value: unknown, supportsStories: boolean, fallbackStoryId: string): CircleObject | null {
@@ -985,7 +1039,9 @@ export function createProjectDocument({
   updatedAt: string;
 }): ModelBuilderProject {
   return {
+    activeLayerSetId: document.activeLayerSetId,
     activeLayerId: document.activeLayerId,
+    activeSavedPlanViewId: document.activeSavedPlanViewId,
     arcs: cloneDocument(document).arcs,
     building: cloneBuildingStructure(document.building),
     circles: cloneDocument(document).circles,
@@ -993,11 +1049,14 @@ export function createProjectDocument({
     format: PROJECT_FILE_FORMAT,
     groups: cloneDocument(document).groups,
     layers: cloneDocument(document).layers,
+    layerSets: cloneDocument(document).layerSets,
     lines: cloneDocument(document).lines,
     name: name.trim() || "Untitled Model",
     objects: cloneDocument(document).objects,
     polylines: cloneDocument(document).polylines,
     rooms: cloneDocument(document).rooms,
+    roomAnnotations: cloneDocument(document).roomAnnotations,
+    savedPlanViews: cloneDocument(document).savedPlanViews,
     units: {
       display: "us-architectural",
       internal: "inch",
@@ -1085,11 +1144,14 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     ) {
       return { ok: false, error: "The project layer configuration is missing or invalid." };
     }
-    const parsedLayers = value.layers.map(readLayer);
+    const parsedLayers = value.layers.map((layer) => readLayer(layer, version >= 43));
     if (parsedLayers.some((layer) => layer === null)) {
       return { ok: false, error: "One or more project layers are invalid." };
     }
-    layers = parsedLayers as ModelLayer[];
+    layers = version >= 43 ? parsedLayers as ModelLayer[] : mergeStandardLayers(parsedLayers as ModelLayer[]).map((layer) => {
+      const standard = STANDARD_LAYERS.find((candidate) => candidate.id === layer.id);
+      return standard ? { ...layer, lineStyle: standard.lineStyle, lineWeight: standard.lineWeight, printColor: layer.color } : layer;
+    });
     if (
       new Set(layers.map((layer) => layer.id)).size !== layers.length ||
       new Set(layers.map((layer) => layer.name.toLowerCase())).size !== layers.length
@@ -1102,7 +1164,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
       return { ok: false, error: "The active project layer must be visible and unlocked." };
     }
   } else {
-    layers = [{ ...DEFAULT_LAYER }];
+    layers = mergeStandardLayers([{ ...DEFAULT_LAYER }]);
     activeLayerId = DEFAULT_LAYER_ID;
   }
 
@@ -1164,11 +1226,14 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.lines) || value.lines.length > MAXIMUM_LINE_COUNT) {
       return { ok: false, error: "The project line collection is missing or invalid." };
     }
-    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20, version >= 23, version >= 27, version >= 28, version >= 30, version >= 35, version >= 37, building));
+    const parsedLines = value.lines.map((line) => readLineObject(line, version >= 8, version >= 14, fallbackStoryId, version >= 15, version >= 18, version >= 20, version >= 23, version >= 27, version >= 28, version >= 30, version >= 35, version >= 37, version >= 43, building));
     if (parsedLines.some((line) => line === null)) {
       return { ok: false, error: "One or more drawing lines are invalid." };
     }
-    lines = parsedLines as LineObject[];
+    lines = (parsedLines as LineObject[]).map((line) => version >= 43 ? line : {
+      ...line,
+      layerId: line.architecturalRole === "wall" ? STANDARD_LAYER_IDS.wall : line.architecturalRole === "foundation-wall" ? STANDARD_LAYER_IDS["foundation-wall"] : line.layerId,
+    });
     if (new Set(lines.map((line) => line.id)).size !== lines.length ||
         new Set(lines.map((line) => line.name.toLowerCase())).size !== lines.length) {
       return { ok: false, error: "Drawing line identifiers and names must be unique." };
@@ -1176,6 +1241,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (lines.some((line) => !layerIds.has(line.layerId))) {
       return { ok: false, error: "One or more drawing lines reference a missing layer." };
     }
+    if (lines.some((line) => line.wallOpenings.some((opening) => !layerIds.has(opening.layerId)))) return { ok: false, error: "One or more Doors or Windows reference a missing layer." };
     if (lines.some((line) => !storyIds.has(line.storyId))) return { ok: false, error: "One or more drawing lines reference a missing Story." };
     const wallTypeIds = new Set(building.wallTypes.map((wallType) => wallType.id));
     if (lines.some((line) => line.wallTypeId !== null && !wallTypeIds.has(line.wallTypeId))) return { ok: false, error: "One or more Walls reference a missing Wall Type." };
@@ -1220,7 +1286,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     }
     const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, fallbackStoryId));
     if (parsedPolylines.some((polyline) => polyline === null)) return { ok: false, error: "One or more drawing polylines are invalid." };
-    polylines = parsedPolylines as PolylineObject[];
+    polylines = (parsedPolylines as PolylineObject[]).map((polyline) => version >= 43 || polyline.architecturalRole !== "floor-platform" ? polyline : { ...polyline, layerId: STANDARD_LAYER_IDS["floor-platform"] });
     if (new Set(polylines.map((polyline) => polyline.id)).size !== polylines.length ||
         new Set(polylines.map((polyline) => polyline.name.toLowerCase())).size !== polylines.length ||
         polylines.some((polyline) => !layerIds.has(polyline.layerId))) {
@@ -1266,11 +1332,44 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   let rooms: RoomObject[] = [];
   if (version >= 24) {
     if (!Array.isArray(value.rooms) || value.rooms.length > MAXIMUM_ROOM_COUNT) return { ok: false, error: "The project Room collection is missing or invalid." };
-    const parsedRooms = value.rooms.map((room) => readRoomObject(room, version >= 25, version >= 29));
+    const parsedRooms = value.rooms.map((room) => readRoomObject(room, version >= 25, version >= 29, version >= 43));
     if (parsedRooms.some((room) => room === null)) return { ok: false, error: "One or more Rooms are invalid." };
     rooms = parsedRooms as RoomObject[];
-    const roomDocument: ModelDocument = { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines, rooms };
+  }
+
+  let layerSets: LayerSet[];
+  let activeLayerSetId: string;
+  let savedPlanViews: SavedPlanView[];
+  let activeSavedPlanViewId: string;
+  let roomAnnotations: RoomAnnotationObject[];
+  if (version >= 43) {
+    if (!Array.isArray(value.layerSets) || value.layerSets.length < 1 || value.layerSets.length > 32 || typeof value.activeLayerSetId !== "string" || !Array.isArray(value.savedPlanViews) || value.savedPlanViews.length < 1 || value.savedPlanViews.length > 64 || typeof value.activeSavedPlanViewId !== "string" || !Array.isArray(value.roomAnnotations) || value.roomAnnotations.length > MAXIMUM_ROOM_COUNT * ROOM_ANNOTATION_KINDS.length) return { ok: false, error: "The project Layer Set, Saved View, or Room annotation configuration is missing or invalid." };
+    const parsedSets = value.layerSets.map(readLayerSet);
+    const parsedViews = value.savedPlanViews.map(readSavedPlanView);
+    const parsedAnnotations = value.roomAnnotations.map(readRoomAnnotation);
+    if (parsedSets.some((set) => set === null) || parsedViews.some((view) => view === null) || parsedAnnotations.some((annotation) => annotation === null)) return { ok: false, error: "One or more Layer Sets, Saved Views, or Room annotations are invalid." };
+    layerSets = parsedSets as LayerSet[];
+    savedPlanViews = parsedViews as SavedPlanView[];
+    roomAnnotations = parsedAnnotations as RoomAnnotationObject[];
+    activeLayerSetId = value.activeLayerSetId;
+    activeSavedPlanViewId = value.activeSavedPlanViewId;
+  } else {
+    layerSets = [createDefaultLayerSet(layers)];
+    activeLayerSetId = DEFAULT_LAYER_SET_ID;
+    savedPlanViews = [createDefaultSavedPlanView(building.activeStoryId)];
+    activeSavedPlanViewId = DEFAULT_SAVED_PLAN_VIEW_ID;
+    roomAnnotations = rooms.flatMap((room) => {
+      const center = polylineCentroid(room.boundary) ?? room.boundary.vertices[0] ?? { x: 0, y: 0 };
+      return ROOM_ANNOTATION_KINDS.map((kind) => ({ id: `${room.id}-${kind}`, kind, layerId: kind === "label" ? STANDARD_LAYER_IDS["room-label"] : kind === "area" ? STANDARD_LAYER_IDS["room-area"] : kind === "interior-dimensions" ? STANDARD_LAYER_IDS["room-interior-dimensions"] : STANDARD_LAYER_IDS["room-ceiling-height"], position: { ...center }, roomId: room.id, storyId: room.storyId, visible: true }));
+    });
+  }
+  const roomDocument: ModelDocument = { activeLayerSetId, activeLayerId, activeSavedPlanViewId, arcs, building, circles, groups, layers, layerSets, lines, objects: validObjects, polylines, rooms, roomAnnotations, savedPlanViews };
+  if (new Set(layerSets.map((set) => set.id)).size !== layerSets.length || !layerSets.some((set) => set.id === activeLayerSetId) || layerSets.some((set) => set.layers.length !== layers.length || new Set(set.layers.map((layer) => layer.id)).size !== layers.length || set.layers.some((layer) => !layerIds.has(layer.id)))) return { ok: false, error: "Layer Set identities or layer references are invalid." };
+  if (new Set(savedPlanViews.map((view) => view.id)).size !== savedPlanViews.length || !savedPlanViews.some((view) => view.id === activeSavedPlanViewId) || savedPlanViews.some((view) => !layerSets.some((set) => set.id === view.layerSetId) || !layerIds.has(view.activeLayerId) || !storyIds.has(view.storyId) || view.referenceStoryId !== null && !storyIds.has(view.referenceStoryId))) return { ok: false, error: "Saved Plan View identities or references are invalid." };
+  if (version >= 24) {
     if (new Set(rooms.map((room) => room.id)).size !== rooms.length || rooms.some((room) => !roomObjectIsValid(room, roomDocument))) return { ok: false, error: "One or more Rooms reference invalid Stories, Walls, or settings." };
+    const annotationKeys = roomAnnotations.map((annotation) => `${annotation.roomId}:${annotation.kind}`);
+    if (new Set(roomAnnotations.map((annotation) => annotation.id)).size !== roomAnnotations.length || new Set(annotationKeys).size !== annotationKeys.length || roomAnnotations.some((annotation) => !roomAnnotationIsValid(annotation, roomDocument)) || rooms.some((room) => ROOM_ANNOTATION_KINDS.some((kind) => !annotationKeys.includes(`${room.id}:${kind}`)))) return { ok: false, error: "One or more Room annotations reference invalid Rooms, Stories, or layers." };
     if (!platformOpeningContinuityIsValid(roomDocument)) return { ok: false, error: "One or more vertical platform-opening paths are invalid or discontinuous." };
   }
   const allEntityIds = [...validObjects.map((object) => object.id), ...lines.map((line) => line.id), ...polylines.map((polyline) => polyline.id), ...circles.map((circle) => circle.id), ...arcs.map((arc) => arc.id)];
@@ -1281,7 +1380,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     ok: true,
     project: createProjectDocument({
       createdAt: value.createdAt,
-      document: { activeLayerId, arcs, building, circles, groups, layers, lines, objects: validObjects, polylines, rooms },
+      document: roomDocument,
       name: value.name,
       updatedAt: value.updatedAt,
     }),
@@ -1290,16 +1389,21 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
 export function projectToDocument(project: ModelBuilderProject): ModelDocument {
   return {
+    activeLayerSetId: project.activeLayerSetId,
     activeLayerId: project.activeLayerId,
+    activeSavedPlanViewId: project.activeSavedPlanViewId,
     arcs: project.arcs.map(cloneArcObject),
     building: cloneBuildingStructure(project.building),
     circles: project.circles.map(cloneCircleObject),
     groups: project.groups.map(cloneGroup),
     layers: project.layers.map(cloneLayer),
+    layerSets: project.layerSets.map(cloneLayerSet),
     lines: project.lines.map(cloneLineObject),
     objects: project.objects.map(cloneBoxObject),
     polylines: project.polylines.map(clonePolylineObject),
     rooms: project.rooms.map(cloneRoomObject),
+    roomAnnotations: project.roomAnnotations.map(cloneRoomAnnotation),
+    savedPlanViews: project.savedPlanViews.map(cloneSavedPlanView),
   };
 }
 

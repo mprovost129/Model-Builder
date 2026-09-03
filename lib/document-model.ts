@@ -138,6 +138,36 @@ import {
   type WallJoinMode,
   type WallReferenceLine,
 } from "./building-stories.ts";
+import {
+  DEFAULT_LAYER_ID,
+  DEFAULT_LAYER_SET_ID,
+  DEFAULT_SAVED_PLAN_VIEW_ID,
+  ROOM_ANNOTATION_KINDS,
+  STANDARD_LAYER_IDS,
+  createDefaultLayerSet,
+  createDefaultLayers,
+  createDefaultSavedPlanView,
+  layerSetStateFromLayer,
+  type LayerSet,
+  type ModelLayer,
+  type ModelLineStyle,
+  type ModelObjectCategory,
+  type RoomAnnotationKind,
+  type RoomAnnotationObject,
+  type RoomType,
+  type SavedPlanView,
+} from "../features/project-presentation.ts";
+
+export {
+  DEFAULT_LAYER_ID,
+  DEFAULT_LAYER_SET_ID,
+  DEFAULT_SAVED_PLAN_VIEW_ID,
+  ROOM_ANNOTATION_KINDS,
+  ROOM_TYPES,
+  STANDARD_LAYER_IDS,
+  STANDARD_LAYERS,
+} from "../features/project-presentation.ts";
+export type { LayerSet, ModelLayer, ModelLineStyle, ModelObjectCategory, RoomAnnotationKind, RoomAnnotationObject, RoomType, SavedPlanView } from "../features/project-presentation.ts";
 
 export type BoxObject = BoxModel & {
   groupId: string | null;
@@ -176,6 +206,7 @@ export type WallOpening = {
   headerTypeIdOverride: string | null;
   id: string;
   kind: WallOpeningKind;
+  layerId: string;
   name: string;
   roughHeight: number;
   roughWidth: number;
@@ -242,11 +273,13 @@ export type RoomObject = {
   floorFinishOverride: LayeredAssembly | null;
   floorStructureOverride: LayeredAssembly | null;
   id: string;
+  layerId: string;
   name: string;
   platformOpenings: PlatformOpening[];
   /** Local offset above or below the Story rough floor/subfloor. */
   roughFloorOffset: number;
   roughCeilingHeightOverride: number | null;
+  roomType: RoomType;
   storyId: string;
 };
 
@@ -329,25 +362,22 @@ export type ModelGroup = {
   name: string;
 };
 
-export type ModelLayer = {
-  color: string;
-  id: string;
-  locked: boolean;
-  name: string;
-  visible: boolean;
-};
-
 export type ModelDocument = {
+  activeLayerSetId: string;
   activeLayerId: string;
+  activeSavedPlanViewId: string;
   arcs: ArcObject[];
   building: BuildingStructure;
   circles: CircleObject[];
   groups: ModelGroup[];
   layers: ModelLayer[];
+  layerSets: LayerSet[];
   lines: LineObject[];
   objects: BoxObject[];
   polylines: PolylineObject[];
   rooms: RoomObject[];
+  roomAnnotations: RoomAnnotationObject[];
+  savedPlanViews: SavedPlanView[];
 };
 
 export type ModelEntityKind = "arc" | "box" | "circle" | "line" | "polyline";
@@ -365,15 +395,7 @@ export const MAXIMUM_LAYER_COUNT = 64;
 export const MAXIMUM_GROUP_COUNT = 64;
 export const MAXIMUM_ROOM_COUNT = 1000;
 export const MAXIMUM_PLATFORM_OPENING_COUNT = 64;
-export const DEFAULT_LAYER_ID = "layer-default";
-
-export const DEFAULT_LAYER: ModelLayer = {
-  color: "#7f95aa",
-  id: DEFAULT_LAYER_ID,
-  locked: false,
-  name: "Default",
-  visible: true,
-};
+export const DEFAULT_LAYER: ModelLayer = createDefaultLayers()[0];
 
 const LAYER_COLORS = [
   "#6ea8d9",
@@ -387,12 +409,15 @@ const LAYER_COLORS = [
 ];
 
 export const DEFAULT_DOCUMENT: ModelDocument = {
+  activeLayerSetId: DEFAULT_LAYER_SET_ID,
   activeLayerId: DEFAULT_LAYER_ID,
+  activeSavedPlanViewId: DEFAULT_SAVED_PLAN_VIEW_ID,
   arcs: [],
   building: createDefaultBuildingStructure(),
   circles: [],
   groups: [],
-  layers: [{ ...DEFAULT_LAYER }],
+  layers: createDefaultLayers(),
+  layerSets: [createDefaultLayerSet(createDefaultLayers())],
   lines: [],
   objects: [
     {
@@ -409,20 +434,27 @@ export const DEFAULT_DOCUMENT: ModelDocument = {
   ],
   polylines: [],
   rooms: [],
+  roomAnnotations: [],
+  savedPlanViews: [createDefaultSavedPlanView("story-01")],
 };
 
 /** A new user project keeps editable project defaults but starts with no model entities. */
 export const NEW_PROJECT_DOCUMENT: ModelDocument = {
+  activeLayerSetId: DEFAULT_LAYER_SET_ID,
   activeLayerId: DEFAULT_LAYER_ID,
+  activeSavedPlanViewId: DEFAULT_SAVED_PLAN_VIEW_ID,
   arcs: [],
   building: createDefaultBuildingStructure(),
   circles: [],
   groups: [],
-  layers: [{ ...DEFAULT_LAYER }],
+  layers: createDefaultLayers(),
+  layerSets: [createDefaultLayerSet(createDefaultLayers())],
   lines: [],
   objects: [],
   polylines: [],
   rooms: [],
+  roomAnnotations: [],
+  savedPlanViews: [createDefaultSavedPlanView("story-01")],
 };
 
 export function cloneArcObject(arc: ArcObject): ArcObject {
@@ -526,6 +558,7 @@ export function wallOpeningsAreValid(line: LineObject, roughCeilingHeight: numbe
       opening.name.trim().length > 120 ||
       names.has(opening.name.trim().toLowerCase()) ||
       (opening.kind !== "door" && opening.kind !== "window") ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.layerId) ||
       !Array.isArray(opening.componentOverrides) || opening.componentOverrides.length > 48 || opening.componentOverrides.some((override) => !openingComponentOverrideIsValid(override)) || new Set(opening.componentOverrides.map((override) => override.componentId)).size !== opening.componentOverrides.length ||
       (opening.headerTypeIdOverride !== null && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.headerTypeIdOverride)) ||
       (opening.wallOpeningTypeId !== null && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(opening.wallOpeningTypeId)) ||
@@ -584,6 +617,18 @@ export function cloneLayer(layer: ModelLayer): ModelLayer {
   return { ...layer };
 }
 
+export function cloneLayerSet(layerSet: LayerSet): LayerSet {
+  return { id: layerSet.id, layers: layerSet.layers.map((layer) => ({ ...layer })), name: layerSet.name };
+}
+
+export function cloneRoomAnnotation(annotation: RoomAnnotationObject): RoomAnnotationObject {
+  return { ...annotation, position: { ...annotation.position } };
+}
+
+export function cloneSavedPlanView(view: SavedPlanView): SavedPlanView {
+  return { ...view };
+}
+
 export function cloneGroup(group: ModelGroup): ModelGroup {
   return { ...group };
 }
@@ -608,12 +653,45 @@ export function cloneRoomObject(room: RoomObject): RoomObject {
     floorFinishOverride: room.floorFinishOverride ? cloneLayeredAssembly(room.floorFinishOverride) : null,
     floorStructureOverride: room.floorStructureOverride ? cloneLayeredAssembly(room.floorStructureOverride) : null,
     id: room.id,
+    layerId: room.layerId,
     name: room.name,
     platformOpenings: (room.platformOpenings ?? []).map(clonePlatformOpening),
     roughCeilingHeightOverride: room.roughCeilingHeightOverride,
     roughFloorOffset: room.roughFloorOffset,
+    roomType: room.roomType,
     storyId: room.storyId,
   };
+}
+
+function roomAnnotationLayerId(kind: RoomAnnotationKind): string {
+  if (kind === "area") return STANDARD_LAYER_IDS["room-area"];
+  if (kind === "interior-dimensions") return STANDARD_LAYER_IDS["room-interior-dimensions"];
+  if (kind === "rough-ceiling-height") return STANDARD_LAYER_IDS["room-ceiling-height"];
+  return STANDARD_LAYER_IDS["room-label"];
+}
+
+function defaultRoomAnnotations(room: RoomObject): RoomAnnotationObject[] {
+  const center = polylineCentroid(room.boundary) ?? room.boundary.vertices[0] ?? { x: 0, y: 0 };
+  return ROOM_ANNOTATION_KINDS.map((kind) => ({
+    id: `${room.id}-${kind}`,
+    kind,
+    layerId: roomAnnotationLayerId(kind),
+    position: { ...center },
+    roomId: room.id,
+    storyId: room.storyId,
+    visible: true,
+  }));
+}
+
+export function roomAnnotationIsValid(annotation: RoomAnnotationObject, document: ModelDocument): boolean {
+  const room = document.rooms.find((candidate) => candidate.id === annotation.roomId);
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(annotation.id) &&
+    ROOM_ANNOTATION_KINDS.includes(annotation.kind) &&
+    Boolean(room && room.storyId === annotation.storyId) &&
+    document.layers.some((layer) => layer.id === annotation.layerId) &&
+    Number.isFinite(annotation.position.x) && Number.isFinite(annotation.position.y) &&
+    Math.abs(annotation.position.x) <= MAXIMUM_COORDINATE && Math.abs(annotation.position.y) <= MAXIMUM_COORDINATE &&
+    typeof annotation.visible === "boolean";
 }
 
 function pointOnPlanSegment(point: PlanPoint, start: PlanPoint, end: PlanPoint, tolerance = 1e-7): boolean {
@@ -693,6 +771,8 @@ export function roomObjectIsValid(room: RoomObject, document: ModelDocument): bo
   const openingNames = new Set(openings.map((opening) => opening.name.trim().toLowerCase()));
   return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room.id) &&
     room.name.trim().length > 0 && room.name.trim().length <= 120 &&
+    room.roomType.trim().length > 0 && room.roomType.trim().length <= 80 &&
+    document.layers.some((layer) => layer.id === room.layerId) &&
     document.building.stories.some((story) => story.id === room.storyId) &&
     polylineGeometryIsValid(room.boundary) && room.boundary.closed && polylineArea(room.boundary) > 0 &&
     room.boundaryWallIds.length >= 3 && new Set(room.boundaryWallIds).size === room.boundaryWallIds.length && room.boundaryWallIds.every((id) => wallIds.has(id)) &&
@@ -1138,7 +1218,7 @@ export function foundationWallVerticalExtent(document: ModelDocument, line: Line
 function documentWallOpeningsAreValid(document: ModelDocument): boolean {
   return document.lines.every((line) => {
     const wallHeight = wallVerticalExtent(document, line)?.height ?? document.building.stories.find((story) => story.id === line.storyId)?.roughCeilingHeight ?? 0;
-    return wallOpeningsAreValid(line, wallHeight);
+    return wallOpeningsAreValid(line, wallHeight) && line.wallOpenings.every((opening) => document.layers.some((layer) => layer.id === opening.layerId));
   });
 }
 
@@ -1215,7 +1295,7 @@ export function refreshRoomsForStory(document: ModelDocument, storyId: string): 
     nextNumber += 1;
     return id;
   };
-  const rooms = faces.map((face, index) => {
+  const rooms = faces.map((face) => {
     const existing = existingByWalls.get(face.boundaryWallIds.join("|"));
     if (existing) return { ...cloneRoomObject(existing), boundary: clonePolylineGeometry(face.geometry), boundaryWallIds: face.boundaryWallIds };
     return {
@@ -1226,18 +1306,28 @@ export function refreshRoomsForStory(document: ModelDocument, storyId: string): 
       floorFinishOverride: null,
       floorStructureOverride: null,
       id: nextId(),
-      name: `Room ${String(index + 1).padStart(2, "0")}`,
+      layerId: STANDARD_LAYER_IDS.room,
+      name: "Unassigned",
       platformOpenings: [],
       roughCeilingHeightOverride: null,
       roughFloorOffset: 0,
+      roomType: "Unassigned",
       storyId,
     } satisfies RoomObject;
   });
   if (rooms.length > MAXIMUM_ROOM_COUNT) return null;
   const next = cloneDocument(document);
   next.rooms = [...next.rooms.filter((room) => room.storyId !== storyId), ...rooms];
+  const annotationsByKey = new Map(next.roomAnnotations.map((annotation) => [`${annotation.roomId}:${annotation.kind}`, annotation]));
+  next.roomAnnotations = [
+    ...next.roomAnnotations.filter((annotation) => annotation.storyId !== storyId),
+    ...rooms.flatMap((room) => defaultRoomAnnotations(room).map((fallback) => {
+      const existing = annotationsByKey.get(`${room.id}:${fallback.kind}`);
+      return existing ? { ...cloneRoomAnnotation(existing), storyId: room.storyId } : fallback;
+    })),
+  ];
   const normalized = clearInvalidPlatformOpeningContinuity(next);
-  return normalized.rooms.every((room) => roomObjectIsValid(room, normalized)) && documentWallOpeningsAreValid(normalized) ? normalized : null;
+  return normalized.rooms.every((room) => roomObjectIsValid(room, normalized)) && normalized.roomAnnotations.every((annotation) => roomAnnotationIsValid(annotation, normalized)) && documentWallOpeningsAreValid(normalized) ? normalized : null;
 }
 
 export function updateRoomObject(document: ModelDocument, roomId: string, change: Partial<Omit<RoomObject, "id" | "storyId" | "boundary" | "boundaryWallIds" | "platformOpenings">>): ModelDocument | null {
@@ -1246,6 +1336,14 @@ export function updateRoomObject(document: ModelDocument, roomId: string, change
   if (index < 0) return null;
   next.rooms[index] = { ...next.rooms[index], ...change, name: change.name?.trim() || next.rooms[index].name };
   return roomObjectIsValid(next.rooms[index], next) && documentWallOpeningsAreValid(next) ? next : null;
+}
+
+export function updateRoomAnnotation(document: ModelDocument, annotationId: string, change: Partial<Pick<RoomAnnotationObject, "layerId" | "position" | "visible">>): ModelDocument | null {
+  const next = cloneDocument(document);
+  const index = next.roomAnnotations.findIndex((annotation) => annotation.id === annotationId);
+  if (index < 0) return null;
+  next.roomAnnotations[index] = { ...next.roomAnnotations[index], ...change, position: change.position ? { ...change.position } : next.roomAnnotations[index].position };
+  return roomAnnotationIsValid(next.roomAnnotations[index], next) ? next : null;
 }
 
 function nextPlatformOpeningIdentity(room: RoomObject, kind: PlatformOpeningKind) {
@@ -1416,22 +1514,29 @@ export function disconnectPlatformOpeningContinuity(document: ModelDocument, roo
 
 export function cloneDocument(document: ModelDocument): ModelDocument {
   return {
+    activeLayerSetId: document.activeLayerSetId,
     activeLayerId: document.activeLayerId,
+    activeSavedPlanViewId: document.activeSavedPlanViewId,
     arcs: document.arcs.map(cloneArcObject),
     building: cloneBuildingStructure(document.building),
     circles: document.circles.map(cloneCircleObject),
     groups: document.groups.map(cloneGroup),
     layers: document.layers.map(cloneLayer),
+    layerSets: document.layerSets.map(cloneLayerSet),
     lines: document.lines.map(cloneLineObject),
     objects: document.objects.map(cloneBoxObject),
     polylines: document.polylines.map(clonePolylineObject),
     rooms: (document.rooms ?? []).map(cloneRoomObject),
+    roomAnnotations: document.roomAnnotations.map(cloneRoomAnnotation),
+    savedPlanViews: document.savedPlanViews.map(cloneSavedPlanView),
   };
 }
 
 export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
   return (
+    a.activeLayerSetId === b.activeLayerSetId &&
     a.activeLayerId === b.activeLayerId &&
+    a.activeSavedPlanViewId === b.activeSavedPlanViewId &&
     buildingStructuresEqual(a.building, b.building) &&
     a.arcs.length === b.arcs.length &&
     a.arcs.every((arc, index) => {
@@ -1459,9 +1564,13 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         layer.id === other.id &&
         layer.name === other.name &&
         layer.color === other.color &&
+        layer.printColor === other.printColor &&
+        layer.lineStyle === other.lineStyle &&
+        layer.lineWeight === other.lineWeight &&
         layer.visible === other.visible &&
         layer.locked === other.locked;
     }) &&
+    JSON.stringify(a.layerSets) === JSON.stringify(b.layerSets) &&
     a.lines.length === b.lines.length &&
     a.lines.every((line, index) => {
       const other = b.lines[index];
@@ -1469,7 +1578,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         line.wallOpenings.length === other.wallOpenings.length && line.wallOpenings.every((opening, openingIndex) => {
           const otherOpening = other.wallOpenings[openingIndex];
-          return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId && JSON.stringify(opening.componentOverrides) === JSON.stringify(otherOpening.componentOverrides);
+          return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.layerId === otherOpening.layerId && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId && JSON.stringify(opening.componentOverrides) === JSON.stringify(otherOpening.componentOverrides);
         }) &&
         lineGeometriesEqual(line, other);
     }) &&
@@ -1483,7 +1592,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     (a.rooms ?? []).length === (b.rooms ?? []).length &&
     (a.rooms ?? []).every((room, index) => {
       const other = (b.rooms ?? [])[index];
-      return other !== undefined && room.id === other.id && room.name === other.name && room.storyId === other.storyId &&
+      return other !== undefined && room.id === other.id && room.layerId === other.layerId && room.name === other.name && room.roomType === other.roomType && room.storyId === other.storyId &&
         room.roughFloorOffset === other.roughFloorOffset && room.roughCeilingHeightOverride === other.roughCeilingHeightOverride &&
         room.boundaryWallIds.length === other.boundaryWallIds.length && room.boundaryWallIds.every((wallId, wallIndex) => wallId === other.boundaryWallIds[wallIndex]) &&
         polylineGeometriesEqual(room.boundary, other.boundary) &&
@@ -1496,6 +1605,8 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         JSON.stringify(room.ceilingStructureOverride) === JSON.stringify(other.ceilingStructureOverride) &&
         JSON.stringify(room.ceilingFinishOverride) === JSON.stringify(other.ceilingFinishOverride);
     }) &&
+    JSON.stringify(a.roomAnnotations) === JSON.stringify(b.roomAnnotations) &&
+    JSON.stringify(a.savedPlanViews) === JSON.stringify(b.savedPlanViews) &&
     a.objects.length === b.objects.length &&
     a.objects.every((object, index) => {
       const other = b.objects[index];
@@ -1586,12 +1697,21 @@ export function updateDocumentBuilding(
       storyId: change.storyId,
     };
   });
+  const roomStoryById = new Map(next.rooms.map((room) => [room.id, room.storyId]));
+  next.roomAnnotations = next.roomAnnotations.map((annotation) => ({ ...annotation, storyId: roomStoryById.get(annotation.roomId) ?? annotation.storyId }));
+  const nextStoryIds = new Set(building.stories.map((story) => story.id));
+  next.savedPlanViews = next.savedPlanViews.map((view) => ({
+    ...view,
+    referenceStoryId: view.referenceStoryId && nextStoryIds.has(view.referenceStoryId) ? view.referenceStoryId : null,
+    storyId: nextStoryIds.has(view.storyId) ? view.storyId : building.activeStoryId,
+  }));
   next.building = cloneBuildingStructure(building);
   const normalized = clearInvalidPlatformOpeningContinuity(next);
   if (!documentWallHeaderAssembliesFit(normalized)) return null;
   if (!documentOpeningComponentOverridesAreValid(normalized)) return null;
   if (!documentWallOpeningsAreValid(normalized)) return null;
   if (normalized.rooms.some((room) => !roomObjectIsValid(room, normalized))) return null;
+  if (normalized.roomAnnotations.some((annotation) => !roomAnnotationIsValid(annotation, normalized))) return null;
   return normalized;
 }
 
@@ -1636,6 +1756,8 @@ export function assignModelEntityToStory(
       ? { ...line, foundationSupportWallId: null }
       : line);
     next.rooms = next.rooms.filter((room) => !room.boundaryWallIds.includes(ref.id));
+    const roomIds = new Set(next.rooms.map((room) => room.id));
+    next.roomAnnotations = next.roomAnnotations.filter((annotation) => roomIds.has(annotation.roomId));
   }
   return next;
 }
@@ -1650,18 +1772,10 @@ export function findLayer(
 
 function withObjects(document: ModelDocument, objects: BoxObject[]): ModelDocument {
   const usedGroupIds = new Set(objects.map((object) => object.groupId).filter(Boolean));
-  return {
-    activeLayerId: document.activeLayerId,
-    arcs: document.arcs.map(cloneArcObject),
-    building: cloneBuildingStructure(document.building),
-    circles: document.circles.map(cloneCircleObject),
-    groups: document.groups.filter((group) => usedGroupIds.has(group.id)).map(cloneGroup),
-    layers: document.layers.map(cloneLayer),
-    lines: document.lines.map(cloneLineObject),
-    objects: objects.map(cloneBoxObject),
-    polylines: document.polylines.map(clonePolylineObject),
-    rooms: (document.rooms ?? []).map(cloneRoomObject),
-  };
+  const next = cloneDocument(document);
+  next.groups = next.groups.filter((group) => usedGroupIds.has(group.id));
+  next.objects = objects.map(cloneBoxObject);
+  return next;
 }
 
 function withLines(document: ModelDocument, lines: LineObject[]): ModelDocument {
@@ -1670,63 +1784,30 @@ function withLines(document: ModelDocument, lines: LineObject[]): ModelDocument 
     line.architecturalRole !== "wall" || foundationWallStories.get(line.foundationSupportWallId) !== line.storyId
   ) ? { ...line, foundationSupportWallId: null } : line);
   const roomWallKeys = new Set(normalizedLines.filter((line) => line.architecturalRole === "wall").map((line) => `${line.storyId}:${line.id}`));
-  return {
-    activeLayerId: document.activeLayerId,
-    arcs: document.arcs.map(cloneArcObject),
-    building: cloneBuildingStructure(document.building),
-    circles: document.circles.map(cloneCircleObject),
-    groups: document.groups.map(cloneGroup),
-    layers: document.layers.map(cloneLayer),
-    lines: normalizedLines.map(cloneLineObject),
-    objects: document.objects.map(cloneBoxObject),
-    polylines: document.polylines.map(clonePolylineObject),
-    rooms: (document.rooms ?? []).filter((room) => room.boundaryWallIds.every((wallId) => roomWallKeys.has(`${room.storyId}:${wallId}`))).map(cloneRoomObject),
-  };
+  const next = cloneDocument(document);
+  next.lines = normalizedLines.map(cloneLineObject);
+  next.rooms = next.rooms.filter((room) => room.boundaryWallIds.every((wallId) => roomWallKeys.has(`${room.storyId}:${wallId}`)));
+  const roomIds = new Set(next.rooms.map((room) => room.id));
+  next.roomAnnotations = next.roomAnnotations.filter((annotation) => roomIds.has(annotation.roomId));
+  return next;
 }
 
 function withPolylines(document: ModelDocument, polylines: PolylineObject[]): ModelDocument {
-  return {
-    activeLayerId: document.activeLayerId,
-    arcs: document.arcs.map(cloneArcObject),
-    building: cloneBuildingStructure(document.building),
-    circles: document.circles.map(cloneCircleObject),
-    groups: document.groups.map(cloneGroup),
-    layers: document.layers.map(cloneLayer),
-    lines: document.lines.map(cloneLineObject),
-    objects: document.objects.map(cloneBoxObject),
-    polylines: polylines.map(clonePolylineObject),
-    rooms: (document.rooms ?? []).map(cloneRoomObject),
-  };
+  const next = cloneDocument(document);
+  next.polylines = polylines.map(clonePolylineObject);
+  return next;
 }
 
 function withCircles(document: ModelDocument, circles: CircleObject[]): ModelDocument {
-  return {
-    activeLayerId: document.activeLayerId,
-    arcs: document.arcs.map(cloneArcObject),
-    building: cloneBuildingStructure(document.building),
-    circles: circles.map(cloneCircleObject),
-    groups: document.groups.map(cloneGroup),
-    layers: document.layers.map(cloneLayer),
-    lines: document.lines.map(cloneLineObject),
-    objects: document.objects.map(cloneBoxObject),
-    polylines: document.polylines.map(clonePolylineObject),
-    rooms: (document.rooms ?? []).map(cloneRoomObject),
-  };
+  const next = cloneDocument(document);
+  next.circles = circles.map(cloneCircleObject);
+  return next;
 }
 
 function withArcs(document: ModelDocument, arcs: ArcObject[]): ModelDocument {
-  return {
-    activeLayerId: document.activeLayerId,
-    arcs: arcs.map(cloneArcObject),
-    building: cloneBuildingStructure(document.building),
-    circles: document.circles.map(cloneCircleObject),
-    groups: document.groups.map(cloneGroup),
-    layers: document.layers.map(cloneLayer),
-    lines: document.lines.map(cloneLineObject),
-    objects: document.objects.map(cloneBoxObject),
-    polylines: document.polylines.map(clonePolylineObject),
-    rooms: (document.rooms ?? []).map(cloneRoomObject),
-  };
+  const next = cloneDocument(document);
+  next.arcs = arcs.map(cloneArcObject);
+  return next;
 }
 
 export function findBoxObject(
@@ -2168,6 +2249,7 @@ export function createWallFromLine(document: ModelDocument, lineId: string): Mod
     foundationSupportWallId: automaticFoundationSupportWall(document, candidate)?.id ?? null,
     foundationWallTypeId: null,
     end: { ...candidate.end, z: roughFloor },
+    layerId: STANDARD_LAYER_IDS.wall,
     name: candidate.name.startsWith("Wall ") ? candidate.name : uniqueObjectName(document, wallName),
     start: { ...candidate.start, z: roughFloor },
     wallExteriorSide: "left",
@@ -2192,6 +2274,7 @@ export function createFoundationWallFromLine(document: ModelDocument, lineId: st
     end: { ...candidate.end, z: roughFloor },
     foundationSupportWallId: null,
     foundationWallTypeId: foundationType.id,
+    layerId: STANDARD_LAYER_IDS["foundation-wall"],
     name: candidate.name.startsWith("Foundation Wall ") ? candidate.name : uniqueObjectName(document, foundationName),
     start: { ...candidate.start, z: roughFloor },
     wallExteriorSide: "left",
@@ -2262,6 +2345,7 @@ export function addWallOpening(
     headerTypeIdOverride: null,
     id,
     kind,
+    layerId: STANDARD_LAYER_IDS[kind],
     name: nextWallOpeningName(line, kind),
     wallOpeningTypeId: openingType.id,
   };
@@ -2502,7 +2586,7 @@ export function createFloorPlatformFromPolyline(document: ModelDocument, polylin
   const roughFloorElevation = calculateStoryElevations(document.building).find((candidate) => candidate.storyId === polyline.storyId)?.roughFloorElevation;
   if (roughFloorElevation === undefined) return null;
   return withPolylines(document, document.polylines.map((candidate) => candidate.id === polylineId
-    ? { ...clonePolylineObject(candidate), architecturalRole: "floor-platform", elevation: roughFloorElevation, name: candidate.name.startsWith("Floor Platform") ? candidate.name : uniqueObjectName(document, `Floor Platform ${candidate.name}`) }
+    ? { ...clonePolylineObject(candidate), architecturalRole: "floor-platform", elevation: roughFloorElevation, layerId: STANDARD_LAYER_IDS["floor-platform"], name: candidate.name.startsWith("Floor Platform") ? candidate.name : uniqueObjectName(document, `Floor Platform ${candidate.name}`) }
     : candidate));
 }
 
@@ -4337,22 +4421,11 @@ export function groupBoxObjects(
     id: `group-${String(number).padStart(2, "0")}`,
     name: `Group ${String(number).padStart(2, "0")}`,
   };
+  const next = cloneDocument(document);
+  next.groups = [...next.groups, group];
+  next.objects = next.objects.map((object) => ({ ...object, groupId: ids.has(object.id) ? group.id : object.groupId }));
   return {
-    document: {
-      activeLayerId: document.activeLayerId,
-      arcs: document.arcs.map(cloneArcObject),
-      building: cloneBuildingStructure(document.building),
-      circles: document.circles.map(cloneCircleObject),
-      groups: [...document.groups.map(cloneGroup), group],
-      layers: document.layers.map(cloneLayer),
-      lines: document.lines.map(cloneLineObject),
-      objects: document.objects.map((object) => ({
-        ...cloneBoxObject(object),
-        groupId: ids.has(object.id) ? group.id : object.groupId,
-      })),
-      polylines: document.polylines.map(clonePolylineObject),
-      rooms: (document.rooms ?? []).map(cloneRoomObject),
-    },
+    document: next,
     group: cloneGroup(group),
   };
 }
@@ -4366,21 +4439,10 @@ export function ungroupBoxObjects(
   if (!group || members.length < 2 || members.some((object) => !objectIsEditable(document, object))) {
     return null;
   }
-  return {
-    activeLayerId: document.activeLayerId,
-    arcs: document.arcs.map(cloneArcObject),
-    building: cloneBuildingStructure(document.building),
-    circles: document.circles.map(cloneCircleObject),
-    groups: document.groups.filter((candidate) => candidate.id !== groupId).map(cloneGroup),
-    layers: document.layers.map(cloneLayer),
-    lines: document.lines.map(cloneLineObject),
-    objects: document.objects.map((object) => ({
-      ...cloneBoxObject(object),
-      groupId: object.groupId === groupId ? null : object.groupId,
-    })),
-    polylines: document.polylines.map(clonePolylineObject),
-    rooms: (document.rooms ?? []).map(cloneRoomObject),
-  };
+  const next = cloneDocument(document);
+  next.groups = next.groups.filter((candidate) => candidate.id !== groupId);
+  next.objects = next.objects.map((object) => ({ ...object, groupId: object.groupId === groupId ? null : object.groupId }));
+  return next;
 }
 
 export function renameGroup(
@@ -4442,25 +4504,142 @@ export function addLayer(document: ModelDocument): {
   const layer: ModelLayer = {
     color: LAYER_COLORS[(number - 1) % LAYER_COLORS.length],
     id: `layer-${String(number).padStart(2, "0")}`,
+    lineStyle: "solid",
+    lineWeight: 1,
     locked: false,
     name: `Layer ${number}`,
+    printColor: LAYER_COLORS[(number - 1) % LAYER_COLORS.length],
     visible: true,
   };
+  const layers = [...document.layers.map(cloneLayer), layer];
   return {
     document: {
+      activeLayerSetId: document.activeLayerSetId,
       activeLayerId: layer.id,
+      activeSavedPlanViewId: document.activeSavedPlanViewId,
       arcs: document.arcs.map(cloneArcObject),
       building: cloneBuildingStructure(document.building),
       circles: document.circles.map(cloneCircleObject),
       groups: document.groups.map(cloneGroup),
-      layers: [...document.layers.map(cloneLayer), layer],
+      layers,
+      layerSets: document.layerSets.map((set) => ({ ...cloneLayerSet(set), layers: [...set.layers.map((state) => ({ ...state })), layerSetStateFromLayer(layer)] })),
       lines: document.lines.map(cloneLineObject),
       objects: document.objects.map(cloneBoxObject),
       polylines: document.polylines.map(clonePolylineObject),
       rooms: (document.rooms ?? []).map(cloneRoomObject),
+      roomAnnotations: document.roomAnnotations.map(cloneRoomAnnotation),
+      savedPlanViews: document.savedPlanViews.map(cloneSavedPlanView),
     },
     layer: cloneLayer(layer),
   };
+}
+
+function syncActiveLayerSet(document: ModelDocument): ModelDocument {
+  const next = cloneDocument(document);
+  next.layerSets = next.layerSets.map((set) => set.id === next.activeLayerSetId
+    ? { ...set, layers: next.layers.map(layerSetStateFromLayer) }
+    : set);
+  return next;
+}
+
+export function modelObjectCategory(value: BoxObject | LineObject | PolylineObject | CircleObject | ArcObject | RoomObject | RoomAnnotationObject | WallOpening): ModelObjectCategory {
+  if ("kind" in value && (value.kind === "door" || value.kind === "window")) return value.kind;
+  if ("roomId" in value) {
+    if (value.kind === "area") return "room-area";
+    if (value.kind === "interior-dimensions") return "room-interior-dimensions";
+    if (value.kind === "rough-ceiling-height") return "room-ceiling-height";
+    return "room-label";
+  }
+  if ("boundaryWallIds" in value) return "room";
+  if ("type" in value) {
+    if (value.type === "box") return "generic-object";
+    if (value.type === "circle") return "circle";
+    if (value.type === "arc") return "arc";
+    if (value.type === "polyline") return value.architecturalRole === "floor-platform" ? "floor-platform" : "polyline";
+    if (value.architecturalRole === "wall") return "wall";
+    if (value.architecturalRole === "foundation-wall") return "foundation-wall";
+  }
+  return "line";
+}
+
+export function updateLayerAppearance(document: ModelDocument, layerId: string, change: Partial<Pick<ModelLayer, "color" | "lineStyle" | "lineWeight" | "printColor">>): ModelDocument | null {
+  const layer = findLayer(document, layerId);
+  if (!layer) return null;
+  const colorValid = (value: string | undefined) => value === undefined || /^#[0-9a-f]{6}$/i.test(value);
+  if (!colorValid(change.color) || !colorValid(change.printColor) || change.lineStyle !== undefined && !(["solid", "dashed", "dotted", "center"] satisfies ModelLineStyle[]).includes(change.lineStyle) || change.lineWeight !== undefined && (!Number.isInteger(change.lineWeight) || change.lineWeight < 1 || change.lineWeight > 10)) return null;
+  const next = cloneDocument(document);
+  next.layers = next.layers.map((item) => item.id === layerId ? { ...item, ...change } : item);
+  return syncActiveLayerSet(next);
+}
+
+export function activateLayerSet(document: ModelDocument, layerSetId: string): ModelDocument | null {
+  if (!document.layerSets.some((set) => set.id === layerSetId)) return null;
+  const currentSaved = syncActiveLayerSet(document);
+  const target = currentSaved.layerSets.find((set) => set.id === layerSetId);
+  if (!target) return null;
+  const stateById = new Map(target.layers.map((state) => [state.id, state]));
+  const next = cloneDocument(currentSaved);
+  next.activeLayerSetId = layerSetId;
+  next.layers = next.layers.map((item) => ({ ...item, ...(stateById.get(item.id) ?? {}) }));
+  const active = next.layers.find((item) => item.id === next.activeLayerId);
+  if (!active || !active.visible || active.locked) {
+    next.activeLayerId = next.layers.find((item) => item.visible && !item.locked)?.id ?? DEFAULT_LAYER_ID;
+  }
+  return next;
+}
+
+export function duplicateLayerSet(document: ModelDocument, sourceId = document.activeLayerSetId): ModelDocument | null {
+  if (document.layerSets.length >= 32) return null;
+  const source = document.layerSets.find((set) => set.id === sourceId);
+  if (!source) return null;
+  let number = 1;
+  while (document.layerSets.some((set) => set.id === `layer-set-${String(number).padStart(2, "0")}`)) number += 1;
+  const nextSet: LayerSet = { id: `layer-set-${String(number).padStart(2, "0")}`, layers: document.layers.map(layerSetStateFromLayer), name: `Layer Set ${number}` };
+  const next = cloneDocument(document);
+  next.layerSets.push(nextSet);
+  next.activeLayerSetId = nextSet.id;
+  return next;
+}
+
+export function renameLayerSet(document: ModelDocument, layerSetId: string, name: string): ModelDocument | null {
+  const normalized = name.trim();
+  if (!normalized || normalized.length > 80 || !document.layerSets.some((set) => set.id === layerSetId) || document.layerSets.some((set) => set.id !== layerSetId && set.name.toLowerCase() === normalized.toLowerCase())) return null;
+  const next = cloneDocument(document);
+  next.layerSets = next.layerSets.map((set) => set.id === layerSetId ? { ...set, name: normalized } : set);
+  return next;
+}
+
+export function savePlanView(document: ModelDocument, input: Omit<SavedPlanView, "id">): ModelDocument | null {
+  if (!document.layerSets.some((set) => set.id === input.layerSetId) || !document.layers.some((layer) => layer.id === input.activeLayerId) || !document.building.stories.some((story) => story.id === input.storyId) || input.referenceStoryId !== null && !document.building.stories.some((story) => story.id === input.referenceStoryId) || !Number.isFinite(input.annotationScale) || input.annotationScale < 1 || input.annotationScale > 1200 || !input.name.trim() || input.name.trim().length > 80) return null;
+  let number = 1;
+  while (document.savedPlanViews.some((view) => view.id === `saved-view-${String(number).padStart(2, "0")}`)) number += 1;
+  const view: SavedPlanView = { ...input, id: `saved-view-${String(number).padStart(2, "0")}`, name: input.name.trim() };
+  const next = cloneDocument(document);
+  next.savedPlanViews.push(view);
+  next.activeSavedPlanViewId = view.id;
+  return next;
+}
+
+export function updateSavedPlanView(document: ModelDocument, viewId: string, change: Partial<Omit<SavedPlanView, "id">>): ModelDocument | null {
+  const current = document.savedPlanViews.find((view) => view.id === viewId);
+  if (!current) return null;
+  const updated = { ...current, ...change, name: change.name?.trim() || current.name };
+  if (!document.layerSets.some((set) => set.id === updated.layerSetId) || !document.layers.some((layer) => layer.id === updated.activeLayerId) || !document.building.stories.some((story) => story.id === updated.storyId) || updated.referenceStoryId !== null && !document.building.stories.some((story) => story.id === updated.referenceStoryId) || !Number.isFinite(updated.annotationScale) || updated.annotationScale < 1 || updated.annotationScale > 1200 || updated.name.length > 80) return null;
+  const next = cloneDocument(document);
+  next.savedPlanViews = next.savedPlanViews.map((view) => view.id === viewId ? updated : view);
+  return next;
+}
+
+export function activateSavedPlanView(document: ModelDocument, viewId: string): ModelDocument | null {
+  const view = document.savedPlanViews.find((candidate) => candidate.id === viewId);
+  if (!view) return null;
+  const withLayers = activateLayerSet(document, view.layerSetId);
+  if (!withLayers) return null;
+  const next = cloneDocument(withLayers);
+  next.activeSavedPlanViewId = view.id;
+  next.activeLayerId = next.layers.some((layer) => layer.id === view.activeLayerId && layer.visible && !layer.locked) ? view.activeLayerId : next.activeLayerId;
+  next.building.activeStoryId = view.storyId;
+  return next;
 }
 
 export function setActiveLayer(
@@ -4486,7 +4665,7 @@ export function toggleLayerVisibility(
   next.layers = next.layers.map((item) =>
     item.id === layerId ? { ...item, visible: !item.visible } : item,
   );
-  return next;
+  return syncActiveLayerSet(next);
 }
 
 export function toggleLayerLock(
@@ -4499,7 +4678,7 @@ export function toggleLayerLock(
   next.layers = next.layers.map((item) =>
     item.id === layerId ? { ...item, locked: !item.locked } : item,
   );
-  return next;
+  return syncActiveLayerSet(next);
 }
 
 export function assignObjectToLayer(
@@ -4537,7 +4716,7 @@ export function deleteLayer(
   layerId: string,
 ): ModelDocument | null {
   if (
-    layerId === DEFAULT_LAYER_ID ||
+    Object.values(STANDARD_LAYER_IDS).includes(layerId) ||
     layerId === document.activeLayerId ||
     !findLayer(document, layerId) ||
     document.objects.some((object) => object.layerId === layerId) ||
@@ -4545,10 +4724,14 @@ export function deleteLayer(
     document.polylines.some((polyline) => polyline.layerId === layerId) ||
     document.circles.some((circle) => circle.layerId === layerId) ||
     document.arcs.some((arc) => arc.layerId === layerId)
+    || document.rooms.some((room) => room.layerId === layerId)
+    || document.roomAnnotations.some((annotation) => annotation.layerId === layerId)
+    || document.lines.some((line) => line.wallOpenings.some((opening) => opening.layerId === layerId))
   ) {
     return null;
   }
   const next = cloneDocument(document);
   next.layers = next.layers.filter((layer) => layer.id !== layerId);
+  next.layerSets = next.layerSets.map((set) => ({ ...set, layers: set.layers.filter((layer) => layer.id !== layerId) }));
   return next;
 }

@@ -29,6 +29,7 @@ import {
   useState,
   useSyncExternalStore,
   type ChangeEvent,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import * as THREE from "three";
@@ -169,6 +170,8 @@ import {
   assignWallFoundationSupport,
   assignWallOpeningType,
   assignWallType,
+  activateLayerSet,
+  activateSavedPlanView,
   cloneDocument,
   arcIsEditable,
   circleIsEditable,
@@ -177,9 +180,9 @@ import {
   createFloorPlatformFromPolyline,
   createFoundationWallFromLine,
   createWallFromLine,
+  duplicateLayerSet,
   createBoundaryPolylineObject,
   continuePlatformOpening,
-  DEFAULT_LAYER_ID,
   NEW_PROJECT_DOCUMENT,
   deleteLayer,
   deleteArcObject,
@@ -226,6 +229,7 @@ import {
   renameGroup,
   renameArcObject,
   renameLayer,
+  renameLayerSet,
   renameLineObject,
   renamePolylineObject,
   renameBoxObject,
@@ -233,8 +237,11 @@ import {
   removeFloorPlatformRole,
   removeWallRole,
   refreshRoomsForStory,
+  ROOM_TYPES,
+  STANDARD_LAYER_IDS,
   resolveOpeningComponents,
   roomObjectIsValid,
+  roomAnnotationIsValid,
   rotateModelEntities,
   scaleModelEntities,
   stretchModelEntities,
@@ -246,6 +253,7 @@ import {
   setCircleLocked,
   setLineLocked,
   setPolylineLocked,
+  savePlanView,
   snapObjectMoveDistance,
   toggleLayerLock,
   toggleLayerVisibility,
@@ -260,6 +268,10 @@ import {
   updateLineObject,
   updateWallPlacement,
   updateWallOpening,
+  updateRoomAnnotation,
+  updateRoomObject,
+  updateLayerAppearance,
+  updateSavedPlanView,
   updatePolylineObjectGrip,
   updatePolylineObject,
   updatePolylineObjectVertex,
@@ -290,6 +302,7 @@ import {
   type ModelEntityRef,
   type OpeningComponentOverride,
   type RoomObject,
+  type RoomAnnotationObject,
   type RoomHorizontalPlatformSolution,
   type FoundationWallVerticalExtent,
   type WallVerticalExtent,
@@ -1327,6 +1340,9 @@ type ViewportProps = {
   onStretchCommit: (before: ModelDocument, next: ModelDocument, targets: CadStretchTarget[]) => void;
   onStretchFinishRequested: (canceled: boolean) => void;
   onStretchTargetsChange: (targets: CadStretchTarget[], mode: SelectionWindowMode) => void;
+  onRoomLabelOpen: (roomId: string) => void;
+  onRoomLabelTypeChange: (roomId: string, roomType: string) => void;
+  onRoomCeilingHeightChange: (roomId: string, height: number) => boolean;
   onViewChange: (view: ViewTarget) => void;
   selectedArcId: string | null;
   selectedFaceIndex: number | null;
@@ -1359,7 +1375,7 @@ type ViewportLine = {
   fillGeometry?: THREE.BufferGeometry;
   fillMaterial?: THREE.MeshBasicMaterial;
   geometry: THREE.BufferGeometry;
-  material: THREE.LineBasicMaterial;
+  material: THREE.LineDashedMaterial;
   line: THREE.Line;
 };
 
@@ -1778,7 +1794,7 @@ function disposeWallView(scene: THREE.Scene, view: WallView) {
 
 function createViewportLine(scene: THREE.Scene, lineId: string): ViewportLine {
   const geometry = new THREE.BufferGeometry();
-  const material = new THREE.LineBasicMaterial({ color: 0x88bff0, depthTest: false, toneMapped: false });
+  const material = new THREE.LineDashedMaterial({ color: 0x88bff0, dashSize: 1e9, depthTest: false, gapSize: 0, toneMapped: false });
   const line = new THREE.Line(geometry, material);
   line.renderOrder = 12;
   line.userData.lineId = lineId;
@@ -1792,6 +1808,15 @@ function updateViewportLine(view: ViewportLine, geometry: LineGeometry, zOffset 
     new THREE.Vector3(geometry.end.x, geometry.end.y, geometry.end.z + zOffset),
   ]);
   view.geometry.computeBoundingSphere();
+  view.line.computeLineDistances();
+}
+
+function applyLayerAppearanceToViewportLine(view: ViewportLine, layer: ReturnType<typeof findLayer>) {
+  if (!layer) return;
+  view.material.color.set(layer.color);
+  view.material.dashSize = layer.lineStyle === "solid" ? 1e9 : layer.lineStyle === "dotted" ? 1.25 : layer.lineStyle === "center" ? 12 : 6;
+  view.material.gapSize = layer.lineStyle === "solid" ? 0 : layer.lineStyle === "dotted" ? 2.5 : layer.lineStyle === "center" ? 3 : 4;
+  view.material.needsUpdate = true;
 }
 
 function disposeViewportLine(scene: THREE.Scene, view: ViewportLine) {
@@ -1823,6 +1848,7 @@ function updateViewportPolyline(view: ViewportLine, polyline: PolylineGeometry, 
   const points = polylinePathPoints(polyline).map((point) => new THREE.Vector3(point.x, point.y, polyline.elevation + zOffset));
   view.geometry.setFromPoints(points);
   view.geometry.computeBoundingSphere();
+  view.line.computeLineDistances();
   if (view.fill && view.fillGeometry) {
     const width = polyline.width ?? 0;
     const positions: number[] = [];
@@ -1869,6 +1895,7 @@ function updateViewportCircle(view: ViewportLine, circle: CircleGeometry, zOffse
   });
   view.geometry.setFromPoints(points);
   view.geometry.computeBoundingSphere();
+  view.line.computeLineDistances();
 }
 
 function createViewportArc(scene: THREE.Scene, arcId: string): ViewportLine {
@@ -1886,6 +1913,7 @@ function updateViewportArc(view: ViewportLine, arc: ArcGeometry, zOffset = 0.55)
   });
   view.geometry.setFromPoints(points);
   view.geometry.computeBoundingSphere();
+  view.line.computeLineDistances();
 }
 
 type LineGripSet = {
@@ -2412,6 +2440,9 @@ function Viewport({
   onStretchCommit,
   onStretchFinishRequested,
   onStretchTargetsChange,
+  onRoomLabelOpen,
+  onRoomLabelTypeChange,
+  onRoomCeilingHeightChange,
   onViewChange,
   selectedArcId,
   selectedFaceIndex,
@@ -2436,6 +2467,11 @@ function Viewport({
   const [selectionBox, setSelectionBox] = useState<{ end: ScreenPoint; mode: SelectionWindowMode; start: ScreenPoint } | null>(null);
   const [hoveredEntityKey, setHoveredEntityKey] = useState<string | null>(null);
   const [selectionCycle, setSelectionCycle] = useState<{ count: number; index: number; label: string; x: number; y: number } | null>(null);
+  const [activeRoomLabelId, setActiveRoomLabelId] = useState<string | null>(null);
+  const [activeRoomCeilingId, setActiveRoomCeilingId] = useState<string | null>(null);
+  const [roomCeilingDraft, setRoomCeilingDraft] = useState("");
+  const [roomLabelScreens, setRoomLabelScreens] = useState<Array<{ roomId: string; x: number; y: number }>>([]);
+  const roomLabelScreenSignatureRef = useRef("");
   const objectViewsRef = useRef(new Map<string, ViewportObject>());
   const lineViewsRef = useRef(new Map<string, ViewportLine>());
   const wallViewsRef = useRef(new Map<string, WallView>());
@@ -6488,6 +6524,21 @@ function Viewport({
           handle.scale.setScalar(worldUnitsPerPixel * (handle.userData.screenPixels ?? 10));
         });
       }
+      if (viewTargetRef.current.id === "top") {
+        const activeStoryId = documentRef.current.building.activeStoryId;
+        const screens = documentRef.current.roomAnnotations.filter((annotation) => annotation.kind === "label" && annotation.storyId === activeStoryId && annotation.visible && findLayer(documentRef.current, annotation.layerId)?.visible).map((annotation) => {
+          const projected = new THREE.Vector3(annotation.position.x, annotation.position.y, activeElevationRef.current + 1).project(camera);
+          return { roomId: annotation.roomId, x: Math.round((projected.x * 0.5 + 0.5) * renderer.domElement.clientWidth), y: Math.round((-projected.y * 0.5 + 0.5) * renderer.domElement.clientHeight) };
+        });
+        const signature = screens.map((item) => `${item.roomId}:${item.x}:${item.y}`).join("|");
+        if (signature !== roomLabelScreenSignatureRef.current) {
+          roomLabelScreenSignatureRef.current = signature;
+          setRoomLabelScreens(screens);
+        }
+      } else if (roomLabelScreenSignatureRef.current) {
+        roomLabelScreenSignatureRef.current = "";
+        setRoomLabelScreens([]);
+      }
       renderer.render(scene, camera);
     };
     render();
@@ -6667,7 +6718,9 @@ function Viewport({
         lineViewsRef.current.set(line.id, view);
       }
       updateViewportLine(view, line);
-      view.line.visible = findLayer(document, line.layerId)?.visible ?? true;
+      const layer = findLayer(document, line.layerId);
+      applyLayerAppearanceToViewportLine(view, layer);
+      view.line.visible = layer?.visible ?? true;
     });
     const currentWallIds = new Set(document.lines.filter((line) => line.architecturalRole !== null).map((line) => line.id));
     wallViewsRef.current.forEach((view, lineId) => {
@@ -6691,6 +6744,11 @@ function Viewport({
       const vertical = wallVerticalExtent(document, line);
       const wallType = document.building.wallTypes.find((candidate) => candidate.id === line.wallTypeId);
       if (vertical && wallType) updateWallView(view, line, vertical, wallType, wallJoinPlan, wallLinesById, wallTypesById, openingTypesById, headerTypesById, document.building.wallFraming, viewTarget);
+      const openingById = new Map(line.wallOpenings.map((opening) => [opening.id, opening]));
+      [...view.meshes.filter((mesh) => Boolean(mesh.userData.openingComponentRole)), ...view.productMeshes].forEach((mesh) => {
+        const opening = openingById.get(String(mesh.userData.wallOpeningId ?? ""));
+        if (opening) mesh.visible = findLayer(document, opening.layerId)?.visible ?? true;
+      });
       view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
@@ -6722,6 +6780,7 @@ function Viewport({
         polylineViewsRef.current.set(polyline.id, view);
       }
       updateViewportPolyline(view, polyline);
+      applyLayerAppearanceToViewportLine(view, findLayer(document, polyline.layerId));
       const visible = findLayer(document, polyline.layerId)?.visible ?? true;
       view.line.visible = visible;
       if (view.fill) view.fill.visible = visible && (polyline.width ?? 0) >= 1 / 16;
@@ -6778,6 +6837,7 @@ function Viewport({
         circleViewsRef.current.set(circle.id, view);
       }
       updateViewportCircle(view, circle);
+      applyLayerAppearanceToViewportLine(view, findLayer(document, circle.layerId));
       view.line.visible = findLayer(document, circle.layerId)?.visible ?? true;
     });
     const currentArcIds = new Set(document.arcs.map((arc) => arc.id));
@@ -6794,6 +6854,7 @@ function Viewport({
         arcViewsRef.current.set(arc.id, view);
       }
       updateViewportArc(view, arc);
+      applyLayerAppearanceToViewportLine(view, findLayer(document, arc.layerId));
       view.line.visible = findLayer(document, arc.layerId)?.visible ?? true;
     });
     const selectedObject = findBoxObject(document, selectedObjectId);
@@ -7095,6 +7156,35 @@ function Viewport({
         </div>
       ) : null}
       <div className="viewport-badge">{viewTarget.label}</div>
+      {roomLabelScreens.map((screen) => {
+        const room = document.rooms.find((candidate) => candidate.id === screen.roomId);
+        if (!room) return null;
+        const story = document.building.stories.find((candidate) => candidate.id === room.storyId);
+        const storyElevation = calculateStoryElevations(document.building).find((item) => item.storyId === room.storyId)?.roughFloorElevation ?? 0;
+        const effective = story ? effectiveRoomSettings(room, story, storyElevation) : null;
+        const annotationVisible = (kind: RoomAnnotationObject["kind"]) => {
+          const annotation = document.roomAnnotations.find((candidate) => candidate.roomId === room.id && candidate.kind === kind);
+          return Boolean(annotation?.visible && findLayer(document, annotation.layerId)?.visible);
+        };
+        const xs = room.boundary.vertices.map((point) => point.x);
+        const ys = room.boundary.vertices.map((point) => point.y);
+        const width = Math.max(...xs) - Math.min(...xs);
+        const depth = Math.max(...ys) - Math.min(...ys);
+        const annotationScale = document.savedPlanViews.find((candidate) => candidate.id === document.activeSavedPlanViewId)?.annotationScale ?? 48;
+        const labelScale = Math.max(0.7, Math.min(1.45, 48 / annotationScale));
+        return <div className="room-label-object" key={room.id} style={{ left: screen.x, top: screen.y, "--room-label-scale": labelScale } as CSSProperties} onDoubleClick={() => onRoomLabelOpen(room.id)}>
+          {activeRoomLabelId === room.id ? <select value={room.roomType} onBlur={() => setActiveRoomLabelId(null)} onChange={(event) => { onRoomLabelTypeChange(room.id, event.target.value); setActiveRoomLabelId(null); }} aria-label={`Room type for ${room.name}`}>{ROOM_TYPES.map((type) => <option value={type} key={type}>{type}</option>)}</select> : <button type="button" onClick={() => setActiveRoomLabelId(room.id)}>{room.name}</button>}
+          {annotationVisible("area") ? <span>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 1 })} SQ FT</span> : null}
+          {annotationVisible("interior-dimensions") ? <span>{formatArchitectural(width)} × {formatArchitectural(depth)}</span> : null}
+          {annotationVisible("rough-ceiling-height") && effective ? activeRoomCeilingId === room.id ? <input className="room-label-ceiling-input" value={roomCeilingDraft} onChange={(event) => setRoomCeilingDraft(event.target.value)} onBlur={() => setActiveRoomCeilingId(null)} onKeyDown={(event) => {
+            if (event.key === "Escape") setActiveRoomCeilingId(null);
+            if (event.key === "Enter") {
+              const height = parseArchitectural(roomCeilingDraft);
+              if (height !== null && onRoomCeilingHeightChange(room.id, height)) setActiveRoomCeilingId(null);
+            }
+          }} aria-label={`Rough ceiling height for ${room.name}`} /> : <span className="room-label-ceiling" title="Double-click to edit the Room rough ceiling height" onDoubleClick={(event) => { event.stopPropagation(); setRoomCeilingDraft(formatArchitectural(effective.roughCeilingHeight)); setActiveRoomCeilingId(room.id); }}>CLG {formatArchitectural(effective.roughCeilingHeight)}</span> : null}
+        </div>;
+      })}
       <NavigationCube
         orbitRef={cubeOrbitRef}
         orientationRef={cameraOrientationRef}
@@ -7513,6 +7603,11 @@ function LayerNameField({
       spellCheck={false}
     />
   );
+}
+
+function LayerColorField({ color, label, onCommit }: { color: string; label: string; onCommit: (color: string) => void }) {
+  const [draft, setDraft] = useState(color);
+  return <input className="layer-color-input" type="color" value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => onCommit(draft)} aria-label={label} title={label} />;
 }
 
 function MoveObjectControl({
@@ -9340,6 +9435,7 @@ function OpeningTypePreview({ openingType, wallType }: { openingType: WallOpenin
     headerTypeIdOverride: null,
     id: "opening-type-preview",
     kind: openingType.kind,
+    layerId: openingType.kind === "door" ? "layer-doors" : "layer-windows",
     name: `${openingType.name} Preview`,
     roughHeight: openingType.roughHeight,
     roughWidth: openingType.roughWidth,
@@ -9363,7 +9459,7 @@ function OpeningTypePreview({ openingType, wallType }: { openingType: WallOpenin
     wallExteriorSide: "left",
     wallJoinPriority: 0,
     wallOpenings: [opening],
-    wallReferenceLine: "main-center",
+    wallReferenceLine: "center-main",
     wallStartJoinMode: "square",
     wallTypeId: wallType.id,
   };
@@ -9833,16 +9929,19 @@ type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" 
 
 function RoomManagerDialog({
   document,
+  initialRoomId,
   onCancel,
   onSave,
 }: {
   document: ModelDocument;
+  initialRoomId?: string | null;
   onCancel: () => void;
   onSave: (document: ModelDocument) => void;
 }) {
   const [draft, setDraft] = useState(() => cloneDocument(document));
-  const [selectedStoryId, setSelectedStoryId] = useState(document.building.activeStoryId);
-  const [selectedRoomId, setSelectedRoomId] = useState(document.rooms.find((room) => room.storyId === document.building.activeStoryId)?.id ?? null);
+  const initialRoom = document.rooms.find((room) => room.id === initialRoomId);
+  const [selectedStoryId, setSelectedStoryId] = useState(initialRoom?.storyId ?? document.building.activeStoryId);
+  const [selectedRoomId, setSelectedRoomId] = useState(initialRoom?.id ?? document.rooms.find((room) => room.storyId === document.building.activeStoryId)?.id ?? null);
   const [error, setError] = useState("");
   useEffect(() => {
     const closeWithEscape = (event: KeyboardEvent) => {
@@ -9860,10 +9959,16 @@ function RoomManagerDialog({
   const storyElevation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id)?.roughFloorElevation ?? 0;
   const effective = selected ? effectiveRoomSettings(selected, story, storyElevation) : null;
   const generatedPlatforms = selected ? roomHorizontalPlatformSolution(draft, selected) : null;
+  const annotations = selected ? draft.roomAnnotations.filter((annotation) => annotation.roomId === selected.id) : [];
   const perimeterFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "perimeter-main-exterior").length ?? 0;
   const foundationFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "foundation-sill-exterior").length ?? 0;
   const sharedFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "shared-wall-reference").length ?? 0;
   const formatRoomArea = (room: RoomObject) => `${(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft`;
+  const roomDimensions = (room: RoomObject) => {
+    const xs = room.boundary.vertices.map((point) => point.x);
+    const ys = room.boundary.vertices.map((point) => point.y);
+    return { width: Math.max(...xs) - Math.min(...xs), depth: Math.max(...ys) - Math.min(...ys) };
+  };
   const selectStory = (storyId: string) => {
     setSelectedStoryId(storyId);
     setSelectedRoomId(draft.rooms.find((room) => room.storyId === storyId)?.id ?? null);
@@ -9873,6 +9978,12 @@ function RoomManagerDialog({
     if (!selected) return;
     setDraft((current) => ({ ...cloneDocument(current), rooms: current.rooms.map((room) => room.id === selected.id ? { ...room, ...change } : room) }));
     setError("");
+  };
+  const replaceAnnotation = (kind: RoomAnnotationObject["kind"], change: Partial<Pick<RoomAnnotationObject, "visible">>) => {
+    const annotation = annotations.find((candidate) => candidate.kind === kind);
+    if (!annotation) return;
+    const next = updateRoomAnnotation(draft, annotation.id, change);
+    if (next) setDraft(next);
   };
   const detect = () => {
     const next = refreshRoomsForStory(draft, story.id);
@@ -9957,7 +10068,7 @@ function RoomManagerDialog({
   };
   const save = () => {
     const next = cloneDocument(draft);
-    if (next.rooms.some((room) => !roomObjectIsValid(room, next)) || !platformOpeningContinuityIsValid(next)) {
+    if (next.rooms.some((room) => !roomObjectIsValid(room, next)) || next.roomAnnotations.some((annotation) => !roomAnnotationIsValid(annotation, next)) || !platformOpeningContinuityIsValid(next)) {
       setError("Check the Room settings and make sure every connected platform opening stays aligned through adjacent Stories.");
       return;
     }
@@ -9987,9 +10098,29 @@ function RoomManagerDialog({
           <main className="story-editor">
             {selected && effective ? <>
               <section className="story-editor-summary room-editor-summary">
+                <label><span>Room type</span><select value={selected.roomType} onChange={(event) => replaceSelected({ roomType: event.target.value, name: selected.name === "Unassigned" || ROOM_TYPES.includes(selected.name as (typeof ROOM_TYPES)[number]) ? event.target.value : selected.name })}>{ROOM_TYPES.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
                 <label><span>Room name</span><input value={selected.name} maxLength={120} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
                 <label><span>Enclosed area</span><output>{formatRoomArea(selected)}</output></label>
                 <label><span>Boundary</span><output>{selected.boundaryWallIds.length} Walls</output></label>
+              </section>
+              <section className="room-annotation-settings" aria-label="Room label and annotation settings">
+                <header><div><strong>Room Label</strong><span>Linked annotations with independent layer controls</span></div></header>
+                <div className="room-annotation-grid">
+                  {(["label", "area", "interior-dimensions", "rough-ceiling-height"] as const).map((kind) => {
+                    const annotation = annotations.find((candidate) => candidate.kind === kind);
+                    const label = kind === "label" ? "Room name" : kind === "area" ? "Standard area" : kind === "interior-dimensions" ? "Interior dimensions" : "Rough ceiling height";
+                    const layer = annotation ? findLayer(draft, annotation.layerId) : null;
+                    return <label key={kind}><input type="checkbox" aria-label={`Show ${label}`} checked={Boolean(annotation?.visible)} onChange={(event) => replaceAnnotation(kind, { visible: event.target.checked })} /><span><strong>{label}</strong><small>{layer?.name ?? "Missing layer"}</small></span></label>;
+                  })}
+                </div>
+                <div className="room-annotation-preview">
+                  <strong>{selected.name}</strong>
+                  <span>{formatRoomArea(selected)}</span>
+                  <span>{formatArchitectural(roomDimensions(selected).width)} × {formatArchitectural(roomDimensions(selected).depth)}</span>
+                  <span>CLG {formatArchitectural(effective.roughCeilingHeight)}</span>
+                </div>
+                <StoryDimensionInput key={`${selected.id}:label-ceiling:${effective.roughCeilingHeight}`} label="Ceiling label value" value={effective.roughCeilingHeight} onChange={(roughCeilingHeightOverride) => replaceSelected({ roughCeilingHeightOverride })} />
+                <p>Editing the ceiling label creates a Room override. Story defaults remain unchanged.</p>
               </section>
               <section className="room-height-settings">
                 <StoryDimensionInput signed key={`${selected.id}:floor:${selected.roughFloorOffset}`} label="Rough floor offset" value={selected.roughFloorOffset} onChange={(roughFloorOffset) => replaceSelected({ roughFloorOffset })} />
@@ -10078,6 +10209,56 @@ function RoomManagerDialog({
   );
 }
 
+function NameEntryDialog({
+  description,
+  initialValue,
+  label,
+  onCancel,
+  onSubmit,
+  submitLabel,
+  title,
+}: {
+  description: string;
+  initialValue: string;
+  label: string;
+  onCancel: () => void;
+  onSubmit: (name: string) => string | null;
+  submitLabel: string;
+  title: string;
+}) {
+  const [draft, setDraft] = useState(initialValue);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+
+  const submit = () => {
+    const message = onSubmit(draft);
+    if (message) setError(message);
+  };
+
+  return (
+    <div className="story-manager-backdrop name-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="name-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="name-entry-title">
+        <header><div><strong id="name-entry-title">{title}</strong><span>{description}</span></div><button type="button" onClick={onCancel} aria-label={`Close ${title}`}>×</button></header>
+        <form onSubmit={(event) => { event.preventDefault(); submit(); }}>
+          <label><span>{label}</span><input value={draft} maxLength={80} onChange={(event) => { setDraft(event.target.value); setError(""); }} /></label>
+          {error ? <p role="alert">{error}</p> : null}
+          <footer><button type="button" onClick={onCancel}>Cancel</button><button type="submit" className="story-save">{submitLabel}</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function ModelBuilderApp() {
   const [editor, dispatch] = useReducer(historyReducer, {
     future: [],
@@ -10102,6 +10283,12 @@ export function ModelBuilderApp() {
   const [productLibraryOpen, setProductLibraryOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
+  const [roomManagerInitialRoomId, setRoomManagerInitialRoomId] = useState<string | null>(null);
+  const [nameEntryDialog, setNameEntryDialog] = useState<null | {
+    initialValue: string;
+    kind: "rename-layer-set" | "save-plan-view";
+    targetId?: string;
+  }>(null);
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
   const [showStartGuide, setShowStartGuide] = useState(true);
   const [topMenu, setTopMenu] = useState<"edit" | "file" | "help" | "program" | "tools" | "view" | "window" | null>(null);
@@ -10347,6 +10534,8 @@ export function ModelBuilderApp() {
         : "Selection geometry";
   const selectedLayer = findLayer(editor.present, selectedBox?.layerId ?? null);
   const activeLayer = findLayer(editor.present, editor.present.activeLayerId);
+  const activeLayerSet = editor.present.layerSets.find((set) => set.id === editor.present.activeLayerSetId) ?? editor.present.layerSets[0];
+  const activeSavedPlanView = editor.present.savedPlanViews.find((view) => view.id === editor.present.activeSavedPlanViewId) ?? editor.present.savedPlanViews[0];
   const filteredLayers = editor.present.layers.filter((layer) =>
     layer.name.toLocaleLowerCase().includes(layerFilter.trim().toLocaleLowerCase()),
   );
@@ -13254,6 +13443,32 @@ export function ModelBuilderApp() {
     setFileNotice({ text: `${count} Room${count === 1 ? "" : "s"} saved for the active Story.`, tone: "success" });
   }, []);
 
+  const changeRoomTypeFromLabel = useCallback((roomId: string, roomType: string) => {
+    const room = editor.present.rooms.find((candidate) => candidate.id === roomId);
+    if (!room) return;
+    const nameFollowsType = room.name === "Unassigned" || room.name === room.roomType;
+    const next = updateRoomObject(editor.present, roomId, { roomType, ...(nameFollowsType ? { name: roomType } : {}) });
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${roomType} assigned. Double-click the label for full Room settings.`, tone: "success" });
+  }, [editor.present]);
+
+  const openRoomFromLabel = useCallback((roomId: string) => {
+    setRoomManagerInitialRoomId(roomId);
+    setRoomManagerOpen(true);
+  }, []);
+
+  const changeRoomCeilingFromLabel = useCallback((roomId: string, height: number) => {
+    const next = updateRoomObject(editor.present, roomId, { roughCeilingHeightOverride: snapToSixteenth(height) });
+    if (!next) {
+      setFileNotice({ text: "Enter a supported rough ceiling height between 6 and 20 feet.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: "Room ceiling override updated from the plan label; the Story default was not changed.", tone: "success" });
+    return true;
+  }, [editor.present]);
+
   const activateLayer = useCallback((layerId: string) => {
     const next = setActiveLayer(editor.present, layerId);
     if (!next) return;
@@ -13292,6 +13507,81 @@ export function ModelBuilderApp() {
     dispatch({ type: "commit", next });
     return true;
   }, [editor.present]);
+
+  const changeLayerAppearance = useCallback((layerId: string, change: Parameters<typeof updateLayerAppearance>[2]) => {
+    const next = updateLayerAppearance(editor.present, layerId, change);
+    if (next) dispatch({ type: "commit", next });
+  }, [editor.present]);
+
+  const selectLayerSet = useCallback((layerSetId: string) => {
+    const next = activateLayerSet(editor.present, layerSetId);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setSelectionForDocument(next, null);
+    setFileNotice({ text: `${next.layerSets.find((set) => set.id === layerSetId)?.name ?? "Layer Set"} is active.`, tone: "success" });
+  }, [editor.present, setSelectionForDocument]);
+
+  const copyActiveLayerSet = useCallback(() => {
+    const next = duplicateLayerSet(editor.present);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setExplorerTab("layers");
+    setFileNotice({ text: "Created a reusable Layer Set from the current display.", tone: "success" });
+  }, [editor.present]);
+
+  const renameActiveLayerSet = useCallback(() => {
+    if (!activeLayerSet) return;
+    setNameEntryDialog({ initialValue: activeLayerSet.name, kind: "rename-layer-set", targetId: activeLayerSet.id });
+  }, [activeLayerSet]);
+
+  const createSavedPlanView = useCallback(() => {
+    setNameEntryDialog({ initialValue: `Plan View ${editor.present.savedPlanViews.length + 1}`, kind: "save-plan-view" });
+  }, [editor.present.savedPlanViews.length]);
+
+  const submitNameEntry = useCallback((name: string) => {
+    const normalized = name.trim();
+    if (!normalized) return "Enter a name.";
+    if (!nameEntryDialog) return "This naming action is no longer available.";
+    if (nameEntryDialog.kind === "rename-layer-set") {
+      const next = renameLayerSet(editor.present, nameEntryDialog.targetId ?? "", normalized);
+      if (!next) return "Use a unique Layer Set name with 80 characters or fewer.";
+      dispatch({ type: "commit", next });
+      setNameEntryDialog(null);
+      setFileNotice({ text: `${normalized} is now the active Layer Set.`, tone: "success" });
+      return null;
+    }
+    const next = savePlanView(editor.present, {
+      activeLayerId: editor.present.activeLayerId,
+      annotationScale: activeSavedPlanView?.annotationScale ?? 48,
+      layerSetId: editor.present.activeLayerSetId,
+      name: normalized,
+      referenceStoryId: activeSavedPlanView?.referenceStoryId ?? null,
+      storyId: editor.present.building.activeStoryId,
+      viewMode: viewTarget.id === "front" || viewTarget.id === "right" || viewTarget.id === "perspective" ? viewTarget.id : "top",
+    });
+    if (!next) return "Use a valid Plan View name with 80 characters or fewer.";
+    dispatch({ type: "commit", next });
+    setNameEntryDialog(null);
+    setFileNotice({ text: `${normalized} saved with the current Story, Layer Set, scale, and view direction.`, tone: "success" });
+    return null;
+  }, [activeSavedPlanView, editor.present, nameEntryDialog, viewTarget.id]);
+
+  const selectSavedPlanView = useCallback((viewId: string) => {
+    const view = editor.present.savedPlanViews.find((candidate) => candidate.id === viewId);
+    const next = activateSavedPlanView(editor.present, viewId);
+    if (!view || !next) return;
+    dispatch({ type: "commit", next });
+    setViewTarget(VIEW_PRESETS[view.viewMode]);
+    setDrawingPlaneFromBuilding(next.building);
+    setSelectionForDocument(next, null);
+    setFileNotice({ text: `${view.name} restored.`, tone: "success" });
+  }, [editor.present, setDrawingPlaneFromBuilding, setSelectionForDocument]);
+
+  const changeAnnotationScale = useCallback((annotationScale: number) => {
+    if (!activeSavedPlanView) return;
+    const next = updateSavedPlanView(editor.present, activeSavedPlanView.id, { annotationScale });
+    if (next) dispatch({ type: "commit", next });
+  }, [activeSavedPlanView, editor.present]);
 
   const removeLayer = useCallback((layerId: string) => {
     const layer = findLayer(editor.present, layerId);
@@ -14204,6 +14494,17 @@ export function ModelBuilderApp() {
         <div className="ribbon-reserve"><span>Reserved for future {activeRibbonTab.toLowerCase()} tools</span></div>
       </section>
 
+      <section className="plan-view-toolbar" aria-label="Plan view controls">
+        <label><span>Annotation Scale</span><select className="annotation-scale-select" value={activeSavedPlanView?.annotationScale ?? 48} onChange={(event) => changeAnnotationScale(Number(event.target.value))}><option value={96}>1/8&quot; = 1&apos;-0&quot;</option><option value={48}>1/4&quot; = 1&apos;-0&quot;</option><option value={24}>1/2&quot; = 1&apos;-0&quot;</option><option value={12}>1&quot; = 1&apos;-0&quot;</option></select></label>
+        <label><span>Layer Set</span><select value={editor.present.activeLayerSetId} onChange={(event) => selectLayerSet(event.target.value)}>{editor.present.layerSets.map((set) => <option value={set.id} key={set.id}>{set.name}</option>)}</select></label>
+        <button type="button" onClick={copyActiveLayerSet}>Copy Set</button>
+        <button type="button" onClick={renameActiveLayerSet}>Rename Set</button>
+        <span className="plan-view-toolbar-divider" />
+        <label><span>Saved Plan View</span><select value={editor.present.activeSavedPlanViewId} onChange={(event) => selectSavedPlanView(event.target.value)}>{editor.present.savedPlanViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select></label>
+        <button type="button" onClick={createSavedPlanView}>Save Current View</button>
+        <output>{activeStory.name} · {viewTarget.id === "top" ? "Plan" : viewTarget.label}</output>
+      </section>
+
       <nav className="document-tabs" aria-label="Open projects">
         <button className="document-menu" type="button" aria-label="Project menu">☰</button>
         <button className="document-tab is-active" type="button"><span>{normalizedProjectName}</span>{isDirty ? <b>•</b> : null}<i>×</i></button>
@@ -14641,6 +14942,9 @@ export function ModelBuilderApp() {
           onStretchCommit={commitStretchMode}
           onStretchFinishRequested={finishStretchMode}
           onStretchTargetsChange={selectStretchTargets}
+          onRoomLabelOpen={openRoomFromLabel}
+          onRoomLabelTypeChange={changeRoomTypeFromLabel}
+          onRoomCeilingHeightChange={changeRoomCeilingFromLabel}
           onViewChange={changeViewTarget}
           onDragStatus={setDragStatus}
           onExactFaceMove={moveFaceByExactGripDistance}
@@ -14760,8 +15064,11 @@ export function ModelBuilderApp() {
               <div className="layer-grid" role="table" aria-label="Layer properties grid">
                 <div className="layer-column-headings" role="row">
                   <span role="columnheader" title="Current layer">C</span>
-                  <span role="columnheader">Color</span>
+                  <span role="columnheader">Display</span>
                   <span role="columnheader">Name</span>
+                  <span role="columnheader">Line</span>
+                  <span role="columnheader">Wt</span>
+                  <span role="columnheader">Print</span>
                   <span role="columnheader" title="Object count">Objects</span>
                   <span role="columnheader">Show</span>
                   <span role="columnheader">Lock</span>
@@ -14769,18 +15076,22 @@ export function ModelBuilderApp() {
                 </div>
                 <div className="layer-list" role="rowgroup">
                 {filteredLayers.map((layer) => {
-                  const objectCount = editor.present.objects.filter((object) => object.layerId === layer.id).length + editor.present.lines.filter((line) => line.layerId === layer.id).length + editor.present.polylines.filter((polyline) => polyline.layerId === layer.id).length + editor.present.circles.filter((circle) => circle.layerId === layer.id).length + editor.present.arcs.filter((arc) => arc.layerId === layer.id).length;
+                  const objectCount = editor.present.objects.filter((object) => object.layerId === layer.id).length + editor.present.lines.filter((line) => line.layerId === layer.id).length + editor.present.lines.flatMap((line) => line.wallOpenings).filter((opening) => opening.layerId === layer.id).length + editor.present.polylines.filter((polyline) => polyline.layerId === layer.id).length + editor.present.circles.filter((circle) => circle.layerId === layer.id).length + editor.present.arcs.filter((arc) => arc.layerId === layer.id).length + editor.present.rooms.filter((room) => room.layerId === layer.id).length + editor.present.roomAnnotations.filter((annotation) => annotation.layerId === layer.id).length;
                   const isActive = layer.id === editor.present.activeLayerId;
-                  const canDelete = layer.id !== DEFAULT_LAYER_ID && !isActive && objectCount === 0;
+                  const isStandard = Object.values(STANDARD_LAYER_IDS).includes(layer.id);
+                  const canDelete = !isStandard && !isActive && objectCount === 0;
                   return (
                     <div className={isActive ? "layer-row is-active" : "layer-row"} key={layer.id} role="row">
                       <div className="layer-cell current-cell" role="cell"><button className="make-current" type="button" onClick={() => activateLayer(layer.id)} aria-label={`Make ${layer.name} current`} title={isActive ? "Current layer" : "Make current"}>{isActive ? "✓" : "○"}</button></div>
-                      <div className="layer-cell color-cell" role="cell"><span className="layer-swatch" style={{ backgroundColor: layer.color }} /></div>
+                      <div className="layer-cell color-cell" role="cell"><LayerColorField key={`${layer.id}:display:${layer.color}`} color={layer.color} label={`${layer.name} display color`} onCommit={(color) => changeLayerAppearance(layer.id, { color })} /></div>
                       <div className="layer-cell name-cell" role="cell"><LayerNameField key={`${layer.id}:${layer.name}`} name={layer.name} onRename={(name) => renameProjectLayer(layer.id, name)} /></div>
+                      <div className="layer-cell style-cell" role="cell"><select value={layer.lineStyle} onChange={(event) => changeLayerAppearance(layer.id, { lineStyle: event.target.value as typeof layer.lineStyle })} aria-label={`${layer.name} line style`}><option value="solid">Solid</option><option value="dashed">Dash</option><option value="dotted">Dot</option><option value="center">Center</option></select></div>
+                      <div className="layer-cell weight-cell" role="cell"><input type="number" min="1" max="10" value={layer.lineWeight} onChange={(event) => changeLayerAppearance(layer.id, { lineWeight: Number(event.target.value) })} aria-label={`${layer.name} line weight`} /></div>
+                      <div className="layer-cell color-cell" role="cell"><LayerColorField key={`${layer.id}:print:${layer.printColor}`} color={layer.printColor} label={`${layer.name} print color`} onCommit={(printColor) => changeLayerAppearance(layer.id, { printColor })} /></div>
                       <div className="layer-cell count-cell" role="cell">{objectCount}</div>
                       <div className="layer-cell toggle-cell" role="cell"><button className={layer.visible ? "layer-toggle is-on" : "layer-toggle"} type="button" onClick={() => changeLayerVisibility(layer.id)} disabled={isActive} aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`} title={isActive ? "Current layer must stay visible" : layer.visible ? "Hide layer" : "Show layer"}>{layer.visible ? "●" : "○"}</button></div>
                       <div className="layer-cell toggle-cell" role="cell"><button className={layer.locked ? "layer-toggle is-locked" : "layer-toggle"} type="button" onClick={() => changeLayerLock(layer.id)} disabled={isActive} aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`} title={isActive ? "Current layer must stay unlocked" : layer.locked ? "Unlock layer" : "Lock layer"}>{layer.locked ? "◆" : "◇"}</button></div>
-                      <div className="layer-cell delete-cell" role="cell"><button className="delete-layer" type="button" onClick={() => removeLayer(layer.id)} disabled={!canDelete} aria-label={`Delete ${layer.name}`} title={canDelete ? "Delete empty layer" : "Only empty, non-current custom layers can be deleted"}>×</button></div>
+                      <div className="layer-cell delete-cell" role="cell"><button className="delete-layer" type="button" onClick={() => removeLayer(layer.id)} disabled={!canDelete} aria-label={`Delete ${layer.name}`} title={canDelete ? "Delete empty layer" : isStandard ? "Standard object layers remain available" : "Only empty, non-current custom layers can be deleted"}>×</button></div>
                     </div>
                   );
                 })}
@@ -14852,7 +15163,8 @@ export function ModelBuilderApp() {
       {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
       {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onAssetUpdated={updateLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onCreateObjectType={createLibraryObjectType} onManageOpeningTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
-      {roomManagerOpen ? <RoomManagerDialog document={editor.present} onCancel={() => setRoomManagerOpen(false)} onSave={applyRoomSettings} /> : null}
+      {roomManagerOpen ? <RoomManagerDialog document={editor.present} initialRoomId={roomManagerInitialRoomId} onCancel={() => { setRoomManagerOpen(false); setRoomManagerInitialRoomId(null); }} onSave={(next) => { setRoomManagerInitialRoomId(null); applyRoomSettings(next); }} /> : null}
+      {nameEntryDialog ? <NameEntryDialog description={nameEntryDialog.kind === "rename-layer-set" ? "Use a clear name for this reusable layer display configuration." : "This view will remember the Story, Layer Set, annotation scale, and view direction."} initialValue={nameEntryDialog.initialValue} label={nameEntryDialog.kind === "rename-layer-set" ? "Layer Set name" : "Saved Plan View name"} onCancel={() => setNameEntryDialog(null)} onSubmit={submitNameEntry} submitLabel={nameEntryDialog.kind === "rename-layer-set" ? "Rename Set" : "Save View"} title={nameEntryDialog.kind === "rename-layer-set" ? "Rename Layer Set" : "Save Current Plan View"} /> : null}
     </main>
   );
 }
