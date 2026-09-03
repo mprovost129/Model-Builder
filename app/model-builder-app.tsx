@@ -72,7 +72,9 @@ import {
   lineLength,
   lineMidpoint,
   parseLineCoordinate,
+  resizeLineFromFixedEndpoint,
   snapLinePoint,
+  type LineFixedEndpoint,
   type LineGeometry,
   type LinePoint,
   type PlanPoint,
@@ -1366,6 +1368,7 @@ type ViewportProps = {
   onRoomLabelOpen: (roomId: string) => void;
   onRoomLabelTypeChange: (roomId: string, roomType: string) => void;
   onRoomCeilingHeightChange: (roomId: string, height: number) => boolean;
+  onWallLengthChange: (lineId: string, fixedEndpoint: LineFixedEndpoint, length: number) => boolean;
   onViewChange: (view: ViewTarget) => void;
   selectedArcId: string | null;
   selectedFaceIndex: number | null;
@@ -1386,6 +1389,107 @@ type ActiveGripInput = {
   x: number;
   y: number;
 };
+
+type TemporaryWallDimensionScreen = {
+  dimensionEnd: ScreenPoint;
+  dimensionStart: ScreenPoint;
+  label: ScreenPoint;
+  lineId: string;
+  wallEnd: ScreenPoint;
+  wallStart: ScreenPoint;
+};
+
+function TemporaryWallDimension({
+  length,
+  onCommit,
+  screen,
+}: {
+  length: number;
+  onCommit: (fixedEndpoint: LineFixedEndpoint, length: number) => boolean;
+  screen: TemporaryWallDimensionScreen;
+}) {
+  const [draft, setDraft] = useState(formatArchitectural(length));
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState("");
+  const [fixedEndpoint, setFixedEndpoint] = useState<LineFixedEndpoint>("start");
+
+  useEffect(() => {
+    if (!editing) setDraft(formatArchitectural(length));
+  }, [editing, length]);
+
+  const commit = () => {
+    const parsed = parseArchitectural(draft);
+    if (parsed === null || parsed < 1 / 16) {
+      setError("Enter a Wall length of at least 1/16 inch.");
+      return;
+    }
+    if (!onCommit(fixedEndpoint, snapToSixteenth(parsed))) {
+      setError("That length conflicts with the Wall, its openings, or a lock.");
+      return;
+    }
+    setError("");
+    setEditing(false);
+  };
+
+  const selectFixedEndpoint = (endpoint: LineFixedEndpoint) => {
+    setFixedEndpoint(endpoint);
+    setError("");
+  };
+
+  return (
+    <div className="temporary-wall-dimension" aria-label="Selected Wall temporary dimension">
+      <svg aria-hidden="true">
+        <line className="temporary-wall-extension" x1={screen.wallStart.x} y1={screen.wallStart.y} x2={screen.dimensionStart.x} y2={screen.dimensionStart.y} />
+        <line className="temporary-wall-extension" x1={screen.wallEnd.x} y1={screen.wallEnd.y} x2={screen.dimensionEnd.x} y2={screen.dimensionEnd.y} />
+        <line className="temporary-wall-dimension-line" x1={screen.dimensionStart.x} y1={screen.dimensionStart.y} x2={screen.dimensionEnd.x} y2={screen.dimensionEnd.y} />
+      </svg>
+      <button
+        type="button"
+        className={fixedEndpoint === "start" ? "temporary-wall-anchor is-fixed" : "temporary-wall-anchor"}
+        style={{ left: screen.dimensionStart.x, top: screen.dimensionStart.y }}
+        onClick={() => selectFixedEndpoint("start")}
+        aria-label="Keep Wall start fixed"
+        aria-pressed={fixedEndpoint === "start"}
+        title="Keep Wall start fixed"
+      >S</button>
+      <button
+        type="button"
+        className={fixedEndpoint === "end" ? "temporary-wall-anchor is-fixed" : "temporary-wall-anchor"}
+        style={{ left: screen.dimensionEnd.x, top: screen.dimensionEnd.y }}
+        onClick={() => selectFixedEndpoint("end")}
+        aria-label="Keep Wall end fixed"
+        aria-pressed={fixedEndpoint === "end"}
+        title="Keep Wall end fixed"
+      >E</button>
+      <form
+        className={error ? "temporary-wall-dimension-input has-error" : "temporary-wall-dimension-input"}
+        style={{ left: screen.label.x, top: screen.label.y }}
+        onSubmit={(event) => { event.preventDefault(); commit(); }}
+        title={`${fixedEndpoint === "start" ? "Start" : "End"} endpoint stays fixed`}
+      >
+        <span>{fixedEndpoint === "start" ? "S" : "E"} FIXED</span>
+        <input
+          value={draft}
+          onChange={(event) => { setDraft(event.target.value); setError(""); }}
+          onFocus={(event) => { setEditing(true); event.currentTarget.select(); }}
+          onBlur={() => { setEditing(false); setError(""); setDraft(formatArchitectural(length)); }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setError("");
+              setDraft(formatArchitectural(length));
+              event.currentTarget.blur();
+            }
+          }}
+          aria-label="Selected Wall length"
+          spellCheck={false}
+        />
+        <b>↵</b>
+        {error ? <small role="alert">{error}</small> : null}
+      </form>
+    </div>
+  );
+}
 
 type ViewportObject = {
   edges: THREE.LineSegments;
@@ -2581,6 +2685,7 @@ function Viewport({
   onRoomLabelOpen,
   onRoomLabelTypeChange,
   onRoomCeilingHeightChange,
+  onWallLengthChange,
   onViewChange,
   selectedArcId,
   selectedFaceIndex,
@@ -2610,6 +2715,8 @@ function Viewport({
   const [roomCeilingDraft, setRoomCeilingDraft] = useState("");
   const [roomLabelScreens, setRoomLabelScreens] = useState<Array<{ roomId: string; x: number; y: number }>>([]);
   const roomLabelScreenSignatureRef = useRef("");
+  const [temporaryWallDimensionScreen, setTemporaryWallDimensionScreen] = useState<TemporaryWallDimensionScreen | null>(null);
+  const temporaryWallDimensionScreenSignatureRef = useRef("");
   const objectViewsRef = useRef(new Map<string, ViewportObject>());
   const lineViewsRef = useRef(new Map<string, ViewportLine>());
   const wallViewsRef = useRef(new Map<string, WallView>());
@@ -6689,6 +6796,64 @@ function Viewport({
         roomLabelScreenSignatureRef.current = "";
         setRoomLabelScreens([]);
       }
+      const selectedWall = findLineObject(documentRef.current, selectedLineIdRef.current);
+      if (
+        viewTargetRef.current.id === "top" &&
+        selectedWall?.architecturalRole === "wall" &&
+        lineIsEditable(documentRef.current, selectedWall) &&
+        findLayer(documentRef.current, selectedWall.layerId)?.visible
+      ) {
+        const projectDimensionPoint = (point: LinePoint) => {
+          const projected = new THREE.Vector3(point.x, point.y, point.z + 1).project(camera);
+          return {
+            x: (projected.x * 0.5 + 0.5) * renderer.domElement.clientWidth,
+            y: (-projected.y * 0.5 + 0.5) * renderer.domElement.clientHeight,
+          };
+        };
+        const wallStart = projectDimensionPoint(selectedWall.start);
+        const wallEnd = projectDimensionPoint(selectedWall.end);
+        const dx = wallEnd.x - wallStart.x;
+        const dy = wallEnd.y - wallStart.y;
+        const projectedLength = Math.hypot(dx, dy);
+        if (projectedLength >= 36) {
+          let normalX = -dy / projectedLength;
+          let normalY = dx / projectedLength;
+          if (normalY > 0 || Math.abs(normalY) < 0.08 && normalX < 0) {
+            normalX *= -1;
+            normalY *= -1;
+          }
+          const dimensionOffset = 38;
+          const dimensionStart = { x: wallStart.x + normalX * dimensionOffset, y: wallStart.y + normalY * dimensionOffset };
+          const dimensionEnd = { x: wallEnd.x + normalX * dimensionOffset, y: wallEnd.y + normalY * dimensionOffset };
+          const screen: TemporaryWallDimensionScreen = {
+            dimensionEnd,
+            dimensionStart,
+            label: { x: (dimensionStart.x + dimensionEnd.x) / 2, y: (dimensionStart.y + dimensionEnd.y) / 2 },
+            lineId: selectedWall.id,
+            wallEnd,
+            wallStart,
+          };
+          const signature = [
+            screen.lineId,
+            screen.wallStart.x,
+            screen.wallStart.y,
+            screen.wallEnd.x,
+            screen.wallEnd.y,
+            screen.dimensionStart.x,
+            screen.dimensionStart.y,
+          ].map((value) => typeof value === "number" ? Math.round(value) : value).join(":");
+          if (signature !== temporaryWallDimensionScreenSignatureRef.current) {
+            temporaryWallDimensionScreenSignatureRef.current = signature;
+            setTemporaryWallDimensionScreen(screen);
+          }
+        } else if (temporaryWallDimensionScreenSignatureRef.current) {
+          temporaryWallDimensionScreenSignatureRef.current = "";
+          setTemporaryWallDimensionScreen(null);
+        }
+      } else if (temporaryWallDimensionScreenSignatureRef.current) {
+        temporaryWallDimensionScreenSignatureRef.current = "";
+        setTemporaryWallDimensionScreen(null);
+      }
       renderer.render(scene, camera);
     };
     render();
@@ -7323,6 +7488,7 @@ function Viewport({
     const object = findBoxObject(document, objectId);
     return object && objectIsEditable(document, object);
   });
+  const temporarilyDimensionedWall = findLineObject(document, temporaryWallDimensionScreen?.lineId ?? null);
 
   return (
     <div className="viewport" ref={mountRef} aria-label="3D model viewport">
@@ -7382,6 +7548,14 @@ function Viewport({
           }} aria-label={`Rough ceiling height for ${room.name}`} /> : <span className="room-label-ceiling" title="Double-click to edit the Room rough ceiling height" onDoubleClick={(event) => { event.stopPropagation(); setRoomCeilingDraft(formatArchitectural(effective.roughCeilingHeight)); setActiveRoomCeilingId(room.id); }}>CLG {formatArchitectural(effective.roughCeilingHeight)}</span> : null}
         </div>;
       })}
+      {temporaryWallDimensionScreen && temporarilyDimensionedWall?.architecturalRole === "wall" && !dragStatus && !lineMode ? (
+        <TemporaryWallDimension
+          key={temporarilyDimensionedWall.id}
+          length={lineLength(temporarilyDimensionedWall)}
+          screen={temporaryWallDimensionScreen}
+          onCommit={(fixedEndpoint, length) => onWallLengthChange(temporarilyDimensionedWall.id, fixedEndpoint, length)}
+        />
+      ) : null}
       <NavigationCube
         orbitRef={cubeOrbitRef}
         orientationRef={cameraOrientationRef}
@@ -7516,7 +7690,7 @@ function Viewport({
       {arcMode && !dragStatus ? <div className="move-grip-hint is-drawing">ARC · start point · second point · endpoint · exact coordinates accepted</div> : null}
       {lineMode && !dragStatus ? <div className="move-grip-hint is-drawing">LINE · click or type X,Y,Z · type a distance · U undoes · C closes</div> : null}
       {circleMode && !dragStatus ? <div className="move-grip-hint is-drawing">CIRCLE · click or type center · click edge or type radius · Escape exits</div> : null}
-      {selectedLineId && !lineMode && !dragStatus ? <div className="move-grip-hint">Line selected · blue endpoints reshape · green midpoint moves</div> : null}
+      {selectedLineId && !lineMode && !dragStatus ? <div className="move-grip-hint">{temporarilyDimensionedWall?.architecturalRole === "wall" ? "Wall selected · edit length above · choose S or E to hold that endpoint" : "Line selected · blue endpoints reshape · green midpoint moves"}</div> : null}
       {selectedCircleId && !circleMode && !dragStatus ? <div className="move-grip-hint">Circle selected · green center moves · blue quadrant grips resize</div> : null}
       {selectedArcId && !arcMode && !dragStatus ? <div className="move-grip-hint">Arc selected · blue endpoints and midpoint reshape · green center moves</div> : null}
       {polylineMode && !dragStatus ? <div className="move-grip-hint is-drawing">POLYLINE · click or type points · distance follows cursor · U undoes · C closes</div> : null}
@@ -13396,6 +13570,21 @@ export function ModelBuilderApp() {
     return true;
   }, [editor.present, selectedLineId]);
 
+  const resizeWallFromTemporaryDimension = useCallback((lineId: string, fixedEndpoint: LineFixedEndpoint, length: number) => {
+    const line = findLineObject(editor.present, lineId);
+    if (!line || line.architecturalRole !== "wall") return false;
+    if (Math.abs(lineLength(line) - length) < 1 / 32) return true;
+    const geometry = resizeLineFromFixedEndpoint(line, length, fixedEndpoint);
+    const next = geometry ? updateLineObject(editor.present, line.id, geometry) : null;
+    if (!next) {
+      setFileNotice({ text: "That Wall length conflicts with a lock or its hosted openings.", tone: "error" });
+      return false;
+    }
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${line.name} is now ${formatArchitectural(length)} long; the ${fixedEndpoint} endpoint stayed fixed.`, tone: "success" });
+    return true;
+  }, [editor.present]);
+
   const renameSelectedLine = useCallback((name: string) => {
     if (!selectedLineId) return false;
     const next = renameLineObject(editor.present, selectedLineId, name);
@@ -15533,6 +15722,7 @@ export function ModelBuilderApp() {
           onRoomLabelOpen={openRoomFromLabel}
           onRoomLabelTypeChange={changeRoomTypeFromLabel}
           onRoomCeilingHeightChange={changeRoomCeilingFromLabel}
+          onWallLengthChange={resizeWallFromTemporaryDimension}
           onViewChange={changeViewTarget}
           onDragStatus={setDragStatus}
           onExactFaceMove={moveFaceByExactGripDistance}

@@ -2294,6 +2294,50 @@ button { color: inherit; }
 .room-label-object .room-label-ceiling { color: #8ab2c8; }
 .room-label-object .room-label-ceiling-input { width: 76px; height: 20px; padding: 0 4px; border: 1px solid #6d94aa; outline: 0; background: #f6fafb; color: #24465c; font: 8px var(--font-geist-mono), monospace; text-align: center; }
 
+.temporary-wall-dimension { position: absolute; z-index: 14; inset: 0; pointer-events: none; }
+.temporary-wall-dimension > svg { position: absolute; width: 100%; height: 100%; overflow: visible; }
+.temporary-wall-extension { stroke: #69bceb; stroke-width: 1; stroke-dasharray: 3 2; }
+.temporary-wall-dimension-line { stroke: #82cef4; stroke-width: 1.25; }
+.temporary-wall-anchor {
+  position: absolute;
+  display: grid;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  place-items: center;
+  border: 1px solid #68add2;
+  border-radius: 50%;
+  background: #17252f;
+  color: #82c9ed;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 28%);
+  cursor: pointer;
+  pointer-events: auto;
+  font: 700 7px var(--font-geist-mono), monospace;
+}
+.temporary-wall-anchor:hover,
+.temporary-wall-anchor:focus-visible { border-color: #bfe8fb; background: #274052; color: #e8f7ff; outline: none; }
+.temporary-wall-anchor.is-fixed { border-color: #e1ad4c; background: #49391f; color: #ffe0a2; }
+.temporary-wall-dimension-input {
+  position: absolute;
+  display: grid;
+  grid-template-columns: 40px 88px 18px;
+  min-height: 26px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #68add2;
+  border-radius: 2px;
+  background: #17232d;
+  box-shadow: 0 5px 15px rgb(0 0 0 / 32%);
+  pointer-events: auto;
+  font: 8px var(--font-geist-mono), monospace;
+}
+.temporary-wall-dimension-input > span { display: grid; place-items: center; color: #7dc5e9; background: #223542; font-size: 7px; font-weight: 700; }
+.temporary-wall-dimension-input input { width: 88px; min-width: 0; height: 25px; padding: 0 6px; border: 0; border-left: 1px solid #38576a; border-right: 1px solid #38576a; outline: 0; background: transparent; color: #f0f6f8; text-align: center; font: 9px var(--font-geist-mono), monospace; }
+.temporary-wall-dimension-input input:focus { background: #101a22; box-shadow: inset 0 -2px #7bc7ed; }
+.temporary-wall-dimension-input > b { display: grid; place-items: center; color: #8096a3; font-size: 9px; font-weight: 500; }
+.temporary-wall-dimension-input.has-error { border-color: #df756c; }
+.temporary-wall-dimension-input small { position: absolute; top: 29px; left: 50%; width: max-content; max-width: 250px; padding: 4px 6px; transform: translateX(-50%); border-radius: 2px; background: #482526; color: #ffc0ba; font-size: 8px; }
+
 .commandbar {
   display: flex;
   align-items: center;
@@ -2488,6 +2532,17 @@ button { color: inherit; }
 .theme-light .room-label-object { color: #213b4c; }
 .theme-light .room-label-object .room-label-ceiling { color: #496b80; }
 .theme-light .room-label-object:hover { border-color: rgb(64 112 142 / 45%); background: rgb(240 247 249 / 82%); }
+.theme-light .temporary-wall-extension { stroke: #4d91b4; }
+.theme-light .temporary-wall-dimension-line { stroke: #3f83a7; }
+.theme-light .temporary-wall-anchor { border-color: #6296af; background: #f7faf9; color: #3c7898; box-shadow: 0 2px 7px rgb(58 76 88 / 18%); }
+.theme-light .temporary-wall-anchor:hover,
+.theme-light .temporary-wall-anchor:focus-visible { border-color: #2e7297; background: #e3eef2; color: #205c7b; }
+.theme-light .temporary-wall-anchor.is-fixed { border-color: #a77b2d; background: #f4e7c7; color: #6d501b; }
+.theme-light .temporary-wall-dimension-input { border-color: #6192aa; background: #fbfcfb; box-shadow: 0 5px 15px rgb(58 76 88 / 18%); }
+.theme-light .temporary-wall-dimension-input > span { color: #356f8d; background: #e1edf1; }
+.theme-light .temporary-wall-dimension-input input { border-color: #b5c8d1; background: #fff; color: #24465a; }
+.theme-light .temporary-wall-dimension-input input:focus { background: #fff; box-shadow: inset 0 -2px #4c91b4; }
+.theme-light .temporary-wall-dimension-input > b { color: #66808d; }
 .theme-light .plan-view-toolbar { border-color: var(--ui-border); background: #dbe6ea; }
 .theme-light .plan-view-toolbar label { color: #607887; }
 .theme-light .plan-view-toolbar label strong,

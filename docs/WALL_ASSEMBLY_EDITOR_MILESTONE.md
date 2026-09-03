@@ -30,6 +30,7 @@ This is the implementation control point for wall design in Slater Woods Omni De
 - [x] Ortho and polar tracking remain active while resizing a Wall by an endpoint grip.
 - [x] A 2x4 interior Wall automatically trims to a 2x6 exterior Wall Main face without a plan seam across the joined end.
 - [x] Replace free-text assembly materials with the initial role-filtered catalog.
+- [x] Add an editable temporary Wall length dimension with explicit fixed-Start and fixed-End behavior.
 - [ ] Add user-defined materials, rendered material patterns/textures, and the full Material Manager.
 - [ ] Add wall-cap and layer-return rules around hosted openings.
 - [ ] Add framing-aware intersections and the remaining garage/mudsill platform edge conditions.
@@ -37,9 +38,10 @@ This is the implementation control point for wall design in Slater Woods Omni De
 ## Next sequence
 
 1. Validate wall Types and the initial material catalog against real small-plan drawing workflows.
-2. Add temporary editable Wall dimensions for placement and adjustment.
-3. Add wall-cap and opening-return editing without coupling finish geometry to rough framing.
-4. Add framing-aware intersections and platform edge exceptions.
-5. Continue manufacturer-component import after wall-host behavior is stable.
+2. Validate the selected-Wall temporary dimension workflow around joins and hosted openings.
+3. Define temporary clear dimensions before building persistent annotation dimensions.
+4. Add wall-cap and opening-return editing without coupling finish geometry to rough framing.
+5. Add framing-aware intersections and platform edge exceptions.
+6. Continue manufacturer-component import after wall-host behavior is stable.
 
 Last reviewed: 2026-09-03

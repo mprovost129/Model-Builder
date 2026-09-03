@@ -9,6 +9,8 @@ export type LineGeometry = {
   start: LinePoint;
 };
 
+export type LineFixedEndpoint = "start" | "end";
+
 export const MINIMUM_LINE_LENGTH = 1 / 16;
 
 export function clonePlanPoint(point: PlanPoint): PlanPoint {
@@ -129,6 +131,16 @@ export function lineFromDirection(
     }),
   };
   return lineGeometryIsValid(line) ? line : null;
+}
+
+export function resizeLineFromFixedEndpoint(
+  line: LineGeometry,
+  length: number,
+  fixedEndpoint: LineFixedEndpoint,
+): LineGeometry | null {
+  if (fixedEndpoint === "start") return lineFromDirection(line.start, line.end, length);
+  const reversed = lineFromDirection(line.end, line.start, length);
+  return reversed ? { start: reversed.end, end: reversed.start } : null;
 }
 
 function angularDifference(a: number, b: number): number {

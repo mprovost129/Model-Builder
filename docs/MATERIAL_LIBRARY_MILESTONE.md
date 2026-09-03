@@ -27,7 +27,8 @@ This control point starts the shared material system for Slater Woods Omni Desig
 ## Next sequence
 
 1. Test the initial catalog against a real project and record missing material families.
-2. Add temporary editable Wall dimensions for placement and selected-wall adjustment.
-3. Build the project Material Manager and stable-ID file migration after the editing workflow is proven.
+2. Test the completed selected-Wall temporary dimension workflow, including fixed-Start and fixed-End edits around hosted openings.
+3. Define temporary clear-dimension reference rules before introducing persistent annotation dimensions.
+4. Build the project Material Manager and stable-ID file migration after the editing workflow is proven.
 
 Last reviewed: 2026-09-03

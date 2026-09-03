@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { lineAngle, lineElevationAngle, lineFromDirection, lineFromLengthAngle, lineFromLengthAngles, lineLength, lineMidpoint, moveLineGrip, parseLineCoordinate, snapLineDirection } from "../lib/cad-line.ts";
+import { lineAngle, lineElevationAngle, lineFromDirection, lineFromLengthAngle, lineFromLengthAngles, lineLength, lineMidpoint, moveLineGrip, parseLineCoordinate, resizeLineFromFixedEndpoint, snapLineDirection } from "../lib/cad-line.ts";
 
 test("calculates line length, angle, and midpoint", () => {
   const line = { start: { x: 0, y: 0, z: 0 }, end: { x: 36, y: 48, z: 0 } };
@@ -53,4 +53,20 @@ test("supports true 3D line lengths", () => {
   assert.ok(polar3d);
   assert.equal(polar3d.end.x, 0);
   assert.equal(polar3d.end.z, 84);
+});
+
+test("resizes a line from either explicitly fixed endpoint", () => {
+  const line = { start: { x: 12, y: 24, z: 48 }, end: { x: 72, y: 104, z: 48 } };
+  const keepStart = resizeLineFromFixedEndpoint(line, 200, "start");
+  assert.ok(keepStart);
+  assert.deepEqual(keepStart.start, line.start);
+  assert.equal(lineLength(keepStart), 200);
+  assert.deepEqual(keepStart.end, { x: 132, y: 184, z: 48 });
+
+  const keepEnd = resizeLineFromFixedEndpoint(line, 200, "end");
+  assert.ok(keepEnd);
+  assert.deepEqual(keepEnd.end, line.end);
+  assert.equal(lineLength(keepEnd), 200);
+  assert.deepEqual(keepEnd.start, { x: -48, y: -56, z: 48 });
+  assert.equal(resizeLineFromFixedEndpoint(line, 0, "start"), null);
 });
