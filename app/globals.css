@@ -881,6 +881,16 @@ button { color: inherit; }
 .story-field-shell.is-error { border-color: var(--danger); }
 .story-editor-summary > button { align-self: end; padding: 0 10px; white-space: nowrap; }
 .story-editor-summary > button.is-anchor { border-color: #806735; color: #f0cd86; background: #3a3022; }
+.story-classification-panel { display: grid; grid-template-columns: minmax(175px, .6fr) minmax(390px, 1.4fr); gap: 8px 12px; margin-bottom: 8px; padding: 8px; border: 1px solid #3b4752; background: #202933; }
+.story-classification-panel .story-field select { min-width: 0; height: 28px; padding: 0 6px; border: 1px solid #465462; border-radius: 2px; outline: 0; background: #141b22; color: #e4e9ed; font: 9px var(--font-geist-mono), monospace; }
+.story-classification-panel .story-field select:focus { border-color: var(--accent); }
+.story-floor-presets { display: grid; gap: 3px; min-width: 0; }
+.story-floor-presets > span { color: #96a3ae; font-size: 7px; letter-spacing: .05em; text-transform: uppercase; }
+.story-floor-presets > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.story-floor-presets button { min-height: 28px; padding: 0 9px; border: 1px solid #4d5a67; border-radius: 2px; background: #27323c; color: #d8e0e6; font-size: 8px; cursor: pointer; }
+.story-floor-presets button:hover { border-color: #6aa9c7; background: #2b3b47; }
+.story-classification-panel > p { grid-column: 1 / -1; margin: 0; color: #8f9ca7; font-size: 8px; line-height: 1.45; }
+.story-classification-panel > p strong { color: #d7e0e6; }
 .story-calculated-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 8px; border: 1px solid #3b4752; }
 .story-calculated-grid > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 7px; border-right: 1px solid #34404a; border-bottom: 1px solid #34404a; background: #1e2730; }
 .story-calculated-grid > div:nth-child(3n) { border-right: 0; }
@@ -938,6 +948,7 @@ button { color: inherit; }
 .wall-preview-layer.is-finish rect { fill: #a7b1b5; }
 .wall-preview-layer.is-sheathing rect { fill: #a97650; }
 .wall-preview-layer.is-framing rect { fill: #c69a62; }
+.wall-preview-layer.is-structure rect { fill: #a9afb2; }
 .wall-preview-layer.is-insulation rect { fill: #cfad52; }
 .wall-preview-layer.is-membrane rect { fill: #7395ac; }
 .wall-preview-layer.is-substrate rect { fill: #958371; }
@@ -971,6 +982,7 @@ button { color: inherit; }
 .wall-preview-selected-layer > header i.is-finish { background: #a7b1b5; }
 .wall-preview-selected-layer > header i.is-sheathing { background: #a97650; }
 .wall-preview-selected-layer > header i.is-framing { background: #c69a62; }
+.wall-preview-selected-layer > header i.is-structure { background: #a9afb2; }
 .wall-preview-selected-layer > header i.is-insulation { background: #cfad52; }
 .wall-preview-selected-layer > header i.is-membrane { background: #7395ac; }
 .wall-preview-selected-layer > header i.is-substrate { background: #958371; }
@@ -1003,6 +1015,8 @@ button { color: inherit; }
 
 @media (max-width: 1180px) {
   .story-manager-body { grid-template-columns: 170px minmax(560px, 1fr); }
+  .story-classification-panel { grid-template-columns: 1fr; }
+  .story-classification-panel > p { grid-column: 1; }
   .wall-type-manager .story-manager-body { grid-template-columns: 180px minmax(520px, 1fr); }
   .wall-assembly-preview { display: none; }
   .room-manager .story-manager-body { grid-template-columns: 190px minmax(560px, 1fr); }
@@ -2588,7 +2602,7 @@ button { color: inherit; }
 .theme-light .story-list > button span,
 .theme-light .story-list > button small { color: #607787; }
 .theme-light .story-editor { background: #f4f6f5; }
-.theme-light :is(.story-editor-summary, .room-height-settings, .story-calculated-grid, .story-assembly, .room-override-section, .room-platform-edges, .room-platform-openings, .foundation-setting-section) { border-color: var(--ui-border); background: #e9eff1; }
+.theme-light :is(.story-editor-summary, .story-classification-panel, .room-height-settings, .story-calculated-grid, .story-assembly, .room-override-section, .room-platform-edges, .room-platform-openings, .foundation-setting-section) { border-color: var(--ui-border); background: #e9eff1; }
 .theme-light .foundation-setting-section > header { border-color: var(--ui-border); background: #dde7eb; }
 .theme-light .foundation-setting-section > header strong { color: #304d60; }
 .theme-light .foundation-setting-section > header span,
@@ -2694,12 +2708,17 @@ button { color: inherit; }
 .theme-light .framing-status-card label:has(input:disabled),
 .theme-light .framing-status-card p { color: var(--muted); }
 .theme-light .framing-status-card input { accent-color: var(--ui-blue); }
-.theme-light :is(.story-editor-summary label > span, .story-field > span, .story-calculated-grid span, .story-assembly > header span, .story-layer-grid > span, .story-wall-group-heading span, .room-story-picker) { color: var(--muted); }
+.theme-light :is(.story-editor-summary label > span, .story-field > span, .story-floor-presets > span, .story-calculated-grid span, .story-assembly > header span, .story-layer-grid > span, .story-wall-group-heading span, .room-story-picker) { color: var(--muted); }
 .theme-light :is(.story-editor-summary input, .story-editor-summary select, .story-editor-summary output, .story-layer-grid input, .story-layer-grid select, .story-field-shell, .room-story-picker select, .room-output) {
   border-color: var(--ui-border-strong);
   background: var(--ui-input);
   color: #2c485b;
 }
+.theme-light .story-classification-panel .story-field select { border-color: var(--ui-border-strong); background: var(--ui-input); color: #2c485b; }
+.theme-light .story-classification-panel > p { color: var(--muted); }
+.theme-light .story-classification-panel > p strong { color: #304d60; }
+.theme-light .story-floor-presets button { border-color: var(--ui-border-strong); background: #edf2f3; color: #3a586b; }
+.theme-light .story-floor-presets button:hover { border-color: var(--ui-blue); background: var(--ui-hover); color: var(--ui-blue-deep); }
 .theme-light :is(.story-list-actions button, .story-manager-footer button, .story-add-layer, .story-editor-summary > button, .room-empty-state button) {
   border-color: var(--ui-border-strong);
   background: #edf2f3;

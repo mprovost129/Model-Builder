@@ -40,7 +40,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 44
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 45
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs
@@ -92,9 +92,12 @@ polylines, rectangles, Circles, and Arcs.
 - Rough-framing Story model with a Building Datum, ordered Stories, an active
   Story drawing plane, and calculated rough and finished elevations
 - Spreadsheet-style Story and Assembly Manager with add-above/add-below, datum
-  anchoring, live section preview, and editable structural and finish layers
+  anchoring, live section preview, explicit Standard/Basement/Crawlspace/Slab-on-grade
+  classifications, and editable structural and finish layers
 - Layered floor structure, floor finish, ceiling structure, and ceiling finish assemblies; only
   rough structure controls dependent Story elevations
+- Controlled Structure / slab assembly role plus one-click wood-framed, basement-slab,
+  and insulated slab-on-grade floor presets; concrete remains a material rather than a system role
 - Reusable wall types with explicitly ordered Exterior, Main, and Interior layer
   groups, per-group thickness totals, and a required structural Main core; new plans
   include 2x4 and 2x6 exterior walls plus 2x4 and 2x6 interior walls, with the 2x6

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   addBuildingStory,
+  applyFloorStructurePreset,
   assemblyTotalThickness,
   buildingStructureIsValid,
   calculateStoryElevations,
@@ -81,6 +82,28 @@ test("uses rough framing rather than finishes to calculate the next Story datum"
   changedFinishes.stories[0].ceilingStructure.layers.push({ id: "story-01-ceiling-structure-01", material: "Lumber", name: "Dropped Furring", role: "framing", thickness: 2 });
   changedFinishes.stories[0].ceilingFinish.layers[0].thickness = 2;
   assert.equal(calculateStoryElevations(changedFinishes)[1].roughFloorElevation, 121.125);
+});
+
+test("classifies lower levels and applies controlled concrete slab presets", () => {
+  const building = createDefaultBuildingStructure();
+  const withBasement = addBuildingStory(building, building.activeStoryId, "below");
+  assert.ok(withBasement);
+  const basementIndex = withBasement.stories.findIndex((story) => story.id === withBasement.activeStoryId);
+  withBasement.stories[basementIndex].purpose = "basement";
+  withBasement.stories[basementIndex] = applyFloorStructurePreset(withBasement.stories[basementIndex], "basement-slab");
+  const basement = withBasement.stories[basementIndex];
+  assert.equal(basement.purpose, "basement");
+  assert.equal(assemblyTotalThickness(basement.floorStructure), 4);
+  assert.equal(basement.floorStructure.layers[0].role, "structure");
+  assert.equal(basement.floorStructure.layers[0].material, "Concrete");
+  assert.equal(basement.floorStructure.layers[1].role, "membrane");
+  assert.equal(basement.floorStructure.layers[1].thickness, 0);
+  assert.equal(buildingStructureIsValid(withBasement), true);
+
+  const slabOnGrade = applyFloorStructurePreset({ ...building.stories[0], purpose: "slab-on-grade" }, "slab-on-grade");
+  assert.equal(slabOnGrade.purpose, "slab-on-grade");
+  assert.equal(assemblyTotalThickness(slabOnGrade.floorStructure), 6);
+  assert.deepEqual(slabOnGrade.floorStructure.layers.map((layer) => layer.role), ["structure", "membrane", "insulation"]);
 });
 
 test("derives finished elevations and clear height from finish layers", () => {

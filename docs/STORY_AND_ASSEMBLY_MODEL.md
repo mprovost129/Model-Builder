@@ -18,6 +18,11 @@ them safely.
   rough floor plane. World Z=0 remains the immutable model origin.
 - **Story** is an ordered building floor with a rough floor datum, rough ceiling
   or plate height, and layered floor and ceiling assemblies.
+- **Story Type** classifies the level as Standard / above-grade, Basement,
+  Crawlspace, or Slab-on-grade. A full basement is a Story below First Floor.
+  A slab-on-grade is the occupied Story's floor structure and does not require a
+  separate Basement Story. A crawlspace becomes a separate Story only when it
+  needs its own plan or independently controlled height.
 - **Rough Floor** is the top of the structural floor assembly, normally the top
   of the subfloor. This is the Story's drawing plane.
 - **Finished Floor** is the rough floor plus the complete floor-finish assembly.
@@ -28,6 +33,21 @@ them safely.
   ceiling-finish assemblies.
 - **Floor Structure** belongs to the Story above it. It establishes the distance
   between the lower Story's rough ceiling and the upper Story's rough floor.
+
+## Controlled Assembly Roles
+
+Assembly roles are program-defined because they drive geometry, joins, quantities,
+framing, and future structural behavior. Users create and edit layers, materials,
+and complete assemblies; they do not create arbitrary core roles. The controlled
+roles are Air gap, Finish, Framing, Insulation, Membrane, Sheathing / subfloor,
+Structure / slab, and Substrate. A concrete slab therefore uses `Concrete Slab`
+as its layer name, `Concrete` as its material, and `Structure / slab` as its role.
+
+The Story and Assembly Manager includes presets for a wood-framed floor, a 4-inch
+basement concrete slab with a zero-thickness vapor-retarder record, and a 4-inch
+insulated slab-on-grade with vapor retarder and rigid insulation. Applying a preset
+replaces only the selected Story's floor-structure layers. Floor finishes and every
+preset layer remain independently editable or removable.
 
 ## Required Calculations
 
@@ -406,7 +426,7 @@ junction framing.
    by another project or catalog record.
 3. Add manual per-junction framing overrides without making unsafe engineering assumptions.
 4. Generate a header schedule from saved marks, resolved assemblies, and engineering flags.
-5. Add reusable assembly presets for framed floors, slabs, and ceiling finishes.
+5. Add reusable ceiling-finish presets and region-specific slab variants only as reviewed needs arise.
 6. Add manual per-edge platform overrides for exceptional support details.
 7. Add split-level, vaulted-ceiling, and manual wall-height exceptions
    only after the default dependency chain is stable.

@@ -311,6 +311,7 @@ import {
 } from "@/lib/document-model";
 import {
   addBuildingStory,
+  applyFloorStructurePreset,
   assemblyTotalThickness,
   buildingStructureIsValid,
   calculateStoryElevations,
@@ -355,11 +356,13 @@ import {
   type DoorPanelLayout,
   type FoundationWallCondition,
   type FoundationWallType,
+  type FloorStructurePreset,
   type LayeredAssembly,
   type OpeningAssemblyComponent,
   type ManufacturerProductSource,
   type ProductAssetReference,
   type ProductObjectCategory,
+  type StoryPurpose,
   type WindowLitePattern,
   type WindowSashArrangement,
   type WallExteriorSide,
@@ -1409,6 +1412,7 @@ const FLOOR_LAYER_COLORS: Record<AssemblyLayerRole, number> = {
   insulation: 0xd6b76f,
   membrane: 0x506b7c,
   sheathing: 0xc3a176,
+  structure: 0xa9afb2,
   substrate: 0x9b9385,
 };
 
@@ -8811,7 +8815,28 @@ const ASSEMBLY_ROLE_LABELS: Record<AssemblyLayerRole, string> = {
   insulation: "Insulation",
   membrane: "Membrane",
   sheathing: "Sheathing / subfloor",
+  structure: "Structure / slab",
   substrate: "Substrate",
+};
+
+const STORY_PURPOSE_LABELS: Record<StoryPurpose, string> = {
+  standard: "Standard / above-grade",
+  basement: "Basement",
+  crawlspace: "Crawlspace",
+  "slab-on-grade": "Slab-on-grade",
+};
+
+const STORY_PURPOSE_HELP: Record<StoryPurpose, string> = {
+  standard: "An ordinary framed level. Stories above and below stack from its rough framing datums.",
+  basement: "A full lower level with its own walls, rooms, openings, slab, ceiling height, and plan view.",
+  crawlspace: "A non-occupiable service or foundation level. Use a separate Story only when it needs its own plan or controlled height.",
+  "slab-on-grade": "The occupied level bears on a slab. Do not add a Basement Story below solely to represent the slab.",
+};
+
+const FLOOR_STRUCTURE_PRESET_LABELS: Record<FloorStructurePreset, string> = {
+  "wood-framed": "Wood-framed floor",
+  "basement-slab": "4 in. basement slab",
+  "slab-on-grade": "4 in. insulated slab-on-grade",
 };
 
 const WALL_LAYER_GROUP_LABELS: Record<WallLayerGroup, string> = {
@@ -8973,7 +8998,7 @@ function StoryAssemblyEditor({
         <select value={layer.role} onChange={(event) => updateLayer(index, { role: event.target.value as AssemblyLayerRole })} aria-label={`${layer.name} role`}>
           {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
         </select>
-        <StoryDimensionInput allowZero={isWallAssembly} key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
+        <StoryDimensionInput allowZero={isWallAssembly || layer.role === "membrane"} key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
         {isWallAssembly ? <label className="story-layer-join" title="When enabled, this layer is trimmed or mitered by automatic wall junctions."><input type="checkbox" checked={layer.participatesInJoin ?? true} onChange={(event) => updateLayer(index, { participatesInJoin: event.target.checked })} aria-label={`${layer.name} participates in automatic wall joins`} /><span>{layer.participatesInJoin === false ? "Square" : "Auto"}</span></label> : null}
         {isWallAssembly ? <label className="story-layer-join" title={layer.role === "finish" && layer.thickness > 0 ? "Wrap this finish across truly open wall ends." : "Only positive-thickness Finish layers can wrap open wall ends."}><input type="checkbox" checked={(assembly.wallEndCapLayerIds ?? []).includes(layer.id)} disabled={layer.role !== "finish" || layer.thickness <= 0} onChange={(event) => toggleEndCapLayer(layer.id, event.target.checked)} aria-label={`${layer.name} wraps open wall ends`} /><span>{(assembly.wallEndCapLayerIds ?? []).includes(layer.id) ? "Wrap" : "Off"}</span></label> : null}
         <div className="story-layer-actions"><button type="button" onClick={() => moveLayer(index, -1)} disabled={!previousLayer || (isWallAssembly && previousLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} up`}>↑</button><button type="button" onClick={() => moveLayer(index, 1)} disabled={!nextLayer || (isWallAssembly && nextLayer.wallGroup !== layer.wallGroup)} aria-label={`Move ${layer.name} down`}>↓</button><button type="button" onClick={() => removeLayer(index)} disabled={isOnlyMainLayer} aria-label={`Remove ${layer.name}`}>×</button></div>
@@ -9056,6 +9081,9 @@ function StoryManagerDialog({
     if (elevation === undefined) return;
     setDraft((current) => ({ ...cloneBuildingStructure(current), anchorStoryId: selectedStory.id, datumElevation: elevation }));
   };
+  const applyFloorPreset = (preset: FloorStructurePreset) => {
+    replaceSelectedStory(applyFloorStructurePreset(selectedStory, preset));
+  };
   const save = () => {
     const next = cloneBuildingStructure(draft);
     next.activeStoryId = selectedStory.id;
@@ -9075,7 +9103,7 @@ function StoryManagerDialog({
             <header><strong>Stories</strong><span>Bottom to top</span></header>
             {[...draft.stories].reverse().map((story) => {
               const calculation = calculations.find((item) => item.storyId === story.id);
-              return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>Rough floor {calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span>{story.id === draft.anchorStoryId ? <small>DATUM ANCHOR</small> : null}</button>;
+              return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>{STORY_PURPOSE_LABELS[story.purpose]} · Rough floor {calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span>{story.id === draft.anchorStoryId ? <small>DATUM ANCHOR</small> : null}</button>;
             })}
             <div className="story-list-actions"><button type="button" onClick={() => addStory("above")}>＋ Above</button><button type="button" onClick={() => addStory("below")}>＋ Below</button><button type="button" onClick={removeStory} disabled={draft.stories.length === 1}>Delete</button></div>
           </aside>
@@ -9085,6 +9113,19 @@ function StoryManagerDialog({
               <StoryDimensionInput key={`${selectedStory.id}:${selectedStory.roughCeilingHeight}`} label="Rough ceiling / plate height" value={selectedStory.roughCeilingHeight} onChange={(roughCeilingHeight) => replaceSelectedStory({ roughCeilingHeight })} />
               <StoryDimensionInput key={`${draft.anchorStoryId}:${draft.datumElevation}`} label="Datum elevation" signed value={draft.datumElevation} onChange={(datumElevation) => setDraft((current) => ({ ...cloneBuildingStructure(current), datumElevation }))} />
               <button type="button" className={selectedStory.id === draft.anchorStoryId ? "is-anchor" : ""} onClick={setDatumAnchor}>{selectedStory.id === draft.anchorStoryId ? "Datum anchor" : "Set as datum anchor"}</button>
+            </section>
+            <section className="story-classification-panel">
+              <label className="story-field">
+                <span>Story type</span>
+                <select value={selectedStory.purpose} onChange={(event) => replaceSelectedStory({ purpose: event.target.value as StoryPurpose })} aria-label="Story type">
+                  {Object.entries(STORY_PURPOSE_LABELS).map(([purpose, label]) => <option key={purpose} value={purpose}>{label}</option>)}
+                </select>
+              </label>
+              <div className="story-floor-presets">
+                <span>Floor structure presets</span>
+                <div>{Object.entries(FLOOR_STRUCTURE_PRESET_LABELS).map(([preset, label]) => <button type="button" key={preset} onClick={() => applyFloorPreset(preset as FloorStructurePreset)}>{label}</button>)}</div>
+              </div>
+              <p><strong>{STORY_PURPOSE_LABELS[selectedStory.purpose]}:</strong> {STORY_PURPOSE_HELP[selectedStory.purpose]} Applying a preset replaces this Story&apos;s floor-structure layers; floor finishes remain separate and editable.</p>
             </section>
             <section className="story-calculated-grid" aria-label="Calculated Story elevations">
               <div><span>Rough floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughFloorElevation) : "—"}</strong></div>

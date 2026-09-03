@@ -106,6 +106,29 @@ test("upgrades version-43 Layer Sets with fill defaults and the fill master enab
   assert.equal(document.layers.every((layer) => layer.fillVisible), true);
 });
 
+test("round-trips Story purposes and upgrades version-44 Stories to Standard", () => {
+  const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Story Purpose Plan", updatedAt });
+  current.building.stories[0].purpose = "slab-on-grade";
+  current.building.stories[0].floorStructure.layers = [
+    { id: "story-01-floor-structure-01", material: "Concrete", name: "Concrete Slab", role: "structure", thickness: 4 },
+  ];
+  const parsed = parseProjectDocument(serializeProjectDocument(current));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.project.building.stories[0].purpose, "slab-on-grade");
+  assert.equal(parsed.project.building.stories[0].floorStructure.layers[0].role, "structure");
+
+  const legacy = structuredClone(current);
+  legacy.version = 44 as number;
+  legacy.building.stories.forEach((story) => delete (story as Partial<typeof story>).purpose);
+  legacy.building.stories[0].floorStructure = structuredClone(NEW_PROJECT_DOCUMENT.building.stories[0].floorStructure);
+  const upgraded = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(upgraded.ok, true);
+  if (!upgraded.ok) return;
+  assert.equal(upgraded.project.building.stories[0].purpose, "standard");
+  assert.equal(upgraded.project.version, PROJECT_FILE_VERSION);
+});
+
 test("round-trips a versioned multi-box project without dimensional drift", () => {
   const added = addBoxObject(DEFAULT_DOCUMENT);
   assert.ok(added);

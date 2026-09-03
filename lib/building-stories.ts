@@ -1,14 +1,12 @@
 import { snapToSixteenth } from "./architectural-units.ts";
 
 export type AssemblyKind = "ceiling-finish" | "ceiling-structure" | "floor-finish" | "floor-structure" | "wall-structure";
-export type AssemblyLayerRole =
-  | "air-gap"
-  | "finish"
-  | "framing"
-  | "insulation"
-  | "membrane"
-  | "sheathing"
-  | "substrate";
+export const ASSEMBLY_LAYER_ROLES = ["air-gap", "finish", "framing", "insulation", "membrane", "sheathing", "structure", "substrate"] as const;
+export type AssemblyLayerRole = (typeof ASSEMBLY_LAYER_ROLES)[number];
+export const STORY_PURPOSES = ["standard", "basement", "crawlspace", "slab-on-grade"] as const;
+export type StoryPurpose = (typeof STORY_PURPOSES)[number];
+export const FLOOR_STRUCTURE_PRESETS = ["wood-framed", "basement-slab", "slab-on-grade"] as const;
+export type FloorStructurePreset = (typeof FLOOR_STRUCTURE_PRESETS)[number];
 
 export const WALL_LAYER_GROUPS = ["exterior", "main", "interior"] as const;
 export type WallLayerGroup = (typeof WALL_LAYER_GROUPS)[number];
@@ -111,6 +109,7 @@ export type BuildingStory = {
   floorStructure: LayeredAssembly;
   id: string;
   name: string;
+  purpose: StoryPurpose;
   roughCeilingHeight: number;
 };
 
@@ -361,7 +360,30 @@ function isSixteenth(value: number): boolean {
   return Math.abs(value * 16 - Math.round(value * 16)) < 1e-8;
 }
 
-function defaultFloorStructure(storyId: string): LayeredAssembly {
+export function createFloorStructurePreset(storyId: string, preset: FloorStructurePreset): LayeredAssembly {
+  if (preset === "basement-slab") {
+    return {
+      id: `${storyId}-floor-structure`,
+      kind: "floor-structure",
+      name: "4 in. Basement Concrete Slab",
+      layers: [
+        { id: `${storyId}-floor-structure-01`, material: "Concrete", name: "Concrete Slab", role: "structure", thickness: 4 },
+        { id: `${storyId}-floor-structure-02`, material: "Vapor Retarder", name: "Vapor Retarder", role: "membrane", thickness: 0 },
+      ],
+    };
+  }
+  if (preset === "slab-on-grade") {
+    return {
+      id: `${storyId}-floor-structure`,
+      kind: "floor-structure",
+      name: "4 in. Insulated Slab-on-Grade",
+      layers: [
+        { id: `${storyId}-floor-structure-01`, material: "Concrete", name: "Concrete Slab", role: "structure", thickness: 4 },
+        { id: `${storyId}-floor-structure-02`, material: "Vapor Retarder", name: "Vapor Retarder", role: "membrane", thickness: 0 },
+        { id: `${storyId}-floor-structure-03`, material: "Rigid Insulation", name: "Under-Slab Rigid Insulation", role: "insulation", thickness: 2 },
+      ],
+    };
+  }
   return {
     id: `${storyId}-floor-structure`,
     kind: "floor-structure",
@@ -383,6 +405,10 @@ function defaultFloorStructure(storyId: string): LayeredAssembly {
       },
     ],
   };
+}
+
+function defaultFloorStructure(storyId: string): LayeredAssembly {
+  return createFloorStructurePreset(storyId, "wood-framed");
 }
 
 function defaultFloorFinish(storyId: string): LayeredAssembly {
@@ -737,7 +763,15 @@ export function createBuildingStory(id: string, name: string): BuildingStory {
     floorStructure: defaultFloorStructure(id),
     id,
     name,
+    purpose: "standard",
     roughCeilingHeight: 109.125,
+  };
+}
+
+export function applyFloorStructurePreset(story: BuildingStory, preset: FloorStructurePreset): BuildingStory {
+  return {
+    ...story,
+    floorStructure: createFloorStructurePreset(story.id, preset),
   };
 }
 
@@ -1087,7 +1121,7 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
         { value: layer.name, limit: LAYER_NAME_LIMIT },
         { value: layer.material, limit: MATERIAL_NAME_LIMIT },
       ]) ||
-      !["air-gap", "finish", "framing", "insulation", "membrane", "sheathing", "substrate"].includes(layer.role) ||
+      !ASSEMBLY_LAYER_ROLES.includes(layer.role) ||
       (layer.wallGroup !== undefined && !WALL_LAYER_GROUPS.includes(layer.wallGroup)) ||
       !Number.isFinite(layer.thickness) ||
       layer.thickness < 0 ||
@@ -1204,6 +1238,7 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
       storyIds.has(story.id) ||
       !stringsAreValid([{ value: story.name, limit: STORY_NAME_LIMIT }]) ||
       storyNames.has(normalizedName) ||
+      !STORY_PURPOSES.includes(story.purpose) ||
       !Number.isFinite(story.roughCeilingHeight) ||
       story.roughCeilingHeight < MINIMUM_ROUGH_CEILING_HEIGHT ||
       story.roughCeilingHeight > MAXIMUM_ROUGH_CEILING_HEIGHT ||

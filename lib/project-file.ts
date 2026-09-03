@@ -78,6 +78,7 @@ import {
   createDefaultWallFramingSettings,
   FOUNDATION_WALL_CONDITIONS,
   OPENING_COMPONENT_DEPTH_ANCHORS,
+  ASSEMBLY_LAYER_ROLES,
   OPENING_COMPONENT_GEOMETRIES,
   OPENING_COMPONENT_ROLES,
   PRODUCT_ASSET_FORMATS,
@@ -86,6 +87,7 @@ import {
   PRODUCT_ASSET_SOURCE_UNITS,
   PRODUCT_ASSET_USAGE_MODES,
   PRODUCT_SOURCE_FORMATS,
+  STORY_PURPOSES,
   PRODUCT_OBJECT_CATEGORIES,
   WALL_CORNER_FRAMING_STYLES,
   WALL_HEADER_ALIGNMENTS,
@@ -123,6 +125,7 @@ import {
   type ProductSourceFormat,
   type ProductObjectCategory,
   type ProductObjectType,
+  type StoryPurpose,
   type WallExteriorSide,
   type WallJoinMode,
   type WallOpeningKind,
@@ -141,7 +144,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 44;
+export const PROJECT_FILE_VERSION = 45;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -203,8 +206,6 @@ function isIsoDate(value: unknown): value is string {
 }
 
 const ASSEMBLY_KINDS: AssemblyKind[] = ["ceiling-finish", "ceiling-structure", "floor-finish", "floor-structure", "wall-structure"];
-const ASSEMBLY_LAYER_ROLES: AssemblyLayerRole[] = ["air-gap", "finish", "framing", "insulation", "membrane", "sheathing", "substrate"];
-
 function readStoryId(value: Record<string, unknown>, supportsStories: boolean, fallbackStoryId: string): string | null {
   const storyId = supportsStories ? value.storyId : fallbackStoryId;
   return typeof storyId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(storyId) ? storyId : null;
@@ -528,13 +529,15 @@ function readWallFramingSettings(value: unknown, supportsJunctionSettings: boole
   };
 }
 
-function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): BuildingStory | null {
+function readBuildingStory(value: unknown, supportsCeilingStructure: boolean, supportsStoryPurpose: boolean): BuildingStory | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
     typeof value.name !== "string" ||
     !isFiniteNumber(value.roughCeilingHeight)
   ) return null;
+  const purpose = supportsStoryPurpose ? value.purpose : "standard";
+  if (typeof purpose !== "string" || !STORY_PURPOSES.includes(purpose as StoryPurpose)) return null;
   const floorStructure = readLayeredAssembly(value.floorStructure, "floor-structure");
   const floorFinish = readLayeredAssembly(value.floorFinish, "floor-finish");
   const ceilingStructure = supportsCeilingStructure
@@ -549,11 +552,12 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean): B
     floorStructure,
     id: value.id,
     name: value.name.trim(),
+    purpose: purpose as StoryPurpose,
     roughCeilingHeight: value.roughCeilingHeight,
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -561,7 +565,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     !isFiniteNumber(value.datumElevation) ||
     !Array.isArray(value.stories)
   ) return null;
-  const stories = value.stories.map((story) => readBuildingStory(story, supportsCeilingStructure));
+  const stories = value.stories.map((story) => readBuildingStory(story, supportsCeilingStructure, supportsStoryPurpose));
   if (stories.some((story) => story === null)) return null;
   const defaults = createDefaultBuildingStructure();
   const legacyWallType = createDefaultWallType();
@@ -1143,7 +1147,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }
