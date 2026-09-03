@@ -214,6 +214,12 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /Confirm project settings/);
   assert.match(component, /saveProjectAs/);
   assert.match(component, /File and application commands/);
+  assert.match(component, /aria-label="Command line"/);
+  assert.match(component, /className="commandbar-shell"/);
+  assert.match(component, /className="model-space-indicator"/);
+  assert.match(component, /aria-label="Drafting status controls"/);
+  assert.match(component, /aria-pressed=\{cadDraftingSettings\.objectSnapEnabled\}/);
+  assert.doesNotMatch(component, /Command history|Model and layouts|Layouts are planned|space-menu/);
   assert.match(component, /3D Perspective/);
   assert.match(component, /onClick=\{\(\) => onNavigate\(VIEW_PRESETS\.top\)\}/);
   assert.match(component, /Model Explorer · Building/);
