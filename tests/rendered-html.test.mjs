@@ -181,6 +181,8 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /className="story-wall-group-add"/);
   assert.doesNotMatch(component, /story-add-wall-layers/);
   assert.match(component, /aria-label="Active Wall Type for new walls"/);
+  assert.match(component, /aria-label="Wall Use for new walls"/);
+  assert.match(component, /Interior Bearing Wall/);
   assert.match(component, /aria-label="Project active Wall Type"/);
   assert.match(component, /const trackingAnchor = source/);
   assert.match(component, /drag\.objectId,[\s\S]*trackingAnchor,[\s\S]*true,/);

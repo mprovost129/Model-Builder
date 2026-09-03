@@ -76,6 +76,7 @@ import {
   cloneBuildingStructure,
   createDefaultCeilingStructure,
   createDefaultBuildingStructure,
+  createDefaultWallTypes,
   createDefaultProductAssetAlignment,
   createDefaultWallType,
   createDefaultWallFramingSettings,
@@ -106,6 +107,8 @@ import {
   WALL_LOCATIONS,
   WALL_REFERENCE_LINES,
   WALL_STRUCTURAL_ROLES,
+  WALL_USES,
+  wallTypeMatchesUse,
   createDefaultOpeningComponents,
   type AssemblyKind,
   type AssemblyLayer,
@@ -144,10 +147,11 @@ import {
   type WallLocation,
   type WallReferenceLine,
   type WallStructuralRole,
+  type WallUse,
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 46;
+export const PROJECT_FILE_VERSION = 47;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -577,7 +581,36 @@ function readBuildingStory(value: unknown, supportsCeilingStructure: boolean, su
   };
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean): BuildingStructure | null {
+function addMissingWallUseTypes(wallTypes: LayeredAssembly[]): LayeredAssembly[] {
+  const result = wallTypes.map((wallType) => ({ ...wallType, layers: wallType.layers.map((layer) => ({ ...layer })) }));
+  const usedIds = new Set(result.map((wallType) => wallType.id));
+  const usedNames = new Set(result.map((wallType) => wallType.name.trim().toLowerCase()));
+  const defaults = createDefaultWallTypes();
+  for (const use of WALL_USES) {
+    if (result.some((wallType) => wallTypeMatchesUse(wallType, use))) continue;
+    const source = defaults.find((wallType) => wallTypeMatchesUse(wallType, use));
+    if (!source) continue;
+    let id = source.id;
+    let suffix = 1;
+    while (usedIds.has(id)) id = `wall-use-${use}-${suffix++}`;
+    let name = source.name;
+    suffix = 1;
+    while (usedNames.has(name.trim().toLowerCase())) name = `${source.name} ${suffix++}`;
+    const layerIdMap = new Map(source.layers.map((layer, index) => [layer.id, `${id}-${String(index + 1).padStart(2, "0")}`]));
+    result.push({
+      ...source,
+      id,
+      name,
+      layers: source.layers.map((layer) => ({ ...layer, id: layerIdMap.get(layer.id) ?? layer.id })),
+      wallEndCapLayerIds: (source.wallEndCapLayerIds ?? []).flatMap((layerId) => layerIdMap.get(layerId) ?? []),
+    });
+    usedIds.add(id);
+    usedNames.add(name.trim().toLowerCase());
+  }
+  return result;
+}
+
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -589,10 +622,13 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   if (stories.some((story) => story === null)) return null;
   const defaults = createDefaultBuildingStructure();
   const legacyWallType = createDefaultWallType();
-  const wallTypes = supportsWallTypes && Array.isArray(value.wallTypes)
+  const parsedWallTypes = supportsWallTypes && Array.isArray(value.wallTypes)
     ? value.wallTypes.map((wallType) => readLayeredAssembly(wallType, "wall-structure", supportsWallGroups, supportsWallJoinMetadata, wallEndCapVersion, supportsHostAwareHeaders))
     : [legacyWallType];
-  if (wallTypes.some((wallType) => wallType === null)) return null;
+  if (parsedWallTypes.some((wallType) => wallType === null)) return null;
+  const wallTypes = supportsWallUseDefaults
+    ? parsedWallTypes as LayeredAssembly[]
+    : addMissingWallUseTypes(parsedWallTypes as LayeredAssembly[]);
   if (supportsFoundationWallTypes && !Array.isArray(value.foundationWallTypes)) return null;
   const foundationWallTypes = supportsFoundationWallTypes
     ? (value.foundationWallTypes as unknown[]).map((type) => readFoundationWallType(type, supportsFoundationWallHeight))
@@ -618,6 +654,22 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   if (productObjectTypes.some((productObjectType) => productObjectType === null)) return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : legacyWallType.id;
   if (typeof activeWallTypeId !== "string") return null;
+  const activeWallUse = supportsWallUseDefaults ? value.activeWallUse : "exterior";
+  if (typeof activeWallUse !== "string" || !WALL_USES.includes(activeWallUse as WallUse)) return null;
+  const defaultExteriorWallTypeId = supportsWallUseDefaults
+    ? value.defaultExteriorWallTypeId
+    : wallTypes.find((wallType) => wallType.id === defaults.defaultExteriorWallTypeId && wallTypeMatchesUse(wallType, "exterior"))?.id
+      ?? wallTypes.find((wallType) => wallType.id === activeWallTypeId && wallTypeMatchesUse(wallType, "exterior"))?.id
+      ?? wallTypes.find((wallType) => wallTypeMatchesUse(wallType, "exterior"))?.id;
+  const defaultInteriorBearingWallTypeId = supportsWallUseDefaults
+    ? value.defaultInteriorBearingWallTypeId
+    : wallTypes.find((wallType) => wallType.id === defaults.defaultInteriorBearingWallTypeId && wallTypeMatchesUse(wallType, "interior-bearing"))?.id
+      ?? wallTypes.find((wallType) => wallTypeMatchesUse(wallType, "interior-bearing"))?.id;
+  const defaultInteriorPartitionWallTypeId = supportsWallUseDefaults
+    ? value.defaultInteriorPartitionWallTypeId
+    : wallTypes.find((wallType) => wallType.id === defaults.defaultInteriorPartitionWallTypeId && wallTypeMatchesUse(wallType, "interior-partition"))?.id
+      ?? wallTypes.find((wallType) => wallTypeMatchesUse(wallType, "interior-partition"))?.id;
+  if (typeof defaultExteriorWallTypeId !== "string" || typeof defaultInteriorBearingWallTypeId !== "string" || typeof defaultInteriorPartitionWallTypeId !== "string") return null;
   const activeFoundationWallTypeId = supportsFoundationWallTypes ? value.activeFoundationWallTypeId : defaults.activeFoundationWallTypeId;
   if (typeof activeFoundationWallTypeId !== "string") return null;
   const activeDoorTypeId = supportsOpeningTypes ? value.activeDoorTypeId : defaults.activeDoorTypeId;
@@ -627,17 +679,21 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     activeDoorTypeId,
     activeFoundationWallTypeId,
     activeWindowTypeId,
+    activeWallUse: activeWallUse as WallUse,
     activeWallTypeId,
     activeStoryId: value.activeStoryId,
     anchorStoryId: value.anchorStoryId,
     datumElevation: value.datumElevation,
+    defaultExteriorWallTypeId,
+    defaultInteriorBearingWallTypeId,
+    defaultInteriorPartitionWallTypeId,
     foundationWallTypes: foundationWallTypes as FoundationWallType[],
     headerTypes: headerTypes as WallHeaderType[],
     openingTypes: openingTypes as WallOpeningType[],
     productObjectTypes: productObjectTypes as ProductObjectType[],
     stories: stories as BuildingStory[],
     wallFraming,
-    wallTypes: wallTypes as LayeredAssembly[],
+    wallTypes,
   };
   return buildingStructureIsValid(building) ? building : null;
 }
@@ -1173,7 +1229,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

@@ -44,6 +44,8 @@ export const WALL_LOCATIONS = ["exterior", "interior"] as const;
 export type WallLocation = (typeof WALL_LOCATIONS)[number];
 export const WALL_STRUCTURAL_ROLES = ["bearing", "non-bearing"] as const;
 export type WallStructuralRole = (typeof WALL_STRUCTURAL_ROLES)[number];
+export const WALL_USES = ["exterior", "interior-bearing", "interior-partition"] as const;
+export type WallUse = (typeof WALL_USES)[number];
 export const OPENING_COMPONENT_ROLES = ["frame", "jamb", "sash", "panel", "glazing", "mullion", "trim", "threshold", "hardware"] as const;
 export type OpeningComponentRole = (typeof OPENING_COMPONENT_ROLES)[number];
 export const OPENING_COMPONENT_GEOMETRIES = ["perimeter", "panel", "panel-grid", "fixed-sash", "single-hung-sashes", "double-hung-sashes", "casement-sashes", "awning-sash", "sliding-sashes", "vertical-divider", "horizontal-divider", "vertical-prairie-divider", "horizontal-prairie-divider"] as const;
@@ -309,10 +311,14 @@ export type BuildingStructure = {
   activeDoorTypeId: string;
   activeFoundationWallTypeId: string;
   activeWindowTypeId: string;
+  activeWallUse: WallUse;
   activeWallTypeId: string;
   activeStoryId: string;
   anchorStoryId: string;
   datumElevation: number;
+  defaultExteriorWallTypeId: string;
+  defaultInteriorBearingWallTypeId: string;
+  defaultInteriorPartitionWallTypeId: string;
   foundationWallTypes: FoundationWallType[];
   headerTypes: WallHeaderType[];
   openingTypes: WallOpeningType[];
@@ -518,7 +524,38 @@ export function createDefaultWallTypes(): LayeredAssembly[] {
         { id: "wall-type-04-03", material: "Gypsum Board", name: "Side B Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "interior" },
       ],
     },
+    {
+      defaultHeaderTypeId: "header-type-04",
+      id: "wall-type-05",
+      kind: "wall-structure",
+      name: "2x4 Interior Bearing Wall",
+      wallLocation: "interior",
+      wallStructuralRole: "bearing",
+      wallEndCapLayerIds: [],
+      layers: [
+        { id: "wall-type-05-01", material: "Gypsum Board", name: "Side A Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "exterior" },
+        { id: "wall-type-05-02", material: "Lumber", name: "2x4 Stud Framing", participatesInJoin: true, role: "framing", thickness: 3.5, wallGroup: "main" },
+        { id: "wall-type-05-03", material: "Gypsum Board", name: "Side B Finish", participatesInJoin: true, role: "finish", thickness: 0.5, wallGroup: "interior" },
+      ],
+    },
   ];
+}
+
+export function wallTypeMatchesUse(wallType: LayeredAssembly, use: WallUse): boolean {
+  if (use === "exterior") return wallType.wallLocation === "exterior";
+  if (use === "interior-bearing") return wallType.wallLocation === "interior" && wallType.wallStructuralRole === "bearing";
+  return wallType.wallLocation === "interior" && wallType.wallStructuralRole === "non-bearing";
+}
+
+export function wallUseForType(wallType: LayeredAssembly): WallUse {
+  if (wallType.wallLocation === "exterior") return "exterior";
+  return wallType.wallStructuralRole === "bearing" ? "interior-bearing" : "interior-partition";
+}
+
+export function defaultWallTypeIdForUse(building: BuildingStructure, use: WallUse): string {
+  if (use === "exterior") return building.defaultExteriorWallTypeId;
+  if (use === "interior-bearing") return building.defaultInteriorBearingWallTypeId;
+  return building.defaultInteriorPartitionWallTypeId;
 }
 
 export function createDefaultWallHeaderTypes(): WallHeaderType[] {
@@ -781,10 +818,14 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     activeDoorTypeId: openingTypes.find((type) => type.kind === "door")!.id,
     activeFoundationWallTypeId: "foundation-wall-type-01",
     activeWindowTypeId: openingTypes.find((type) => type.kind === "window")!.id,
+    activeWallUse: "exterior",
     activeWallTypeId: "wall-type-02",
     activeStoryId: "story-01",
     anchorStoryId: "story-01",
     datumElevation: 0,
+    defaultExteriorWallTypeId: "wall-type-02",
+    defaultInteriorBearingWallTypeId: "wall-type-05",
+    defaultInteriorPartitionWallTypeId: "wall-type-03",
     foundationWallTypes: [createDefaultFoundationWallType()],
     headerTypes: createDefaultWallHeaderTypes(),
     openingTypes,
@@ -1156,6 +1197,7 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
 
 export function buildingStructureIsValid(building: BuildingStructure): boolean {
   if (
+    !WALL_USES.includes(building.activeWallUse) ||
     !Number.isFinite(building.datumElevation) ||
     Math.abs(building.datumElevation) > MAXIMUM_BUILDING_DATUM ||
     !isSixteenth(building.datumElevation) ||
@@ -1254,8 +1296,14 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     storyIds.add(story.id);
     storyNames.add(normalizedName);
   }
+  const defaultExteriorWallType = building.wallTypes.find((wallType) => wallType.id === building.defaultExteriorWallTypeId);
+  const defaultInteriorBearingWallType = building.wallTypes.find((wallType) => wallType.id === building.defaultInteriorBearingWallTypeId);
+  const defaultInteriorPartitionWallType = building.wallTypes.find((wallType) => wallType.id === building.defaultInteriorPartitionWallTypeId);
   return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) &&
     wallTypeIds.has(building.activeWallTypeId) && foundationTypeIds.has(building.activeFoundationWallTypeId) &&
+    Boolean(defaultExteriorWallType && wallTypeMatchesUse(defaultExteriorWallType, "exterior")) &&
+    Boolean(defaultInteriorBearingWallType && wallTypeMatchesUse(defaultInteriorBearingWallType, "interior-bearing")) &&
+    Boolean(defaultInteriorPartitionWallType && wallTypeMatchesUse(defaultInteriorPartitionWallType, "interior-partition")) &&
     building.openingTypes.some((type) => type.id === building.activeDoorTypeId && type.kind === "door") &&
     building.openingTypes.some((type) => type.id === building.activeWindowTypeId && type.kind === "window");
 }

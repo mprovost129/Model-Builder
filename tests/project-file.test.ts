@@ -57,8 +57,9 @@ test("round-trips a blank new plan with its project settings", () => {
   assert.deepEqual(document.objects, []);
   assert.deepEqual(document.lines, []);
   assert.equal(document.building.stories[0].name, "First Floor");
-  assert.equal(document.building.wallTypes.length, 4);
+  assert.equal(document.building.wallTypes.length, 5);
   assert.equal(document.building.activeWallTypeId, "wall-type-02");
+  assert.deepEqual([document.building.activeWallUse, document.building.defaultExteriorWallTypeId, document.building.defaultInteriorBearingWallTypeId, document.building.defaultInteriorPartitionWallTypeId], ["exterior", "wall-type-02", "wall-type-05", "wall-type-03"]);
   assert.equal(document.building.foundationWallTypes.length, 1);
   assert.equal(document.building.activeFoundationWallTypeId, document.building.foundationWallTypes[0].id);
   assert.equal(document.layerSets.length, 1);
@@ -75,6 +76,26 @@ test("upgrades version-45 projects with blank project information", () => {
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.deepEqual(projectToDocument(parsed.project).projectInformation, NEW_PROJECT_DOCUMENT.projectInformation);
+});
+
+test("upgrades version-46 projects with categorized Wall defaults", () => {
+  const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Version 46 Plan", updatedAt });
+  const legacy = structuredClone(current) as unknown as { building: Record<string, unknown>; version: number };
+  legacy.version = 46;
+  delete legacy.building.activeWallUse;
+  delete legacy.building.defaultExteriorWallTypeId;
+  delete legacy.building.defaultInteriorBearingWallTypeId;
+  delete legacy.building.defaultInteriorPartitionWallTypeId;
+  const parsed = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.project.version, PROJECT_FILE_VERSION);
+  assert.deepEqual([
+    parsed.project.building.activeWallUse,
+    parsed.project.building.defaultExteriorWallTypeId,
+    parsed.project.building.defaultInteriorBearingWallTypeId,
+    parsed.project.building.defaultInteriorPartitionWallTypeId,
+  ], ["exterior", "wall-type-02", "wall-type-05", "wall-type-03"]);
 });
 
 test("upgrades version-42 projects with standard layers, Layer Sets, Saved Views, and Room annotation storage", () => {
@@ -523,6 +544,9 @@ test("round-trips host-aware header assemblies and upgrades version-30 through v
     ["exterior", "bearing", "header-type-04"],
     ["exterior", "bearing", "header-type-04"],
     ["exterior", "bearing", "header-type-04"],
+    ["exterior", "bearing", "header-type-04"],
+    ["interior", "bearing", "header-type-04"],
+    ["interior", "non-bearing", "header-type-02"],
   ]);
   assert.equal(upgradedHostHeaders.project.building.openingTypes.every((type) => type.headerTypeId === "header-type-04"), true);
 
@@ -801,7 +825,9 @@ test("upgrades version-14 projects with default wall types and drafting Lines", 
   assert.equal(parsed.project.version, PROJECT_FILE_VERSION);
   assert.equal(parsed.project.lines[0].architecturalRole, null);
   assert.equal(parsed.project.lines[0].wallTypeId, null);
-  assert.equal(parsed.project.building.wallTypes.length, 1);
+  assert.equal(parsed.project.building.wallTypes.length, 3);
+  assert.equal(parsed.project.building.wallTypes.some((type) => type.wallLocation === "interior" && type.wallStructuralRole === "bearing"), true);
+  assert.equal(parsed.project.building.wallTypes.some((type) => type.wallLocation === "interior" && type.wallStructuralRole === "non-bearing"), true);
 });
 
 test("upgrades version-15 Stories with an empty ceiling-structure assembly", () => {

@@ -27,6 +27,10 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] Story table shows type, calculated rough-floor elevation, and ceiling / plate height.
 - [x] Quick editing for Story name, type, ceiling / plate height, and floor-structure preset.
 - [x] Active Foundation Wall, Wall, Door, and Window types can be selected before drawing.
+- [x] Separate project defaults for Exterior Wall, Interior Bearing Wall, and Interior Partition types.
+- [x] Wall drawing Properties includes a Wall Use selector that recalls the assigned default Type for each use.
+- [x] New and version-46-or-earlier projects receive a valid Interior Bearing Wall type when one is missing.
+- [x] Wall Types assigned as project defaults are protected from accidental deletion or reclassification until another default is chosen.
 - [x] Review checklist summarizes the model-driving setup before project creation.
 - [x] Detailed Story assembly cards are collapsible and calculated values are visually separated from editable inputs.
 - [x] Dedicated advanced Story, Foundation, Wall, Door/Window, Framing, Room, and Layer tools remain available.
@@ -34,7 +38,6 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 
 ## Next setup work
 
-- [ ] Separate project defaults for Exterior Wall, Interior Bearing Wall, and Interior Partition types. The current Wall tool correctly uses one active Wall type.
 - [ ] Project template files that users can save, name, duplicate, and choose from the dashboard.
 - [ ] Metric and additional display precision support. Internal geometry should remain unit-neutral during this work.
 - [ ] Geographic/location data, orientation, project north / true north, and climate information.
@@ -60,4 +63,5 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] A saved and reopened project retains project information and building setup.
 - [x] Older project files continue to open.
 - [x] Quick Setup does not hide or replace the detailed assembly editors.
-- [x] Unsupported unit and wall-default behavior is labeled as planned rather than presented as working.
+- [x] Wall-default behavior shown in Quick Setup and Drawing Properties is backed by saved project data.
+- [x] Unsupported measurement formats remain labeled as planned rather than presented as working.

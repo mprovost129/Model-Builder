@@ -24,6 +24,7 @@ import {
   wallHeaderTypeIsValid,
   wallHeaderTypeRequiredMainThickness,
   wallLayerGroupThickness,
+  wallTypeMatchesUse,
   windowLitePatternForType,
   windowSashArrangementForType,
   removeBuildingStory,
@@ -136,10 +137,12 @@ test("sums every layer in a rough floor assembly", () => {
 
 test("defines reusable exterior-to-interior layered wall types", () => {
   const building = createDefaultBuildingStructure();
-  assert.equal(building.wallTypes.length, 4);
+  assert.equal(building.wallTypes.length, 5);
   assert.equal(building.activeWallTypeId, "wall-type-02");
-  assert.deepEqual(building.wallTypes.map((type) => type.name), ["2x4 Exterior Wall", "2x6 Exterior Wall", "2x4 Interior Wall", "2x6 Interior Wall"]);
-  assert.deepEqual(building.wallTypes.map((type) => wallLayerGroupThickness(type, "main")), [3.5, 5.5, 3.5, 5.5]);
+  assert.equal(building.activeWallUse, "exterior");
+  assert.deepEqual([building.defaultExteriorWallTypeId, building.defaultInteriorBearingWallTypeId, building.defaultInteriorPartitionWallTypeId], ["wall-type-02", "wall-type-05", "wall-type-03"]);
+  assert.deepEqual(building.wallTypes.map((type) => type.name), ["2x4 Exterior Wall", "2x6 Exterior Wall", "2x4 Interior Wall", "2x6 Interior Wall", "2x4 Interior Bearing Wall"]);
+  assert.deepEqual(building.wallTypes.map((type) => wallLayerGroupThickness(type, "main")), [3.5, 5.5, 3.5, 5.5, 3.5]);
   assert.equal(building.wallTypes[0].kind, "wall-structure");
   assert.equal(assemblyTotalThickness(building.wallTypes[0]), 4.9375);
   assert.equal(building.wallTypes[0].layers[0].name, "Exterior Finish");
@@ -154,7 +157,15 @@ test("defines reusable exterior-to-interior layered wall types", () => {
     ["exterior", "bearing", "header-type-01"],
     ["interior", "non-bearing", "header-type-02"],
     ["interior", "non-bearing", "header-type-02"],
+    ["interior", "bearing", "header-type-04"],
   ]);
+  assert.equal(wallTypeMatchesUse(building.wallTypes[1], "exterior"), true);
+  assert.equal(wallTypeMatchesUse(building.wallTypes[4], "interior-bearing"), true);
+  assert.equal(wallTypeMatchesUse(building.wallTypes[2], "interior-partition"), true);
+
+  const invalidDefault = cloneBuildingStructure(building);
+  invalidDefault.defaultInteriorBearingWallTypeId = "wall-type-03";
+  assert.equal(buildingStructureIsValid(invalidDefault), false);
 });
 
 test("defines reusable Foundation Wall types with condition-based sill ownership", () => {

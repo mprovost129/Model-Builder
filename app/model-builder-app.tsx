@@ -334,6 +334,7 @@ import {
   OPENING_COMPONENT_GEOMETRIES,
   OPENING_COMPONENT_ROLES,
   foundationConditionPlateDefaults,
+  defaultWallTypeIdForUse,
   foundationSillStackHeight,
   FOUNDATION_WALL_CONDITIONS,
   MAXIMUM_WALL_OPENING_TYPE_COUNT,
@@ -343,6 +344,8 @@ import {
   recommendedWallHeaderTypeId,
   resolveWallHeaderType,
   wallDefaultHeaderTypeId,
+  wallTypeMatchesUse,
+  wallUseForType,
   wallLayerGroupThickness,
   wallLayerDistanceRanges,
   wallReferenceDistanceFromExterior,
@@ -380,6 +383,7 @@ import {
   type WallPartitionBackingStyle,
   type WallReferenceLine,
   type WallStructuralRole,
+  type WallUse,
 } from "@/lib/building-stories";
 import type { ProductLibraryTarget } from "@/lib/product-library";
 import {
@@ -9184,6 +9188,12 @@ const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   "as-built": "Existing / as-built",
 };
 
+const WALL_USE_LABELS: Record<WallUse, string> = {
+  exterior: "Exterior Wall",
+  "interior-bearing": "Interior Bearing Wall",
+  "interior-partition": "Interior Partition",
+};
+
 const WALL_LAYER_GROUP_LABELS: Record<WallLayerGroup, string> = {
   exterior: "Exterior Layers",
   main: "Main Layers",
@@ -9683,6 +9693,12 @@ function WallTypeManagerDialog({
     return () => window.removeEventListener("keydown", closeWithEscape, true);
   }, [onCancel]);
   const selected = draft.wallTypes.find((wallType) => wallType.id === selectedId) ?? draft.wallTypes[0];
+  const defaultWallTypeIds = new Set([
+    draft.defaultExteriorWallTypeId,
+    draft.defaultInteriorBearingWallTypeId,
+    draft.defaultInteriorPartitionWallTypeId,
+  ]);
+  const selectedIsProjectDefault = defaultWallTypeIds.has(selected.id);
   const effectiveSelectedLayerId = selected.layers.some((layer) => layer.id === selectedLayerId) ? selectedLayerId : selected.layers[0]?.id ?? "";
   const selectedMainThickness = wallLayerGroupThickness(selected, "main");
   const compatibleHeaders = draft.headerTypes.filter((headerType) => {
@@ -9713,15 +9729,16 @@ function WallTypeManagerDialog({
       layers: selected.layers.map((layer) => ({ ...layer, id: layerIdMap.get(layer.id) ?? layer.id })),
       wallEndCapLayerIds: (selected.wallEndCapLayerIds ?? []).flatMap((layerId) => layerIdMap.get(layerId) ?? []),
     };
-    setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: id, wallTypes: [...current.wallTypes.map((wallType) => ({ ...wallType, layers: wallType.layers.map((layer) => ({ ...layer })) })), copy] }));
+    setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallUse: wallUseForType(copy), activeWallTypeId: id, wallTypes: [...current.wallTypes.map((wallType) => ({ ...wallType, layers: wallType.layers.map((layer) => ({ ...layer })) })), copy] }));
     setSelectedId(id);
     setSelectedLayerId(copy.layers[0]?.id ?? "");
   };
   const deleteType = () => {
-    if (draft.wallTypes.length <= 1) return;
+    if (draft.wallTypes.length <= 1 || selectedIsProjectDefault) return;
     const remaining = draft.wallTypes.filter((wallType) => wallType.id !== selected.id);
     const nextActive = draft.activeWallTypeId === selected.id ? remaining[0].id : draft.activeWallTypeId;
-    setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: nextActive, wallTypes: remaining }));
+    const nextActiveType = remaining.find((wallType) => wallType.id === nextActive) ?? remaining[0];
+    setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallUse: wallUseForType(nextActiveType), activeWallTypeId: nextActive, wallTypes: remaining }));
     setSelectedId(nextActive);
   };
   const save = () => {
@@ -9740,21 +9757,22 @@ function WallTypeManagerDialog({
           <aside className="story-list">
             <header><strong>Wall Types</strong><span>{draft.wallTypes.length} defined</span></header>
             {draft.wallTypes.map((wallType) => <button type="button" key={wallType.id} className={wallType.id === selected.id ? "is-selected" : ""} onClick={() => { setSelectedId(wallType.id); setSelectedLayerId(wallType.layers[0]?.id ?? ""); }}><strong>{wallType.name}</strong><span>{formatArchitectural(assemblyTotalThickness(wallType))} total</span>{wallType.id === draft.activeWallTypeId ? <small>ACTIVE TYPE</small> : null}</button>)}
-            <div className="story-list-actions"><button type="button" onClick={addType} disabled={draft.wallTypes.length >= 32}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={draft.wallTypes.length <= 1}>Delete</button></div>
+            <div className="story-list-actions"><button type="button" onClick={addType} disabled={draft.wallTypes.length >= 32}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={draft.wallTypes.length <= 1 || selectedIsProjectDefault} title={selectedIsProjectDefault ? "Choose another project default before deleting this Type" : undefined}>Delete</button></div>
           </aside>
           <main className="story-editor">
             <section className="story-editor-summary">
               <label><span>Type name</span><input value={selected.name} maxLength={80} onChange={(event) => replaceSelected({ ...selected, name: event.target.value })} /></label>
               <label><span>Open-end wrap</span><output>{selected.wallEndCapLayerIds?.length ? `${selected.wallEndCapLayerIds.length} finish layer${selected.wallEndCapLayerIds.length === 1 ? "" : "s"}` : "None"}</output></label>
-              <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
+              <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallUse: wallUseForType(selected), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
             </section>
             <section className="foundation-setting-section">
               <header><div><strong>Wall Use &amp; Opening Framing</strong><span>The host Wall supplies the normal header assembly; a Door/Window Type or placed opening can override it.</span></div></header>
               <div className="foundation-field-grid">
-                <label className="story-field"><span>Wall location</span><select value={selected.wallLocation ?? "exterior"} onChange={(event) => { const wallLocation = event.target.value as WallLocation; const next = { ...selected, wallLocation }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="exterior">Exterior</option><option value="interior">Interior</option></select></label>
-                <label className="story-field"><span>Structural role</span><select value={selected.wallStructuralRole ?? "bearing"} onChange={(event) => { const wallStructuralRole = event.target.value as WallStructuralRole; const next = { ...selected, wallStructuralRole }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="bearing">Bearing</option><option value="non-bearing">Non-bearing</option></select></label>
+                <label className="story-field"><span>Wall location</span><select value={selected.wallLocation ?? "exterior"} disabled={selectedIsProjectDefault} title={selectedIsProjectDefault ? "Change the project default assignment before reclassifying this Type" : undefined} onChange={(event) => { const wallLocation = event.target.value as WallLocation; const next = { ...selected, wallLocation }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="exterior">Exterior</option><option value="interior">Interior</option></select></label>
+                <label className="story-field"><span>Structural role</span><select value={selected.wallStructuralRole ?? "bearing"} disabled={selectedIsProjectDefault} title={selectedIsProjectDefault ? "Change the project default assignment before reclassifying this Type" : undefined} onChange={(event) => { const wallStructuralRole = event.target.value as WallStructuralRole; const next = { ...selected, wallStructuralRole }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="bearing">Bearing</option><option value="non-bearing">Non-bearing</option></select></label>
                 <label className="story-field"><span>Default header assembly</span><select value={wallDefaultHeaderTypeId(selected)} onChange={(event) => replaceSelected({ ...selected, defaultHeaderTypeId: event.target.value })}>{compatibleHeaders.map((headerType) => <option key={headerType.id} value={headerType.id}>{headerType.scheduleMark} · {headerType.name}{headerType.engineeringRequired ? " · Engineering" : ""}</option>)}</select></label>
               </div>
+              {selectedIsProjectDefault ? <p className="story-help-text">This Type is assigned as a project Wall default. Choose a different default in Project Setup before deleting or reclassifying it.</p> : null}
               <p className="opening-type-note">Changing the location or structural role applies the recommended residential default. The selected assembly remains an explicit project rule; loads, spans, species, grades, and code compliance are not calculated here.</p>
             </section>
             <StoryAssemblyEditor assembly={selected} onChange={replaceSelected} onSelectLayer={setSelectedLayerId} selectedLayerId={effectiveSelectedLayerId} />
@@ -10948,6 +10966,7 @@ function ProjectSetupDialog({
   const activeWall = draft.building.wallTypes.find((type) => type.id === draft.building.activeWallTypeId) ?? draft.building.wallTypes[0];
   const activeDoor = draft.building.openingTypes.find((type) => type.id === draft.building.activeDoorTypeId);
   const activeWindow = draft.building.openingTypes.find((type) => type.id === draft.building.activeWindowTypeId);
+  const wallTypesForUse = (use: WallUse) => draft.building.wallTypes.filter((type) => wallTypeMatchesUse(type, use));
   const stepIndex = PROJECT_SETUP_STEPS.findIndex((item) => item.id === step);
 
   useEffect(() => {
@@ -10971,6 +10990,21 @@ function ProjectSetupDialog({
   const changeBuilding = (building: BuildingStructure) => {
     setDraft((current) => ({ ...cloneDocument(current), building: cloneBuildingStructure(building) }));
     setError("");
+  };
+  const changeWallDefault = (use: WallUse, wallTypeId: string) => {
+    const building = cloneBuildingStructure(draft.building);
+    if (!building.wallTypes.some((type) => type.id === wallTypeId && wallTypeMatchesUse(type, use))) return;
+    if (use === "exterior") building.defaultExteriorWallTypeId = wallTypeId;
+    else if (use === "interior-bearing") building.defaultInteriorBearingWallTypeId = wallTypeId;
+    else building.defaultInteriorPartitionWallTypeId = wallTypeId;
+    if (building.activeWallUse === use) building.activeWallTypeId = wallTypeId;
+    changeBuilding(building);
+  };
+  const changeStartingWallUse = (use: WallUse) => {
+    const building = cloneBuildingStructure(draft.building);
+    building.activeWallUse = use;
+    building.activeWallTypeId = defaultWallTypeIdForUse(building, use);
+    changeBuilding(building);
   };
   const replaceSelectedStory = (change: Partial<typeof selectedStory>) => {
     const building = cloneBuildingStructure(draft.building);
@@ -11052,7 +11086,8 @@ function ProjectSetupDialog({
     { complete: draft.building.stories.every((story) => story.roughCeilingHeight > 0), label: "Ceiling / plate heights", value: "Set for every Story" },
     { complete: draft.building.stories.every((story) => story.floorStructure.layers.length > 0), label: "Floor structure", value: "Assembly assigned to every Story" },
     { complete: Boolean(activeFoundation), label: "Foundation default", value: activeFoundation?.name ?? "Required" },
-    { complete: Boolean(activeWall), label: "Wall drawing default", value: activeWall?.name ?? "Required" },
+    { complete: Boolean(activeWall), label: "Starting Wall use", value: `${WALL_USE_LABELS[draft.building.activeWallUse]} · ${activeWall?.name ?? "Required"}` },
+    { complete: ["exterior", "interior-bearing", "interior-partition"].every((use) => wallTypesForUse(use as WallUse).length > 0), label: "Wall defaults", value: "Exterior, bearing, and partition assigned" },
   ];
 
   return (
@@ -11091,9 +11126,9 @@ function ProjectSetupDialog({
               <header><span>3 · Defaults</span><strong>Choose what the first drafting tools will use.</strong><p>These choices select active reusable Types. Editing the construction layers remains in the detailed managers.</p></header>
               <section className="project-default-grid">
                 <article><header><b>▰</b><div><strong>Foundation</strong><span>Support, footing, and sill edge</span></div></header><label><span>Active Foundation Wall type</span><select value={draft.building.activeFoundationWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeFoundationWallTypeId: event.target.value })}>{draft.building.foundationWallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Condition</dt><dd>{activeFoundation?.condition.replaceAll("-", " ")}</dd></div><div><dt>Sill plates</dt><dd>{activeFoundation?.sill.foundationPlateCount}</dd></div></dl></article>
-                <article><header><b>▥</b><div><strong>Walls</strong><span>Active type for the Wall tool</span></div></header><label><span>Active Wall type</span><select value={draft.building.activeWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWallTypeId: event.target.value })}>{draft.building.wallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Location</dt><dd>{activeWall?.wallLocation ?? "—"}</dd></div><div><dt>Total thickness</dt><dd>{activeWall ? formatArchitectural(assemblyTotalThickness(activeWall)) : "—"}</dd></div></dl></article>
+                <article><header><b>▥</b><div><strong>Walls</strong><span>Defaults by drawing use</span></div></header><label><span>Exterior Wall</span><select value={draft.building.defaultExteriorWallTypeId} onChange={(event) => changeWallDefault("exterior", event.target.value)}>{wallTypesForUse("exterior").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Bearing Wall</span><select value={draft.building.defaultInteriorBearingWallTypeId} onChange={(event) => changeWallDefault("interior-bearing", event.target.value)}>{wallTypesForUse("interior-bearing").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Partition</span><select value={draft.building.defaultInteriorPartitionWallTypeId} onChange={(event) => changeWallDefault("interior-partition", event.target.value)}>{wallTypesForUse("interior-partition").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Starting Wall use</span><select value={draft.building.activeWallUse} onChange={(event) => changeStartingWallUse(event.target.value as WallUse)}>{Object.entries(WALL_USE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><dl><div><dt>First Wall Type</dt><dd>{activeWall?.name ?? "—"}</dd></div><div><dt>Total thickness</dt><dd>{activeWall ? formatArchitectural(assemblyTotalThickness(activeWall)) : "—"}</dd></div></dl></article>
                 <article><header><b>▣</b><div><strong>Doors &amp; Windows</strong><span>Reusable opening Types</span></div></header><label><span>Active Door type</span><select value={draft.building.activeDoorTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeDoorTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "door").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Active Window type</span><select value={draft.building.activeWindowTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWindowTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "window").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Door</dt><dd>{activeDoor?.name}</dd></div><div><dt>Window</dt><dd>{activeWindow?.name}</dd></div></dl></article>
-              </section><p className="project-setup-note">A future milestone will add separate exterior, interior-bearing, and partition defaults. For now, the selected active Wall type is exactly what the Wall tool uses, so the interface does not imply behavior that is not yet implemented.</p>
+              </section><p className="project-setup-note">The Wall tool starts with the selected Wall use. While drawing, switch between Exterior, Interior Bearing, and Interior Partition without reopening Project Setup; each use recalls its assigned default Type.</p>
             </> : null}
             {step === "review" ? <>
               <header><span>4 · Review</span><strong>Confirm the model-driving settings.</strong><p>This is a setup check, not a lock. Every value remains editable from Manage after the project opens.</p></header>
@@ -14269,8 +14304,10 @@ export function ModelBuilderApp() {
   }, [editor.present]);
 
   const selectActiveWallType = useCallback((wallTypeId: string) => {
-    if (!editor.present.building.wallTypes.some((wallType) => wallType.id === wallTypeId)) return;
+    const selectedType = editor.present.building.wallTypes.find((wallType) => wallType.id === wallTypeId);
+    if (!selectedType) return;
     const building = cloneBuildingStructure(editor.present.building);
+    building.activeWallUse = wallUseForType(selectedType);
     building.activeWallTypeId = wallTypeId;
     const next = updateDocumentBuilding(editor.present, building);
     if (!next) {
@@ -14278,8 +14315,23 @@ export function ModelBuilderApp() {
       return;
     }
     dispatch({ type: "commit", next });
-    const selectedType = building.wallTypes.find((wallType) => wallType.id === wallTypeId);
     setFileNotice({ text: `${selectedType?.name ?? "Wall type"} is active for new walls.`, tone: "success" });
+  }, [editor.present]);
+
+  const selectActiveWallUse = useCallback((use: WallUse) => {
+    const building = cloneBuildingStructure(editor.present.building);
+    const wallTypeId = defaultWallTypeIdForUse(building, use);
+    const selectedType = building.wallTypes.find((wallType) => wallType.id === wallTypeId && wallTypeMatchesUse(wallType, use));
+    if (!selectedType) {
+      setFileNotice({ text: `No valid ${WALL_USE_LABELS[use]} default is assigned. Open Project Setup to choose one.`, tone: "error" });
+      return;
+    }
+    building.activeWallUse = use;
+    building.activeWallTypeId = wallTypeId;
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: `${WALL_USE_LABELS[use]} active · ${selectedType.name}.`, tone: "success" });
   }, [editor.present]);
 
   const applyFoundationWallTypes = useCallback((building: BuildingStructure) => {
@@ -15889,7 +15941,7 @@ export function ModelBuilderApp() {
             <>
               <PropertyGridSection className="drawing-properties" title={activeDrawingTitle} meta={activeDrawingMeta}>
                 {arcMode ? <PropertyGridRow label="Method"><select className="property-cell-select" value={arcMethod} onChange={(event) => activateArcMode(event.target.value as ArcMethod)} aria-label="Active Arc method">{ARC_METHODS.map((definition) => <option key={definition.method} value={definition.method}>{definition.label}</option>)}</select></PropertyGridRow> : null}
-                {wallMode ? <PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Active Wall Type for new walls">{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow> : null}
+                {wallMode ? <><PropertyGridRow label="Wall Use"><select className="property-cell-select" value={editor.present.building.activeWallUse} onChange={(event) => selectActiveWallUse(event.target.value as WallUse)} aria-label="Wall Use for new walls">{Object.entries(WALL_USE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow><PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Active Wall Type for new walls">{editor.present.building.wallTypes.filter((wallType) => wallTypeMatchesUse(wallType, editor.present.building.activeWallUse)).map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow></> : null}
                 <PropertyGridRow label="Current layer"><span className="property-readout">{activeLayer?.name ?? "Default"}</span></PropertyGridRow>
                 {wallMode || foundationWallMode ? <PropertyGridRow label="Elevation"><span className="property-readout">{formatSignedArchitectural(cadDraftingSettings.activeElevation)} · Story controlled</span></PropertyGridRow> : <label className="property-table-row property-input-row"><span className="property-table-label">Elevation</span><div className={activeElevationError ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={activeElevationDraft} onChange={(event) => { setActiveElevationDraft(event.target.value); setActiveElevationError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyActiveElevation(); }} onBlur={applyActiveElevation} aria-label="Active drawing elevation" spellCheck={false} /><span>ft-in</span></div></label>}
                 {!wallMode && activeElevationError ? <p className="property-grid-note property-row-error" role="alert">{activeElevationError}</p> : null}
@@ -15930,7 +15982,8 @@ export function ModelBuilderApp() {
                 <PropertyGridRow label="Rough floor"><span className="property-readout">{formatSignedArchitectural(activeStoryCalculation?.roughFloorElevation ?? 0)}</span></PropertyGridRow>
                 <PropertyGridRow label="Ceiling height"><span className="property-readout">{formatArchitectural(activeStory.roughCeilingHeight)}</span></PropertyGridRow>
                 <PropertyGridRow label="Floor depth"><span className="property-readout">{formatArchitectural(assemblyTotalThickness(activeStory.floorStructure))}</span></PropertyGridRow>
-                <PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Project active Wall Type">{editor.present.building.wallTypes.map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow>
+                <PropertyGridRow label="Starting Wall Use"><select className="property-cell-select" value={editor.present.building.activeWallUse} onChange={(event) => selectActiveWallUse(event.target.value as WallUse)} aria-label="Project starting Wall Use">{Object.entries(WALL_USE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></PropertyGridRow>
+                <PropertyGridRow label="Active Wall Type"><select className="property-cell-select" value={activeWallType.id} onChange={(event) => selectActiveWallType(event.target.value)} aria-label="Project active Wall Type">{editor.present.building.wallTypes.filter((wallType) => wallTypeMatchesUse(wallType, editor.present.building.activeWallUse)).map((wallType) => <option key={wallType.id} value={wallType.id}>{wallType.name}</option>)}</select></PropertyGridRow>
                 <PropertyGridRow label="Rooms"><span className="property-readout">{activeStoryRoomCount} detected</span></PropertyGridRow>
                 <div className="property-action-row project-setup-actions"><button type="button" onClick={() => setProjectSetupMode("edit")}>Project Setup Center</button><button type="button" onClick={() => setStoryManagerOpen(true)}>Story &amp; Floor Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
                 <p className="property-grid-note">Story settings establish the defaults. Room settings override them only where needed.</p>

@@ -218,8 +218,9 @@ test("defines a blank new-project document with editable project defaults", () =
   assert.deepEqual(NEW_PROJECT_DOCUMENT.circles, []);
   assert.deepEqual(NEW_PROJECT_DOCUMENT.arcs, []);
   assert.equal(NEW_PROJECT_DOCUMENT.building.stories[0].name, "First Floor");
-  assert.equal(NEW_PROJECT_DOCUMENT.building.wallTypes.length, 4);
+  assert.equal(NEW_PROJECT_DOCUMENT.building.wallTypes.length, 5);
   assert.equal(NEW_PROJECT_DOCUMENT.building.activeWallTypeId, "wall-type-02");
+  assert.equal(NEW_PROJECT_DOCUMENT.building.defaultInteriorBearingWallTypeId, "wall-type-05");
   const added = addBoxObject(NEW_PROJECT_DOCUMENT);
   assert.ok(added);
   assert.equal(added.object.id, "box-01");
@@ -1734,14 +1735,14 @@ test("keeps Walls on their Story when moved or copied and reassigns removed wall
   assert.equal(copied.document.lines[1].start.z, 0);
 
   const revised = cloneBuildingStructure(copied.document.building);
-  revised.wallTypes.push({ ...revised.wallTypes[0], id: "wall-type-05", name: "Alternate Wall", layers: revised.wallTypes[0].layers.map((layer, index) => ({ ...layer, id: `wall-type-05-${index + 1}` })) });
-  revised.activeWallTypeId = "wall-type-05";
+  revised.wallTypes.push({ ...revised.wallTypes[0], id: "wall-type-06", name: "Alternate Wall", layers: revised.wallTypes[0].layers.map((layer, index) => ({ ...layer, id: `wall-type-06-${index + 1}` })) });
+  revised.activeWallTypeId = "wall-type-06";
   const withTypes = updateDocumentBuilding(copied.document, revised);
   assert.ok(withTypes);
-  const reassigned = assignWallType(withTypes, withTypes.lines[0].id, "wall-type-05");
+  const reassigned = assignWallType(withTypes, withTypes.lines[0].id, "wall-type-06");
   assert.ok(reassigned);
   const removed = cloneBuildingStructure(revised);
-  removed.wallTypes = removed.wallTypes.filter((wallType) => wallType.id !== "wall-type-05");
+  removed.wallTypes = removed.wallTypes.filter((wallType) => wallType.id !== "wall-type-06");
   removed.activeWallTypeId = removed.wallTypes[0].id;
   const normalized = updateDocumentBuilding({ ...reassigned, building: revised }, removed);
   assert.ok(normalized);
