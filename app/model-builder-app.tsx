@@ -379,6 +379,12 @@ import {
 } from "@/lib/building-stories";
 import type { ProductLibraryTarget } from "@/lib/product-library";
 import {
+  MATERIAL_CATEGORIES,
+  MATERIAL_CATEGORY_LABELS,
+  architecturalMaterialByName,
+  architecturalMaterialsForRole,
+} from "@/lib/material-library";
+import {
   automaticWallJoinCount,
   buildAutomaticWallJoinPlan,
   unresolvedWallJunctionCount,
@@ -8960,6 +8966,35 @@ function StoryDimensionInput({
   );
 }
 
+function AssemblyMaterialSelect({
+  layer,
+  onChange,
+}: {
+  layer: AssemblyLayer;
+  onChange: (material: string) => void;
+}) {
+  const definition = architecturalMaterialByName(layer.material);
+  const compatibleMaterials = architecturalMaterialsForRole(layer.role);
+  const compatibleNames = new Set(compatibleMaterials.map((material) => material.name));
+  const currentNeedsFallback = !compatibleNames.has(layer.material);
+  const summary = definition
+    ? `Plan: ${definition.plan.pattern} · 3D surface properties ready · texture ${definition.model.textureAssetId ? "assigned" : "not assigned"}`
+    : "Existing project material · preserved until a library material is selected";
+
+  return (
+    <div className="story-material-choice" title={summary}>
+      <i style={{ backgroundColor: definition?.plan.color ?? "#a8b1b6" }} aria-hidden="true" />
+      <select value={layer.material} onChange={(event) => onChange(event.target.value)} aria-label={`${layer.name} material`}>
+        {currentNeedsFallback ? <optgroup label="Current project material"><option value={layer.material}>{layer.material}</option></optgroup> : null}
+        {MATERIAL_CATEGORIES.map((category) => {
+          const options = compatibleMaterials.filter((material) => material.category === category);
+          return options.length ? <optgroup label={MATERIAL_CATEGORY_LABELS[category]} key={category}>{options.map((material) => <option value={material.name} key={material.name}>{material.name}</option>)}</optgroup> : null;
+        })}
+      </select>
+    </div>
+  );
+}
+
 function StoryAssemblyEditor({
   assembly,
   onChange,
@@ -8974,11 +9009,16 @@ function StoryAssemblyEditor({
   const isWallAssembly = assembly.kind === "wall-structure";
   const addLayer = (wallGroup?: WallLayerGroup) => {
     const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
+    const role: AssemblyLayerRole = isWallAssembly
+      ? wallGroup === "main" ? "framing" : "finish"
+      : assembly.kind === "floor-structure" || assembly.kind === "ceiling-structure" ? "framing" : "finish";
     const layer: AssemblyLayer = {
       id: nextAssemblyLayerId(next),
-      material: "New Material",
+      material: isWallAssembly && wallGroup === "exterior"
+        ? "Exterior Cladding"
+        : role === "framing" ? "Lumber" : "Gypsum Board",
       name: "New Layer",
-      role: assembly.kind === "floor-structure" || assembly.kind === "ceiling-structure" || isWallAssembly ? "framing" : "finish",
+      role,
       thickness: 0.5,
     };
     if (isWallAssembly) {
@@ -9040,7 +9080,7 @@ function StoryAssemblyEditor({
         <span>{index + 1}</span>
         <div className="story-layer-names">
           <input value={layer.name} onChange={(event) => updateLayer(index, { name: event.target.value })} aria-label={`${assembly.name} layer ${index + 1} name`} />
-          <input value={layer.material} onChange={(event) => updateLayer(index, { material: event.target.value })} aria-label={`${layer.name} material`} />
+          <AssemblyMaterialSelect layer={layer} onChange={(material) => updateLayer(index, { material })} />
         </div>
         <select value={layer.role} onChange={(event) => updateLayer(index, { role: event.target.value as AssemblyLayerRole })} aria-label={`${layer.name} role`}>
           {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}

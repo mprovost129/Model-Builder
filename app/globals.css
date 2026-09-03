@@ -1042,6 +1042,9 @@ button { color: inherit; }
 .story-layer-head { min-height: 24px; background: #222b34; }
 .story-layer-head span { padding: 0 5px; color: #93a0ab; text-align: left; }
 .story-layer-names { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; }
+.story-material-choice { position: relative; min-width: 0; }
+.story-material-choice > i { position: absolute; z-index: 1; top: 50%; left: 6px; width: 9px; height: 9px; border: 1px solid rgba(12, 24, 31, .45); border-radius: 1px; transform: translateY(-50%); pointer-events: none; }
+.story-material-choice > select { padding-left: 20px; }
 .story-layer-grid > select { margin: 3px; }
 .story-layer-grid > .story-field { padding: 3px; }
 .story-layer-grid > .story-field > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
@@ -2919,6 +2922,7 @@ button { color: inherit; }
 .theme-light .story-layer-head,
 .theme-light .story-wall-group-heading { background: #e4ebed; }
 .theme-light .story-wall-group-add { border-color: var(--ui-border); background: #f5f8f9; color: var(--ui-ink); }
+.theme-light .story-material-choice > i { border-color: rgba(37, 66, 82, .35); }
 .theme-light .story-layer-head span { color: #637987; }
 .theme-light .story-layer-join { color: #617786; }
 .theme-light .story-layer-actions button { border-color: var(--ui-border); background: #edf2f3; color: #536c7c; }

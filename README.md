@@ -98,6 +98,9 @@ polylines, rectangles, Circles, and Arcs.
   classifications, and editable structural and finish layers
 - Layered floor structure, floor finish, ceiling structure, and ceiling finish assemblies; only
   rough structure controls dependent Story elevations
+- Role-filtered material selectors for floor, ceiling, and Wall assemblies, backed by an
+  initial architectural catalog with plan-display and future 3D texture properties;
+  existing project-specific material names remain preserved until deliberately replaced
 - Controlled Structure / slab assembly role plus one-click wood-framed, basement-slab,
   and insulated slab-on-grade floor presets; concrete remains a material rather than a system role
 - Reusable wall types with explicitly ordered Exterior, Main, and Interior layer

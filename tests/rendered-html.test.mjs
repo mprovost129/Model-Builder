@@ -68,13 +68,14 @@ test("server-renders the Slater Woods Omni Design startup dashboard", async () =
 });
 
 test("keeps product code separate from the removed starter preview", async () => {
-  const [page, layout, component, productLibraryDialog, productRepresentationRenderer, productRepresentations, packageJson] = await Promise.all([
+  const [page, layout, component, productLibraryDialog, productRepresentationRenderer, productRepresentations, materialLibrary, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/model-builder-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../features/products/product-library-dialog.tsx", import.meta.url), "utf8"),
     readFile(new URL("../features/products/product-representation-renderer.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/product-representations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/material-library.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -166,6 +167,13 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(component, /createBoundaryPolylineObject/);
   assert.match(component, /onBoundaryCommit/);
   assert.match(component, /StoryManagerDialog/);
+  assert.match(component, /AssemblyMaterialSelect/);
+  assert.match(component, /Current project material/);
+  assert.match(component, /MATERIAL_CATEGORY_LABELS/);
+  assert.doesNotMatch(component, /material: "New Material"/);
+  assert.match(materialLibrary, /ARCHITECTURAL_MATERIALS/);
+  assert.match(materialLibrary, /textureAssetId: string \| null/);
+  assert.match(materialLibrary, /architecturalMaterialsForRole/);
   assert.match(component, /Rough framing establishes reference elevations/);
   assert.match(component, /ELEVATION REFERENCE/);
   assert.match(component, /label="Reference elevation"/);
