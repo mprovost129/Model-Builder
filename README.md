@@ -29,6 +29,8 @@ polylines, rectangles, Circles, and Arcs.
   detected Rooms, plus an always-available Project Setup summary in Properties
 - Compact spreadsheet-style Properties grid with collapsible categories and inline values
 - Column-aligned Layer Manager with inline naming, object counts, state controls, and search
+- Independent Layer line and fill properties, a Layer-Set-level Fills master that produces
+  linework-only marketing views, and per-object By Layer fill overrides in Properties
 - Parametric Length, Width, and Height fields
 - Feet-inch-fraction input and display to the nearest 1/16 inch
 - Live box resizing from exact overall dimensions
@@ -38,7 +40,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 27
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 44
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs

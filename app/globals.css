@@ -64,6 +64,7 @@ button { color: inherit; }
 .plan-view-toolbar select { min-width: 140px; padding: 0 22px 0 6px; }
 .plan-view-toolbar button { padding: 0 7px; cursor: pointer; }
 .plan-view-toolbar button:hover { border-color: #6b8495; background: #2a3945; }
+.plan-view-toolbar button.is-engaged { border-color: #6f9db4; background: #284657; color: #e8f4f8; }
 .plan-view-toolbar-divider { width: 1px; height: 17px; margin: 0 2px; background: #43505b; }
 .plan-view-toolbar output { overflow: hidden; margin-left: auto; color: #9aabb6; font: 8px var(--font-geist-mono), monospace; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2068,7 +2069,7 @@ button { color: inherit; }
 }
 .layer-search input:focus { box-shadow: inset 0 0 0 1px var(--accent); }
 .layer-search input::placeholder { color: #667480; }
-.layer-grid { --layer-columns: 25px 32px minmax(94px, 1fr) 50px 30px 32px 35px 31px 31px 22px; min-width: 380px; border-top: 1px solid #11171d; }
+.layer-grid { --layer-columns: 25px 32px minmax(94px, 1fr) 50px 30px 32px 32px 31px 35px 31px 31px 22px; min-width: 445px; border-top: 1px solid #11171d; }
 .layer-manager { overflow-x: auto; }
 .layer-column-headings,
 .layer-row {
@@ -2122,6 +2123,8 @@ button { color: inherit; }
 .layer-row .make-current { width: 100%; color: #d4ad61; }
 .layer-swatch { width: 11px; height: 11px; border-radius: 0; }
 .layer-color-input { width: 18px; height: 18px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.object-fill-field { display: inline-flex; align-items: center; min-height: 22px; }
+.object-fill-field .layer-color-input { width: 32px; height: 20px; }
 .style-cell select,
 .weight-cell input { width: 100%; height: 27px; min-width: 0; padding: 0 3px; border: 0; outline: 0; background: transparent; color: #c4cfd6; font-size: 7px; }
 .weight-cell input { text-align: center; }
@@ -2339,6 +2342,7 @@ button { color: inherit; }
 .theme-light .plan-view-toolbar select,
 .theme-light .plan-view-toolbar button { border-color: #a9bbc5; background: #f4f7f7; color: #345369; }
 .theme-light .plan-view-toolbar button:hover { border-color: #7598ab; background: #e8f1f4; }
+.theme-light .plan-view-toolbar button.is-engaged { border-color: #6f98ac; background: #d8e9ef; color: #234b61; }
 .theme-light .plan-view-toolbar-divider { background: #aebdc5; }
 .theme-light .document-tabs button { color: #617584; }
 .theme-light .document-tab.is-active { background: var(--ui-panel); color: #29465a; }

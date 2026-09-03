@@ -20,6 +20,8 @@ export type ModelObjectCategory =
 
 export type ModelLayer = {
   color: string;
+  fillColor: string;
+  fillVisible: boolean;
   id: string;
   lineStyle: ModelLineStyle;
   lineWeight: number;
@@ -29,18 +31,26 @@ export type ModelLayer = {
   visible: boolean;
 };
 
-export type LayerSetState = Pick<ModelLayer, "color" | "id" | "lineStyle" | "lineWeight" | "locked" | "printColor" | "visible">;
+export type LayerSetState = Pick<ModelLayer, "color" | "fillColor" | "fillVisible" | "id" | "lineStyle" | "lineWeight" | "locked" | "printColor" | "visible">;
 
 export type LayerSet = {
+  fillsVisible: boolean;
   id: string;
   layers: LayerSetState[];
   name: string;
+};
+
+/** Null means the object inherits its parent Layer's fill settings. */
+export type ModelFillOverride = {
+  color: string;
+  visible: boolean;
 };
 
 export const ROOM_ANNOTATION_KINDS = ["label", "area", "interior-dimensions", "rough-ceiling-height"] as const;
 export type RoomAnnotationKind = (typeof ROOM_ANNOTATION_KINDS)[number];
 
 export type RoomAnnotationObject = {
+  fillOverride?: ModelFillOverride | null;
   id: string;
   kind: RoomAnnotationKind;
   layerId: string;
@@ -108,22 +118,22 @@ export const STANDARD_LAYER_IDS: Record<ModelObjectCategory, string> = {
   window: "layer-windows",
 };
 
-function layer(id: string, name: string, color: string, lineWeight = 1): ModelLayer {
-  return { color, id, lineStyle: "solid", lineWeight, locked: false, name, printColor: color, visible: true };
+function layer(id: string, name: string, color: string, fillColor: string, lineWeight = 1): ModelLayer {
+  return { color, fillColor, fillVisible: true, id, lineStyle: "solid", lineWeight, locked: false, name, printColor: color, visible: true };
 }
 
 export const STANDARD_LAYERS: readonly ModelLayer[] = [
-  layer(DEFAULT_LAYER_ID, "Default", "#7f95aa"),
-  layer("layer-walls", "Walls", "#263746", 3),
-  layer("layer-foundation-walls", "Walls, Foundation", "#657277", 3),
-  layer("layer-doors", "Doors", "#8a5d45", 2),
-  layer("layer-windows", "Windows", "#397d9d", 2),
-  layer("layer-floor-platforms", "Floors, Platforms", "#927c58", 2),
-  layer("layer-rooms", "Rooms", "#d6e8f3"),
-  layer("layer-room-labels", "Rooms, Labels", "#20394c", 2),
-  layer("layer-room-area", "Rooms, Standard Area", "#496b80"),
-  layer("layer-room-interior-dimensions", "Rooms, Interior Dimensions", "#496b80"),
-  layer("layer-room-ceiling-heights", "Rooms, Ceiling Heights", "#496b80"),
+  layer(DEFAULT_LAYER_ID, "Default", "#7f95aa", "#c7d2dc"),
+  layer("layer-walls", "Walls", "#263746", "#b9c8d2", 3),
+  layer("layer-foundation-walls", "Walls, Foundation", "#657277", "#c8ced0", 3),
+  layer("layer-doors", "Doors", "#8a5d45", "#d8c3b7", 2),
+  layer("layer-windows", "Windows", "#397d9d", "#b7d8e5", 2),
+  layer("layer-floor-platforms", "Floors, Platforms", "#927c58", "#ded2bd", 2),
+  layer("layer-rooms", "Rooms", "#d6e8f3", "#e8eef2"),
+  layer("layer-room-labels", "Rooms, Labels", "#20394c", "#ffffff", 2),
+  layer("layer-room-area", "Rooms, Standard Area", "#496b80", "#ffffff"),
+  layer("layer-room-interior-dimensions", "Rooms, Interior Dimensions", "#496b80", "#ffffff"),
+  layer("layer-room-ceiling-heights", "Rooms, Ceiling Heights", "#496b80", "#ffffff"),
 ];
 
 export function clonePresentationLayer(layerValue: ModelLayer): ModelLayer {
@@ -131,8 +141,8 @@ export function clonePresentationLayer(layerValue: ModelLayer): ModelLayer {
 }
 
 export function layerSetStateFromLayer(layerValue: ModelLayer): LayerSetState {
-  const { color, id, lineStyle, lineWeight, locked, printColor, visible } = layerValue;
-  return { color, id, lineStyle, lineWeight, locked, printColor, visible };
+  const { color, fillColor, fillVisible, id, lineStyle, lineWeight, locked, printColor, visible } = layerValue;
+  return { color, fillColor, fillVisible, id, lineStyle, lineWeight, locked, printColor, visible };
 }
 
 export function createDefaultLayers(): ModelLayer[] {
@@ -140,7 +150,7 @@ export function createDefaultLayers(): ModelLayer[] {
 }
 
 export function createDefaultLayerSet(layers: readonly ModelLayer[]): LayerSet {
-  return { id: DEFAULT_LAYER_SET_ID, layers: layers.map(layerSetStateFromLayer), name: "Working Plan" };
+  return { fillsVisible: true, id: DEFAULT_LAYER_SET_ID, layers: layers.map(layerSetStateFromLayer), name: "Working Plan" };
 }
 
 export function createDefaultSavedPlanView(storyId: string): SavedPlanView {

@@ -99,6 +99,7 @@ import {
   updatePolylineObjectVertex,
   selectionIdsForObject,
   setActiveLayer,
+  setActiveLayerSetFillsVisible,
   setBoxObjectsLocked,
   setBoxObjectPosition,
   snapObjectMoveDistance,
@@ -107,6 +108,7 @@ import {
   type ModelDocument,
   ungroupBoxObjects,
   updateBoxObject,
+  updateModelEntityFillOverride,
 } from "../lib/document-model.ts";
 import { addBuildingStory, calculateStoryElevations, cloneBuildingStructure } from "../lib/building-stories.ts";
 
@@ -287,7 +289,7 @@ test("stores complete layer appearance in reusable Layer Sets and Saved Plan Vie
   assert.ok(copied);
   const renamed = renameLayerSet(copied, copied.activeLayerSetId, "Permit Plan");
   assert.ok(renamed);
-  const styled = updateLayerAppearance(renamed, STANDARD_LAYER_IDS.wall, { color: "#123456", lineStyle: "dashed", lineWeight: 5, printColor: "#101010" });
+  const styled = updateLayerAppearance(renamed, STANDARD_LAYER_IDS.wall, { color: "#123456", fillColor: "#d8e9ef", fillVisible: true, lineStyle: "dashed", lineWeight: 5, printColor: "#101010" });
   assert.ok(styled);
   const original = activateLayerSet(styled, "layer-set-working-plan");
   assert.ok(original);
@@ -300,6 +302,25 @@ test("stores complete layer appearance in reusable Layer Sets and Saved Plan Vie
   const restored = activateSavedPlanView(saved, saved.activeSavedPlanViewId);
   assert.ok(restored);
   assert.equal(restored.building.activeStoryId, permit.building.activeStoryId);
+});
+
+test("stores the fill master per Layer Set and lets one object leave By Layer", () => {
+  const copied = duplicateLayerSet(DEFAULT_DOCUMENT);
+  assert.ok(copied);
+  const lineworkOnly = setActiveLayerSetFillsVisible(copied, false);
+  assert.ok(lineworkOnly);
+  assert.equal(lineworkOnly.layerSets.find((set) => set.id === lineworkOnly.activeLayerSetId)?.fillsVisible, false);
+  const original = activateLayerSet(lineworkOnly, "layer-set-working-plan");
+  assert.ok(original);
+  assert.equal(original.layerSets.find((set) => set.id === original.activeLayerSetId)?.fillsVisible, true);
+
+  const overridden = updateModelEntityFillOverride(original, { id: "box-01", kind: "box" }, { color: "#abcDEF", visible: false });
+  assert.ok(overridden);
+  assert.deepEqual(overridden.objects[0].fillOverride, { color: "#abcdef", visible: false });
+  assert.equal(documentsEqual(original, overridden), false);
+  const inherited = updateModelEntityFillOverride(overridden, { id: "box-01", kind: "box" }, null);
+  assert.ok(inherited);
+  assert.equal(inherited.objects[0].fillOverride, null);
 });
 
 test("snaps direct object movement to nearby aligned faces", () => {

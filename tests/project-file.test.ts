@@ -82,6 +82,30 @@ test("upgrades version-42 projects with standard layers, Layer Sets, Saved Views
   assert.equal(document.layers.find((layer) => layer.id === "layer-walls")?.lineWeight, 3);
 });
 
+test("upgrades version-43 Layer Sets with fill defaults and the fill master enabled", () => {
+  const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Version 43 Plan", updatedAt });
+  const legacy = structuredClone(current);
+  legacy.version = 43 as number;
+  legacy.layers.forEach((layer) => {
+    delete (layer as Partial<typeof layer>).fillColor;
+    delete (layer as Partial<typeof layer>).fillVisible;
+  });
+  legacy.layerSets.forEach((set) => {
+    delete (set as Partial<typeof set>).fillsVisible;
+    set.layers.forEach((layer) => {
+      delete (layer as Partial<typeof layer>).fillColor;
+      delete (layer as Partial<typeof layer>).fillVisible;
+    });
+  });
+  const parsed = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const document = projectToDocument(parsed.project);
+  assert.equal(document.layerSets[0].fillsVisible, true);
+  assert.equal(document.layers.find((layer) => layer.id === "layer-walls")?.fillColor, "#b9c8d2");
+  assert.equal(document.layers.every((layer) => layer.fillVisible), true);
+});
+
 test("round-trips a versioned multi-box project without dimensional drift", () => {
   const added = addBoxObject(DEFAULT_DOCUMENT);
   assert.ok(added);

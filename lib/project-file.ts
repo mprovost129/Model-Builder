@@ -27,6 +27,7 @@ import {
   type CircleObject,
   type ModelGroup,
   type ModelDocument,
+  type ModelFillOverride,
   type ModelLayer,
   type LineObject,
   type WallOpening,
@@ -140,7 +141,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 43;
+export const PROJECT_FILE_VERSION = 44;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -177,6 +178,12 @@ export type ProjectParseResult =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readFillOverride(value: unknown): ModelFillOverride | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value) || typeof value.color !== "string" || !/^#[0-9A-F]{6}$/i.test(value.color) || typeof value.visible !== "boolean") return undefined;
+  return { color: value.color.toLowerCase(), visible: value.visible };
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -676,9 +683,12 @@ function readBoxObject(
   ) {
     return null;
   }
+  const fillOverride = readFillOverride(value.fillOverride);
+  if (fillOverride === undefined) return null;
 
   return {
     dimensions: { length: numericLength, width: numericWidth, height: numericHeight },
+    ...(value.fillOverride === undefined ? {} : { fillOverride }),
     groupId,
     id: value.id,
     layerId,
@@ -706,7 +716,7 @@ function readGroup(value: unknown): ModelGroup | null {
   return { id: value.id, name: value.name.trim() };
 }
 
-function readLayer(value: unknown, supportsPresentationProperties: boolean): ModelLayer | null {
+function readLayer(value: unknown, supportsPresentationProperties: boolean, supportsFillAppearance = false): ModelLayer | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.id !== "string" ||
@@ -716,6 +726,7 @@ function readLayer(value: unknown, supportsPresentationProperties: boolean): Mod
     value.name.trim().length > 80 ||
     typeof value.color !== "string" ||
     !/^#[0-9A-F]{6}$/i.test(value.color) ||
+    (supportsFillAppearance && (typeof value.fillColor !== "string" || !/^#[0-9A-F]{6}$/i.test(value.fillColor) || typeof value.fillVisible !== "boolean")) ||
     (supportsPresentationProperties && (typeof value.printColor !== "string" || !/^#[0-9A-F]{6}$/i.test(value.printColor) || typeof value.lineStyle !== "string" || !MODEL_LINE_STYLES.includes(value.lineStyle as ModelLayer["lineStyle"]) || typeof value.lineWeight !== "number" || !Number.isInteger(value.lineWeight) || value.lineWeight < 1 || value.lineWeight > 10)) ||
     typeof value.visible !== "boolean" ||
     typeof value.locked !== "boolean"
@@ -724,6 +735,8 @@ function readLayer(value: unknown, supportsPresentationProperties: boolean): Mod
   }
   return {
     color: value.color.toLowerCase(),
+    fillColor: supportsFillAppearance ? (value.fillColor as string).toLowerCase() : value.color.toLowerCase(),
+    fillVisible: supportsFillAppearance ? value.fillVisible as boolean : true,
     id: value.id,
     lineStyle: supportsPresentationProperties ? value.lineStyle as ModelLayer["lineStyle"] : "solid",
     lineWeight: supportsPresentationProperties ? value.lineWeight as number : 1,
@@ -759,6 +772,7 @@ function readOpeningComponentOverride(value: unknown): OpeningComponentOverride 
 
 function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supportsHostAwareHeaders: boolean, supportsComponentOverrides: boolean, supportsObjectLayers: boolean, defaults: BuildingStructure): WallOpening | null {
   if (!isRecord(value)) return null;
+  const fillOverride = readFillOverride(value.fillOverride);
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
     typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120 ||
@@ -771,12 +785,14 @@ function readWallOpening(value: unknown, supportsOpeningTypes: boolean, supports
     (supportsOpeningTypes && value.wallOpeningTypeId !== null && typeof value.wallOpeningTypeId !== "string") ||
     (supportsHostAwareHeaders && value.headerTypeIdOverride !== null && typeof value.headerTypeIdOverride !== "string")
   ) return null;
+  if (fillOverride === undefined) return null;
   const componentOverrides = supportsComponentOverrides ? (value.componentOverrides as unknown[]).map(readOpeningComponentOverride) : [];
   if (componentOverrides.some((override) => override === null)) return null;
   return {
     centerOffset: value.centerOffset,
     componentOverrides: componentOverrides as OpeningComponentOverride[],
     headerBottomHeight: value.headerBottomHeight,
+    ...(value.fillOverride === undefined ? {} : { fillOverride }),
     headerTypeIdOverride: supportsHostAwareHeaders ? value.headerTypeIdOverride as string | null : null,
     id: value.id,
     kind: value.kind,
@@ -835,8 +851,9 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
       ? value.wallOpenings.map((opening) => readWallOpening(opening, supportsOpeningTypes, supportsHostAwareHeaders, supportsComponentOverrides, supportsObjectLayers, building))
       : null
     : [];
+  const fillOverride = readFillOverride(value.fillOverride);
   if (
-    architecturalRole === undefined ||
+    fillOverride === undefined || architecturalRole === undefined ||
     wallTypeId === undefined ||
     wallExteriorSide === undefined ||
     wallReferenceLine === undefined ||
@@ -856,6 +873,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
     end: { x: endX, y: endY, z: endZ },
     foundationSupportWallId,
     foundationWallTypeId,
+    ...(value.fillOverride === undefined ? {} : { fillOverride }),
     id: value.id,
     layerId: value.layerId,
     locked: value.locked,
@@ -902,7 +920,9 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
       ? "floor-platform"
       : undefined;
   if (architecturalRole === undefined || (architecturalRole === "floor-platform" && !geometry.closed)) return null;
-  return { ...geometry, architecturalRole, id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), shape: value.shape, storyId, type: "polyline" };
+  const fillOverride = readFillOverride(value.fillOverride);
+  if (fillOverride === undefined) return null;
+  return { ...geometry, architecturalRole, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), shape: value.shape, storyId, type: "polyline" };
 }
 
 function readPlatformOpening(value: unknown, supportsVerticalOpeningContinuity: boolean): PlatformOpening | null {
@@ -948,6 +968,8 @@ function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, suppo
       : null
     : [];
   if (!platformOpenings || platformOpenings.some((opening) => opening === null)) return null;
+  const fillOverride = readFillOverride(value.fillOverride);
+  if (fillOverride === undefined) return null;
   return {
     boundary,
     boundaryWallIds: value.boundaryWallIds as string[],
@@ -955,6 +977,7 @@ function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, suppo
     ceilingStructureOverride,
     floorFinishOverride,
     floorStructureOverride,
+    ...(value.fillOverride === undefined ? {} : { fillOverride }),
     id: value.id,
     layerId: supportsPresentation ? value.layerId as string : STANDARD_LAYER_IDS.room,
     name: value.name.trim(),
@@ -968,18 +991,20 @@ function readRoomObject(value: unknown, supportsPlatformOpenings: boolean, suppo
 
 function readRoomAnnotation(value: unknown): RoomAnnotationObject | null {
   if (!isRecord(value) || !isRecord(value.position) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(value.id) || typeof value.kind !== "string" || !ROOM_ANNOTATION_KINDS.includes(value.kind as RoomAnnotationObject["kind"]) || typeof value.layerId !== "string" || typeof value.roomId !== "string" || typeof value.storyId !== "string" || typeof value.visible !== "boolean" || !isFiniteNumber(value.position.x) || !isFiniteNumber(value.position.y)) return null;
-  return { id: value.id, kind: value.kind as RoomAnnotationObject["kind"], layerId: value.layerId, position: { x: value.position.x, y: value.position.y }, roomId: value.roomId, storyId: value.storyId, visible: value.visible };
+  const fillOverride = readFillOverride(value.fillOverride);
+  if (fillOverride === undefined) return null;
+  return { ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, kind: value.kind as RoomAnnotationObject["kind"], layerId: value.layerId, position: { x: value.position.x, y: value.position.y }, roomId: value.roomId, storyId: value.storyId, visible: value.visible };
 }
 
-function readLayerSetState(value: unknown): LayerSetState | null {
-  const parsed = readLayer({ ...(isRecord(value) ? value : {}), name: "Layer Set State" }, true);
-  return parsed ? { color: parsed.color, id: parsed.id, lineStyle: parsed.lineStyle, lineWeight: parsed.lineWeight, locked: parsed.locked, printColor: parsed.printColor, visible: parsed.visible } : null;
+function readLayerSetState(value: unknown, supportsFillAppearance: boolean): LayerSetState | null {
+  const parsed = readLayer({ ...(isRecord(value) ? value : {}), name: "Layer Set State" }, true, supportsFillAppearance);
+  return parsed ? { color: parsed.color, fillColor: parsed.fillColor, fillVisible: parsed.fillVisible, id: parsed.id, lineStyle: parsed.lineStyle, lineWeight: parsed.lineWeight, locked: parsed.locked, printColor: parsed.printColor, visible: parsed.visible } : null;
 }
 
-function readLayerSet(value: unknown): LayerSet | null {
-  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 80 || !Array.isArray(value.layers)) return null;
-  const layers = value.layers.map(readLayerSetState);
-  return layers.some((layer) => layer === null) ? null : { id: value.id, layers: layers as LayerSetState[], name: value.name.trim() };
+function readLayerSet(value: unknown, supportsFillAppearance: boolean): LayerSet | null {
+  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 80 || !Array.isArray(value.layers) || supportsFillAppearance && typeof value.fillsVisible !== "boolean") return null;
+  const layers = value.layers.map((layer) => readLayerSetState(layer, supportsFillAppearance));
+  return layers.some((layer) => layer === null) ? null : { fillsVisible: supportsFillAppearance ? value.fillsVisible as boolean : true, id: value.id, layers: layers as LayerSetState[], name: value.name.trim() };
 }
 
 function readSavedPlanView(value: unknown): SavedPlanView | null {
@@ -1001,7 +1026,9 @@ function readCircleObject(value: unknown, supportsStories: boolean, fallbackStor
   const storyId = readStoryId(value, supportsStories, fallbackStoryId);
   if (!storyId) return null;
   if (!circleGeometryIsValid(geometry)) return null;
-  return { ...geometry, id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), storyId, type: "circle" };
+  const fillOverride = readFillOverride(value.fillOverride);
+  if (fillOverride === undefined) return null;
+  return { ...geometry, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), storyId, type: "circle" };
 }
 
 function readArcObject(value: unknown, supportsStories: boolean, fallbackStoryId: string): ArcObject | null {
@@ -1024,7 +1051,9 @@ function readArcObject(value: unknown, supportsStories: boolean, fallbackStoryId
   const storyId = readStoryId(value, supportsStories, fallbackStoryId);
   if (!storyId) return null;
   if (!arcGeometryIsValid(geometry)) return null;
-  return { ...geometry, id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), storyId, type: "arc" };
+  const fillOverride = readFillOverride(value.fillOverride);
+  if (fillOverride === undefined) return null;
+  return { ...geometry, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), storyId, type: "arc" };
 }
 
 export function createProjectDocument({
@@ -1144,13 +1173,17 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     ) {
       return { ok: false, error: "The project layer configuration is missing or invalid." };
     }
-    const parsedLayers = value.layers.map((layer) => readLayer(layer, version >= 43));
+    const parsedLayers = value.layers.map((layer) => readLayer(layer, version >= 43, version >= 44));
     if (parsedLayers.some((layer) => layer === null)) {
       return { ok: false, error: "One or more project layers are invalid." };
     }
-    layers = version >= 43 ? parsedLayers as ModelLayer[] : mergeStandardLayers(parsedLayers as ModelLayer[]).map((layer) => {
+    layers = version >= 43 ? (parsedLayers as ModelLayer[]).map((layer) => {
+      if (version >= 44) return layer;
       const standard = STANDARD_LAYERS.find((candidate) => candidate.id === layer.id);
-      return standard ? { ...layer, lineStyle: standard.lineStyle, lineWeight: standard.lineWeight, printColor: layer.color } : layer;
+      return { ...layer, fillColor: standard?.fillColor ?? layer.color, fillVisible: true };
+    }) : mergeStandardLayers(parsedLayers as ModelLayer[]).map((layer) => {
+      const standard = STANDARD_LAYERS.find((candidate) => candidate.id === layer.id);
+      return standard ? { ...layer, fillColor: standard.fillColor, fillVisible: true, lineStyle: standard.lineStyle, lineWeight: standard.lineWeight, printColor: layer.color } : layer;
     });
     if (
       new Set(layers.map((layer) => layer.id)).size !== layers.length ||
@@ -1344,11 +1377,18 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   let roomAnnotations: RoomAnnotationObject[];
   if (version >= 43) {
     if (!Array.isArray(value.layerSets) || value.layerSets.length < 1 || value.layerSets.length > 32 || typeof value.activeLayerSetId !== "string" || !Array.isArray(value.savedPlanViews) || value.savedPlanViews.length < 1 || value.savedPlanViews.length > 64 || typeof value.activeSavedPlanViewId !== "string" || !Array.isArray(value.roomAnnotations) || value.roomAnnotations.length > MAXIMUM_ROOM_COUNT * ROOM_ANNOTATION_KINDS.length) return { ok: false, error: "The project Layer Set, Saved View, or Room annotation configuration is missing or invalid." };
-    const parsedSets = value.layerSets.map(readLayerSet);
+    const parsedSets = value.layerSets.map((set) => readLayerSet(set, version >= 44));
     const parsedViews = value.savedPlanViews.map(readSavedPlanView);
     const parsedAnnotations = value.roomAnnotations.map(readRoomAnnotation);
     if (parsedSets.some((set) => set === null) || parsedViews.some((view) => view === null) || parsedAnnotations.some((annotation) => annotation === null)) return { ok: false, error: "One or more Layer Sets, Saved Views, or Room annotations are invalid." };
-    layerSets = parsedSets as LayerSet[];
+    layerSets = (parsedSets as LayerSet[]).map((set) => version >= 44 ? set : ({
+      ...set,
+      fillsVisible: true,
+      layers: set.layers.map((state) => {
+        const layer = layers.find((candidate) => candidate.id === state.id);
+        return { ...state, fillColor: layer?.fillColor ?? state.color, fillVisible: layer?.fillVisible ?? true };
+      }),
+    }));
     savedPlanViews = parsedViews as SavedPlanView[];
     roomAnnotations = parsedAnnotations as RoomAnnotationObject[];
     activeLayerSetId = value.activeLayerSetId;

@@ -247,6 +247,7 @@ import {
   stretchModelEntities,
   selectionIdsForObject,
   setActiveLayer,
+  setActiveLayerSetFillsVisible,
   setArcLocked,
   setBoxObjectsLocked,
   setBoxObjectPosition,
@@ -271,6 +272,7 @@ import {
   updateRoomAnnotation,
   updateRoomObject,
   updateLayerAppearance,
+  updateModelEntityFillOverride,
   updateSavedPlanView,
   updatePolylineObjectGrip,
   updatePolylineObject,
@@ -1382,6 +1384,8 @@ type ViewportLine = {
 };
 
 type FloorPlatformView = {
+  edgeMaterials: THREE.LineBasicMaterial[];
+  edges: THREE.LineSegments[];
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
   meshes: THREE.Mesh[];
@@ -1390,6 +1394,8 @@ type FloorPlatformView = {
 };
 
 type WallView = {
+  edgeMaterials: THREE.LineBasicMaterial[];
+  edges: THREE.LineSegments[];
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
   meshes: THREE.Mesh[];
@@ -1406,11 +1412,34 @@ const FLOOR_LAYER_COLORS: Record<AssemblyLayerRole, number> = {
   substrate: 0x9b9385,
 };
 
+type FillStyledObject = { fillOverride?: { color: string; visible: boolean } | null };
+
+function resolvedObjectFill(document: ModelDocument, layerId: string | null | undefined, object?: FillStyledObject | null) {
+  const layer = findLayer(document, layerId ?? null);
+  const layerSet = document.layerSets.find((set) => set.id === document.activeLayerSetId);
+  const override = object?.fillOverride ?? null;
+  return {
+    color: override?.color ?? layer?.fillColor ?? layer?.color ?? "#7f95aa",
+    visible: (layerSet?.fillsVisible ?? true) && (override?.visible ?? layer?.fillVisible ?? true),
+  };
+}
+
+function setMeshOpacity(mesh: THREE.Mesh, visible: boolean, selected = false, hovered = false) {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  materials.forEach((material) => {
+    if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshBasicMaterial)) return;
+    const baseOpacity = typeof material.userData.baseOpacity === "number" ? material.userData.baseOpacity : 0.92;
+    material.transparent = true;
+    material.opacity = visible ? selected || hovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity : 0;
+    material.depthWrite = visible && baseOpacity >= 0.8;
+  });
+}
+
 function createFloorPlatformView(scene: THREE.Scene): FloorPlatformView {
   const group = new THREE.Group();
   group.renderOrder = 5;
   scene.add(group);
-  return { group, materials: [], meshes: [], outlineMaterials: [], outlines: [] };
+  return { edgeMaterials: [], edges: [], group, materials: [], meshes: [], outlineMaterials: [], outlines: [] };
 }
 
 function clearFloorPlatformView(view: FloorPlatformView) {
@@ -1419,6 +1448,11 @@ function clearFloorPlatformView(view: FloorPlatformView) {
     mesh.geometry.dispose();
   });
   view.materials.forEach((material) => material.dispose());
+  view.edges.forEach((edge) => {
+    view.group.remove(edge);
+    edge.geometry.dispose();
+  });
+  view.edgeMaterials.forEach((material) => material.dispose());
   view.outlines.forEach((outline) => {
     view.group.remove(outline);
     outline.geometry.dispose();
@@ -1426,6 +1460,8 @@ function clearFloorPlatformView(view: FloorPlatformView) {
   view.outlineMaterials.forEach((material) => material.dispose());
   view.meshes = [];
   view.materials = [];
+  view.edges = [];
+  view.edgeMaterials = [];
   view.outlines = [];
   view.outlineMaterials = [];
 }
@@ -1489,6 +1525,25 @@ function addHorizontalPlatformLayer(
   view.materials.push(material);
 }
 
+function rebuildPlatformEdges(view: FloorPlatformView) {
+  view.edges.forEach((edge) => { view.group.remove(edge); edge.geometry.dispose(); });
+  view.edgeMaterials.forEach((material) => material.dispose());
+  view.edges = [];
+  view.edgeMaterials = [];
+  view.meshes.forEach((mesh) => {
+    const material = new THREE.LineBasicMaterial({ color: 0x263746, depthTest: false, toneMapped: false, transparent: true, opacity: 0.92 });
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 20), material);
+    edge.position.copy(mesh.position);
+    edge.rotation.copy(mesh.rotation);
+    edge.scale.copy(mesh.scale);
+    edge.renderOrder = 14;
+    edge.userData.sourceMesh = mesh;
+    view.group.add(edge);
+    view.edges.push(edge);
+    view.edgeMaterials.push(material);
+  });
+}
+
 function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObject, story: BuildingStructure["stories"][number]) {
   clearFloorPlatformView(view);
   const shape = platformShape(polyline);
@@ -1504,6 +1559,7 @@ function updateFloorPlatformView(view: FloorPlatformView, polyline: PolylineObje
     addHorizontalPlatformLayer(view, shape, layer.thickness, finishBase, layer.role, { floorLayer: layer.name, polylineId: polyline.id });
     finishBase += layer.thickness;
   });
+  rebuildPlatformEdges(view);
 }
 
 function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizontalPlatformSolution) {
@@ -1550,6 +1606,7 @@ function updateRoomPlatformView(view: FloorPlatformView, solution: RoomHorizonta
       addPlatformOpeningOutline(view, opening.boundary, solution.finishedCeilingElevation - 1 / 16, opening);
     }
   });
+  rebuildPlatformEdges(view);
 }
 
 function disposeFloorPlatformView(scene: THREE.Scene, view: FloorPlatformView) {
@@ -1561,7 +1618,7 @@ function createWallView(scene: THREE.Scene): WallView {
   const group = new THREE.Group();
   group.renderOrder = 6;
   scene.add(group);
-  return { group, materials: [], meshes: [], productMeshes: [] };
+  return { edgeMaterials: [], edges: [], group, materials: [], meshes: [], productMeshes: [] };
 }
 
 function clearWallView(view: WallView) {
@@ -1571,8 +1628,35 @@ function clearWallView(view: WallView) {
     mesh.geometry.dispose();
   });
   view.materials.forEach((material) => material.dispose());
+  view.edges.forEach((edge) => {
+    view.group.remove(edge);
+    edge.geometry.dispose();
+  });
+  view.edgeMaterials.forEach((material) => material.dispose());
   view.meshes = [];
   view.materials = [];
+  view.edges = [];
+  view.edgeMaterials = [];
+}
+
+function rebuildWallEdges(view: WallView) {
+  view.edges.forEach((edge) => { view.group.remove(edge); edge.geometry.dispose(); });
+  view.edgeMaterials.forEach((material) => material.dispose());
+  view.edges = [];
+  view.edgeMaterials = [];
+  [...view.meshes, ...view.productMeshes].forEach((mesh) => {
+    const material = new THREE.LineBasicMaterial({ color: 0x263746, depthTest: false, toneMapped: false, transparent: true, opacity: 0.94 });
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 20), material);
+    edge.position.copy(mesh.position);
+    edge.rotation.copy(mesh.rotation);
+    edge.scale.copy(mesh.scale);
+    edge.renderOrder = 15;
+    edge.userData.sourceMesh = mesh;
+    Object.assign(edge.userData, mesh.userData);
+    view.group.add(edge);
+    view.edges.push(edge);
+    view.edgeMaterials.push(material);
+  });
 }
 
 function updateWallView(
@@ -1731,6 +1815,7 @@ function updateWallView(
     vertical,
     wallType,
   });
+  rebuildWallEdges(view);
 }
 
 function addFoundationSolid(
@@ -1787,6 +1872,7 @@ function updateFoundationWallView(
       `Foundation sill plate ${index + 1}`,
     );
   }
+  rebuildWallEdges(view);
 }
 
 function disposeWallView(scene: THREE.Scene, view: WallView) {
@@ -6785,7 +6871,7 @@ function Viewport({
       applyLayerAppearanceToViewportLine(view, findLayer(document, polyline.layerId));
       const visible = findLayer(document, polyline.layerId)?.visible ?? true;
       view.line.visible = visible;
-      if (view.fill) view.fill.visible = visible && (polyline.width ?? 0) >= 1 / 16;
+      if (view.fill) view.fill.visible = visible && resolvedObjectFill(document, polyline.layerId, polyline).visible && (polyline.width ?? 0) >= 1 / 16;
     });
     const currentFloorIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "floor-platform").map((polyline) => polyline.id));
     floorPlatformViewsRef.current.forEach((view, polylineId) => {
@@ -6989,17 +7075,19 @@ function Viewport({
       const hoveredObject = hoveredEntityKey === cadEntityKey({ id: objectId, kind: "box" });
       const object = findBoxObject(document, objectId);
       const layer = findLayer(document, object?.layerId ?? null);
-      const layerColor = layer ? Number.parseInt(layer.color.slice(1), 16) : 0x66788a;
+      const fill = resolvedObjectFill(document, object?.layerId, object);
+      const fillColor = Number.parseInt(fill.color.slice(1), 16);
       view.materials.forEach((material, index) => {
         const selectedFace = objectId === selectedObjectId && index === selectedFaceIndex;
         material.color.setHex(
-          selectedFace ? 0xf2bd5b : selectedObject ? primaryObject ? 0xd7a64b : 0xa98345 : hoveredObject ? 0x4ba6c8 : layerColor,
+          selectedFace ? 0xf2bd5b : selectedObject ? primaryObject ? 0xd7a64b : 0xa98345 : hoveredObject ? 0x4ba6c8 : fillColor,
         );
         material.emissive.setHex(selectedFace ? 0x4a2b06 : hoveredObject ? 0x082a38 : 0x000000);
-        material.opacity = selectedObject || hoveredObject ? 0.95 : 0.84;
+        material.opacity = fill.visible ? selectedObject || hoveredObject ? 0.95 : 0.84 : 0;
+        material.depthWrite = fill.visible;
       });
       (view.edges.material as THREE.LineBasicMaterial).color.setHex(
-        primaryObject ? 0xffe3a3 : selectedObject ? 0xd5b16d : hoveredObject ? 0x87d8f3 : 0x8da0b2,
+        primaryObject ? 0xffe3a3 : selectedObject ? 0xd5b16d : hoveredObject ? 0x87d8f3 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x8da0b2,
       );
     });
   }, [arcMode, circleMode, copyMode, document, hoveredEntityKey, lineMode, moveMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, selectedEntityKeys, selectedFaceIndex, selectedObjectId, selectedObjectIds]);
@@ -7010,21 +7098,47 @@ function Viewport({
       const hovered = hoveredEntityKey === cadEntityKey({ id: lineId, kind: "line" });
       const line = findLineObject(document, lineId);
       const layer = findLayer(document, line?.layerId ?? null);
+      const fill = resolvedObjectFill(document, line?.layerId, line);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
-      view.fillMaterial?.color.setHex(selected ? 0xd9a53f : hovered ? 0x4fb7d6 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
-      if (view.fillMaterial) view.fillMaterial.opacity = selected || hovered ? 0.58 : 0.38;
+      view.fillMaterial?.color.setHex(selected ? 0xd9a53f : hovered ? 0x4fb7d6 : Number.parseInt(fill.color.slice(1), 16));
+      if (view.fillMaterial) {
+        view.fill.visible = Boolean((findLayer(document, line?.layerId ?? null)?.visible ?? true) && fill.visible);
+        view.fillMaterial.opacity = selected || hovered ? 0.58 : 0.38;
+      }
       view.material.linewidth = selected || hovered ? 2 : 1;
     });
     wallViewsRef.current.forEach((view, lineId) => {
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: lineId, kind: "line" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: lineId, kind: "line" });
+      const line = findLineObject(document, lineId);
+      const hostLayer = findLayer(document, line?.layerId ?? null);
+      const openingById = new Map(line?.wallOpenings.map((opening) => [opening.id, opening]) ?? []);
+      [...view.meshes, ...view.productMeshes].forEach((mesh) => {
+        const opening = openingById.get(String(mesh.userData.wallOpeningId ?? ""));
+        const owner = opening ?? line;
+        const ownerLayerId = opening?.layerId ?? line?.layerId;
+        const fill = resolvedObjectFill(document, ownerLayerId, owner);
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((material) => {
+          if (!(material instanceof THREE.MeshStandardMaterial)) return;
+          if (viewTarget.id === "top") material.color.set(fill.color);
+          material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
+        });
+        setMeshOpacity(mesh, fill.visible, selected, hovered);
+      });
+      view.edges.forEach((edge) => {
+        const opening = openingById.get(String(edge.userData.wallOpeningId ?? ""));
+        const edgeLayer = findLayer(document, opening?.layerId ?? line?.layerId ?? null) ?? hostLayer;
+        const edgeMaterial = edge.material as THREE.LineBasicMaterial;
+        edgeMaterial.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : edgeLayer ? Number.parseInt(edgeLayer.color.slice(1), 16) : 0x263746);
+        const sourceMesh = edge.userData.sourceMesh as THREE.Mesh | undefined;
+        edge.visible = sourceMesh?.visible ?? true;
+      });
       view.materials.forEach((material) => {
         material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
-        const baseOpacity = typeof material.userData.baseOpacity === "number" ? material.userData.baseOpacity : 0.92;
-        material.opacity = selected || hovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity;
       });
     });
-  }, [document, hoveredEntityKey, selectedEntityKeys]);
+  }, [document, hoveredEntityKey, selectedEntityKeys, viewTarget]);
 
   useEffect(() => {
     polylineViewsRef.current.forEach((view, polylineId) => {
@@ -7032,24 +7146,43 @@ function Viewport({
       const hovered = hoveredEntityKey === cadEntityKey({ id: polylineId, kind: "polyline" });
       const polyline = findPolylineObject(document, polylineId);
       const layer = findLayer(document, polyline?.layerId ?? null);
+      const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
+      if (view.fillMaterial) view.fillMaterial.color.setHex(Number.parseInt(fill.color.slice(1), 16));
+      if (view.fill) view.fill.visible = Boolean((layer?.visible ?? true) && fill.visible && (polyline?.width ?? 0) >= 1 / 16);
     });
     floorPlatformViewsRef.current.forEach((view, polylineId) => {
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: polylineId, kind: "polyline" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: polylineId, kind: "polyline" });
+      const polyline = findPolylineObject(document, polylineId);
+      const layer = findLayer(document, polyline?.layerId ?? null);
+      const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
+      view.meshes.forEach((mesh) => {
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((material) => {
+          if (material instanceof THREE.MeshStandardMaterial && viewTarget.id === "top") material.color.set(fill.color);
+        });
+        setMeshOpacity(mesh, fill.visible, selected, hovered);
+      });
+      view.edges.forEach((edge) => {
+        (edge.material as THREE.LineBasicMaterial).color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x263746);
+      });
       view.materials.forEach((material) => {
         material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
-        material.opacity = selected || hovered ? 1 : 0.9;
       });
     });
-  }, [document, hoveredEntityKey, selectedEntityKeys]);
+  }, [document, hoveredEntityKey, selectedEntityKeys, viewTarget]);
 
   useEffect(() => {
     const showGeneratedRoomPlatforms = viewTarget.id !== "top";
-    roomPlatformViewsRef.current.forEach((view) => {
+    roomPlatformViewsRef.current.forEach((view, roomId) => {
+      const room = document.rooms.find((candidate) => candidate.id === roomId);
+      const fill = resolvedObjectFill(document, room?.layerId, room);
       view.meshes.forEach((mesh) => {
         mesh.visible = showGeneratedRoomPlatforms;
+        setMeshOpacity(mesh, fill.visible);
       });
+      view.edges.forEach((edge) => { edge.visible = showGeneratedRoomPlatforms; });
     });
   }, [document, viewTarget]);
 
@@ -8552,6 +8685,7 @@ function WallOpeningComponentMaterialField({ material, onUpdate }: { material: s
 
 function WallOpeningsControl({
   building,
+  layers,
   line,
   onAdd,
   onAssignType,
@@ -8559,6 +8693,7 @@ function WallOpeningsControl({
   onUpdate,
 }: {
   building: BuildingStructure;
+  layers: ModelDocument["layers"];
   line: LineObject;
   onAdd: (kind: WallOpeningKind) => string | null;
   onAssignType: (openingId: string, typeId: string) => boolean;
@@ -8602,12 +8737,24 @@ function WallOpeningsControl({
     return !wallType || required === 0 || required <= wallLayerGroupThickness(wallType, "main") + 1e-8;
   });
   const compatibleTypes = building.openingTypes.filter((type) => type.kind === opening?.kind);
+  const openingLayer = layers.find((layer) => layer.id === opening?.layerId) ?? layers[0];
+  const updateFillOverride = (change: { color?: string; visible?: boolean } | null) => {
+    if (!opening || !openingLayer) return false;
+    const current = opening.fillOverride ?? { color: openingLayer.fillColor, visible: openingLayer.fillVisible };
+    return onUpdate(opening.id, { fillOverride: change === null ? null : { ...current, ...change } });
+  };
   return (
     <PropertyGridSection title="Openings" meta={`${line.wallOpenings.length} hosted`}>
       <div className="property-action-row"><button type="button" onClick={() => add("door")}>+ Door</button><button type="button" onClick={() => add("window")}>+ Window</button></div>
       {line.wallOpenings.length > 0 ? <PropertyGridRow label="Opening"><select className="property-cell-select" value={opening?.id ?? ""} onChange={(event) => { const nextOpening = line.wallOpenings.find((candidate) => candidate.id === event.target.value); const nextType = building.openingTypes.find((type) => type.id === nextOpening?.wallOpeningTypeId); setSelectedId(event.target.value); setSelectedComponentId(nextType?.components[0]?.id ?? ""); }} aria-label="Hosted wall opening">{line.wallOpenings.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.kind === "door" ? "Door" : "Window"}</option>)}</select></PropertyGridRow> : <p className="property-grid-note">Add a Door or Window to cut its rough opening through every Wall layer.</p>}
       {opening ? <>
         <WallOpeningNameField key={`${opening.id}:${opening.name}`} opening={opening} onUpdate={(change) => onUpdate(opening.id, change)} />
+        <PropertyGridRow label="Layer"><select className="property-cell-select" value={opening.layerId} onChange={(event) => onUpdate(opening.id, { layerId: event.target.value })} aria-label={`${opening.kind} layer`}>{layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}{!layer.visible ? " (hidden)" : ""}</option>)}</select></PropertyGridRow>
+        {openingLayer ? <>
+          <PropertyGridRow label="By Layer"><button type="button" className={!opening.fillOverride ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => updateFillOverride(opening.fillOverride ? null : {})}>{!opening.fillOverride ? "✓ Inherited" : "○ Use Layer"}</button></PropertyGridRow>
+          <PropertyGridRow label="Fill color"><span className="object-fill-field"><LayerColorField key={`${opening.id}:fill:${opening.fillOverride?.color ?? openingLayer.fillColor}`} color={opening.fillOverride?.color ?? openingLayer.fillColor} label={`${opening.name} fill color`} onCommit={(color) => updateFillOverride({ color })} /></span></PropertyGridRow>
+          <PropertyGridRow label="Fill"><button type="button" className={(opening.fillOverride?.visible ?? openingLayer.fillVisible) ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => updateFillOverride({ visible: !(opening.fillOverride?.visible ?? openingLayer.fillVisible) })}>{(opening.fillOverride?.visible ?? openingLayer.fillVisible) ? "● On" : "○ Off"}</button></PropertyGridRow>
+        </> : null}
         <PropertyGridRow label="Component type"><select className="property-cell-select" value={opening.wallOpeningTypeId ?? ""} onChange={(event) => onAssignType(opening.id, event.target.value)} aria-label="Door or Window component type">{opening.wallOpeningTypeId === null ? <option value="" disabled>Legacy custom opening</option> : null}{compatibleTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
         {componentType ? <PropertyGridRow label="3D assembly"><span className="property-readout">{componentType.components.length} joined components</span></PropertyGridRow> : null}
         {componentType && baseComponent && resolvedComponent ? <>
@@ -10597,6 +10744,14 @@ export function ModelBuilderApp() {
   const selectedEntityRefs = selectedEntityKeys
     .map(cadEntityRefFromKey)
     .filter((ref): ref is CadEntityRef => ref !== null);
+  const selectedAppearanceRef = selectedEntityRefs.length === 1 ? selectedEntityRefs[0] : null;
+  const selectedAppearanceObject = selectedAppearanceRef?.kind === "box" ? findBoxObject(editor.present, selectedAppearanceRef.id)
+    : selectedAppearanceRef?.kind === "line" ? findLineObject(editor.present, selectedAppearanceRef.id)
+      : selectedAppearanceRef?.kind === "polyline" ? findPolylineObject(editor.present, selectedAppearanceRef.id)
+        : selectedAppearanceRef?.kind === "circle" ? findCircleObject(editor.present, selectedAppearanceRef.id)
+          : selectedAppearanceRef?.kind === "arc" ? findArcObject(editor.present, selectedAppearanceRef.id)
+            : null;
+  const selectedAppearanceLayer = findLayer(editor.present, selectedAppearanceObject?.layerId ?? null);
   const selectionCanModify = selectedEntityRefs.length > 0 &&
     selectedEntityRefs.every((ref) => modelEntityIsEditable(editor.present, ref));
   const selectedOffsetRef = selectedEntityRefs.length === 1 && selectedEntityRefs[0].kind !== "box"
@@ -13665,6 +13820,23 @@ export function ModelBuilderApp() {
     if (next) dispatch({ type: "commit", next });
   }, [editor.present]);
 
+  const toggleActiveLayerSetFills = useCallback(() => {
+    const current = editor.present.layerSets.find((set) => set.id === editor.present.activeLayerSetId);
+    const next = setActiveLayerSetFillsVisible(editor.present, !(current?.fillsVisible ?? true));
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setFileNotice({ text: current?.fillsVisible ?? true ? "All fills are off for this Layer Set. Linework remains visible." : "Layer and object fills are on for this Layer Set.", tone: "success" });
+  }, [editor.present]);
+
+  const changeSelectedFillOverride = useCallback((change: { color?: string; visible?: boolean } | null) => {
+    if (!selectedAppearanceRef || !selectedAppearanceObject || !selectedAppearanceLayer) return;
+    const current = selectedAppearanceObject.fillOverride ?? { color: selectedAppearanceLayer.fillColor, visible: selectedAppearanceLayer.fillVisible };
+    const nextOverride = change === null ? null : { ...current, ...change };
+    const next = updateModelEntityFillOverride(editor.present, selectedAppearanceRef, nextOverride);
+    if (!next) return;
+    dispatch({ type: "commit", next });
+  }, [editor.present, selectedAppearanceLayer, selectedAppearanceObject, selectedAppearanceRef]);
+
   const selectLayerSet = useCallback((layerSetId: string) => {
     const next = activateLayerSet(editor.present, layerSetId);
     if (!next) return;
@@ -14649,6 +14821,7 @@ export function ModelBuilderApp() {
       <section className="plan-view-toolbar" aria-label="Plan view controls">
         <label><span>Annotation Scale</span><select className="annotation-scale-select" value={activeSavedPlanView?.annotationScale ?? 48} onChange={(event) => changeAnnotationScale(Number(event.target.value))}><option value={96}>1/8&quot; = 1&apos;-0&quot;</option><option value={48}>1/4&quot; = 1&apos;-0&quot;</option><option value={24}>1/2&quot; = 1&apos;-0&quot;</option><option value={12}>1&quot; = 1&apos;-0&quot;</option></select></label>
         <label><span>Layer Set</span><select value={editor.present.activeLayerSetId} onChange={(event) => selectLayerSet(event.target.value)}>{editor.present.layerSets.map((set) => <option value={set.id} key={set.id}>{set.name}</option>)}</select></label>
+        <button type="button" className={activeLayerSet?.fillsVisible ?? true ? "is-engaged" : ""} onClick={toggleActiveLayerSetFills} aria-pressed={activeLayerSet?.fillsVisible ?? true} title="Show or hide all object fills in this Layer Set">{activeLayerSet?.fillsVisible ?? true ? "Fills On" : "Linework Only"}</button>
         <button type="button" onClick={copyActiveLayerSet}>Copy Set</button>
         <button type="button" onClick={renameActiveLayerSet}>Rename Set</button>
         <span className="plan-view-toolbar-divider" />
@@ -14829,6 +15002,15 @@ export function ModelBuilderApp() {
             </PropertyGridSection>
           ) : null}
 
+          {selectedAppearanceRef && selectedAppearanceObject && selectedAppearanceLayer && (selectedAppearanceRef.kind === "box" || selectedAppearanceRef.kind === "polyline" || selectedAppearanceRef.kind === "line" && selectedLine?.architecturalRole !== null) ? (
+            <PropertyGridSection title="Appearance" meta={selectedAppearanceObject.fillOverride ? "Object override" : "By Layer"}>
+              <PropertyGridRow label="By Layer"><button type="button" className={!selectedAppearanceObject.fillOverride ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => changeSelectedFillOverride(selectedAppearanceObject.fillOverride ? null : {})} disabled={!selectionCanModify}>{!selectedAppearanceObject.fillOverride ? "✓ Inherited" : "○ Use Layer"}</button></PropertyGridRow>
+              <PropertyGridRow label="Fill color"><span className="object-fill-field"><LayerColorField key={`${selectedAppearanceObject.id}:fill:${selectedAppearanceObject.fillOverride?.color ?? selectedAppearanceLayer.fillColor}`} color={selectedAppearanceObject.fillOverride?.color ?? selectedAppearanceLayer.fillColor} label={`${selectedAppearanceObject.name} fill color`} onCommit={(color) => changeSelectedFillOverride({ color })} /></span></PropertyGridRow>
+              <PropertyGridRow label="Fill"><button type="button" className={(selectedAppearanceObject.fillOverride?.visible ?? selectedAppearanceLayer.fillVisible) ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => changeSelectedFillOverride({ visible: !(selectedAppearanceObject.fillOverride?.visible ?? selectedAppearanceLayer.fillVisible) })} disabled={!selectionCanModify}>{(selectedAppearanceObject.fillOverride?.visible ?? selectedAppearanceLayer.fillVisible) ? "● On" : "○ Off"}</button></PropertyGridRow>
+              <p className="property-grid-note">Changing either object value clears By Layer. The Layer Set’s master fill switch still wins.</p>
+            </PropertyGridSection>
+          ) : null}
+
           {stretchMode ? (
             stretchTargets.length ? (
               <StretchControl key={`stretch:${stretchTargets.map((target) => `${target.kind}:${target.id}:${target.components.join("-")}:${target.whole}`).join("|")}`} onApply={stretchSelectionExact} onCancel={() => finishStretchMode(true)} targetCount={stretchTargets.length} />
@@ -14879,7 +15061,7 @@ export function ModelBuilderApp() {
             selectedLine.architecturalRole === "wall"
               ? <>
                 <WallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}`} line={selectedLine} onUpdate={updateSelectedLine} />
-                <WallOpeningsControl building={editor.present.building} line={selectedLine} onAdd={addSelectedWallOpening} onAssignType={assignSelectedWallOpeningType} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
+                <WallOpeningsControl building={editor.present.building} layers={editor.present.layers} line={selectedLine} onAdd={addSelectedWallOpening} onAssignType={assignSelectedWallOpeningType} onDelete={deleteSelectedWallOpening} onUpdate={updateSelectedWallOpening} />
               </>
               : selectedLine.architecturalRole === "foundation-wall"
                 ? <FoundationWallGeometryControl document={editor.present} key={`${selectedLine.id}:${selectedLine.start.x}:${selectedLine.start.y}:${selectedLine.end.x}:${selectedLine.end.y}:${selectedLine.storyId}:${selectedLine.foundationWallTypeId}`} line={selectedLine} onUpdate={updateSelectedLine} />
@@ -15221,6 +15403,8 @@ export function ModelBuilderApp() {
                   <span role="columnheader">Line</span>
                   <span role="columnheader">Wt</span>
                   <span role="columnheader">Print</span>
+                  <span role="columnheader">Fill</span>
+                  <span role="columnheader" title="Layer fill display">Use</span>
                   <span role="columnheader" title="Object count">Objects</span>
                   <span role="columnheader">Show</span>
                   <span role="columnheader">Lock</span>
@@ -15240,6 +15424,8 @@ export function ModelBuilderApp() {
                       <div className="layer-cell style-cell" role="cell"><select value={layer.lineStyle} onChange={(event) => changeLayerAppearance(layer.id, { lineStyle: event.target.value as typeof layer.lineStyle })} aria-label={`${layer.name} line style`}><option value="solid">Solid</option><option value="dashed">Dash</option><option value="dotted">Dot</option><option value="center">Center</option></select></div>
                       <div className="layer-cell weight-cell" role="cell"><input type="number" min="1" max="10" value={layer.lineWeight} onChange={(event) => changeLayerAppearance(layer.id, { lineWeight: Number(event.target.value) })} aria-label={`${layer.name} line weight`} /></div>
                       <div className="layer-cell color-cell" role="cell"><LayerColorField key={`${layer.id}:print:${layer.printColor}`} color={layer.printColor} label={`${layer.name} print color`} onCommit={(printColor) => changeLayerAppearance(layer.id, { printColor })} /></div>
+                      <div className="layer-cell color-cell" role="cell"><LayerColorField key={`${layer.id}:fill:${layer.fillColor}`} color={layer.fillColor} label={`${layer.name} fill color`} onCommit={(fillColor) => changeLayerAppearance(layer.id, { fillColor })} /></div>
+                      <div className="layer-cell toggle-cell" role="cell"><button className={layer.fillVisible ? "layer-toggle is-on" : "layer-toggle"} type="button" onClick={() => changeLayerAppearance(layer.id, { fillVisible: !layer.fillVisible })} aria-label={`${layer.fillVisible ? "Hide" : "Show"} ${layer.name} fills`} title={layer.fillVisible ? "Hide fills on this layer" : "Show fills on this layer"}>{layer.fillVisible ? "●" : "○"}</button></div>
                       <div className="layer-cell count-cell" role="cell">{objectCount}</div>
                       <div className="layer-cell toggle-cell" role="cell"><button className={layer.visible ? "layer-toggle is-on" : "layer-toggle"} type="button" onClick={() => changeLayerVisibility(layer.id)} disabled={isActive} aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`} title={isActive ? "Current layer must stay visible" : layer.visible ? "Hide layer" : "Show layer"}>{layer.visible ? "●" : "○"}</button></div>
                       <div className="layer-cell toggle-cell" role="cell"><button className={layer.locked ? "layer-toggle is-locked" : "layer-toggle"} type="button" onClick={() => changeLayerLock(layer.id)} disabled={isActive} aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`} title={isActive ? "Current layer must stay unlocked" : layer.locked ? "Unlock layer" : "Lock layer"}>{layer.locked ? "◆" : "◇"}</button></div>
@@ -15250,7 +15436,7 @@ export function ModelBuilderApp() {
                 {!filteredLayers.length ? <div className="layer-empty-row">No layers match “{layerFilter.trim()}”.</div> : null}
                 </div>
               </div>
-              <p className="layer-manager-note">Click C to make a layer current. The current layer remains visible and unlocked.</p>
+              <p className="layer-manager-note">Line and fill appearance are independent. The Layer Set button above can suppress every fill without changing object or layer colors.</p>
             </section>
           ) : (
             <section className="building-browser" aria-label="Building structure">
@@ -15307,7 +15493,7 @@ export function ModelBuilderApp() {
       </div>
       <footer className="statusbar">
         <nav className="space-tabs" aria-label="Model and layouts"><button type="button" className="space-menu" aria-label="Space menu">☰</button><button type="button" className="is-active">Model</button><button type="button" disabled title="Layouts are planned">Layout 1 <small>planned</small></button><button type="button" disabled aria-label="Add layout">＋</button></nav>
-        <div className="status-items"><span>{editor.present.objects.length} BOX{editor.present.objects.length === 1 ? "" : "ES"} · {editor.present.lines.length} LINE{editor.present.lines.length === 1 ? "" : "S"} · {editor.present.polylines.length} POLYLINE{editor.present.polylines.length === 1 ? "" : "S"} · {editor.present.circles.length} CIRCLE{editor.present.circles.length === 1 ? "" : "S"} · {editor.present.arcs.length} ARC{editor.present.arcs.length === 1 ? "" : "S"}</span><span>Story: {activeStory.name}</span><span>Layer: {activeLayer?.name ?? "Default"}</span><span>FT-IN</span><button type="button" className={cadDraftingSettings.gridVisible ? "status-toggle grid-toggle is-on" : "status-toggle grid-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))} title="Grid Display (F7)" aria-label="Toggle model space grid" aria-pressed={cadDraftingSettings.gridVisible}>GRID <small>{formatDraftingSpacing(cadDraftingSettings.gridSpacing)}</small></button><span>Snap {formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</span><button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)">OSNAP</button><button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)">ORTHO</button><button type="button" className={cadDraftingSettings.polarEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, polarEnabled: !current.polarEnabled }))} title="Polar Tracking (F10)">POLAR</button><span>ELEV {formatSignedArchitectural(cadDraftingSettings.activeElevation)}</span><span>{viewTarget.label}</span><span title="Work is automatically recoverable on this device">RECOVERY ON</span></div>
+        <div className="status-items"><span>{editor.present.objects.length} BOX{editor.present.objects.length === 1 ? "" : "ES"} · {editor.present.lines.length} LINE{editor.present.lines.length === 1 ? "" : "S"} · {editor.present.polylines.length} POLYLINE{editor.present.polylines.length === 1 ? "" : "S"} · {editor.present.circles.length} CIRCLE{editor.present.circles.length === 1 ? "" : "S"} · {editor.present.arcs.length} ARC{editor.present.arcs.length === 1 ? "" : "S"}</span><span>Story: {activeStory.name}</span><span>Layer: {activeLayer?.name ?? "Default"}</span><span>FT-IN</span><button type="button" className={cadDraftingSettings.gridVisible ? "status-toggle grid-toggle is-on" : "status-toggle grid-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))} title="Grid Display (F7)" aria-label="Toggle model space grid" aria-pressed={cadDraftingSettings.gridVisible}>GRID <small>{formatDraftingSpacing(cadDraftingSettings.gridSpacing)}</small></button><button type="button" className={activeLayerSet?.fillsVisible ?? true ? "status-toggle is-on" : "status-toggle"} onClick={toggleActiveLayerSetFills} title="Show or hide all fills for the active Layer Set" aria-pressed={activeLayerSet?.fillsVisible ?? true}>FILLS</button><span>Snap {formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</span><button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)">OSNAP</button><button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)">ORTHO</button><button type="button" className={cadDraftingSettings.polarEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, polarEnabled: !current.polarEnabled }))} title="Polar Tracking (F10)">POLAR</button><span>ELEV {formatSignedArchitectural(cadDraftingSettings.activeElevation)}</span><span>{viewTarget.label}</span><span title="Work is automatically recoverable on this device">RECOVERY ON</span></div>
       </footer>
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}

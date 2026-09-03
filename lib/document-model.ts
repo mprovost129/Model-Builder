@@ -150,6 +150,7 @@ import {
   layerSetStateFromLayer,
   type LayerSet,
   type ModelLayer,
+  type ModelFillOverride,
   type ModelLineStyle,
   type ModelObjectCategory,
   type RoomAnnotationKind,
@@ -167,9 +168,10 @@ export {
   STANDARD_LAYER_IDS,
   STANDARD_LAYERS,
 } from "../features/project-presentation.ts";
-export type { LayerSet, ModelLayer, ModelLineStyle, ModelObjectCategory, RoomAnnotationKind, RoomAnnotationObject, RoomType, SavedPlanView } from "../features/project-presentation.ts";
+export type { LayerSet, ModelFillOverride, ModelLayer, ModelLineStyle, ModelObjectCategory, RoomAnnotationKind, RoomAnnotationObject, RoomType, SavedPlanView } from "../features/project-presentation.ts";
 
 export type BoxObject = BoxModel & {
+  fillOverride?: ModelFillOverride | null;
   groupId: string | null;
   id: string;
   layerId: string;
@@ -202,6 +204,7 @@ export type WallOpening = {
   componentOverrides: OpeningComponentOverride[];
   /** Bottom of the structural header above the Story rough floor/subfloor. */
   headerBottomHeight: number;
+  fillOverride?: ModelFillOverride | null;
   /** Null uses the component or host Wall default; otherwise overrides the resolved assembly. */
   headerTypeIdOverride: string | null;
   id: string;
@@ -218,6 +221,7 @@ export type WallOpening = {
 
 export type LineObject = LineGeometry & {
   architecturalRole: "foundation-wall" | "wall" | null;
+  fillOverride?: ModelFillOverride | null;
   /** Saved Foundation Wall that physically supports this framed Wall. */
   foundationSupportWallId: string | null;
   foundationWallTypeId: string | null;
@@ -238,6 +242,7 @@ export type LineObject = LineGeometry & {
 
 export type PolylineObject = PolylineGeometry & {
   architecturalRole: "floor-platform" | null;
+  fillOverride?: ModelFillOverride | null;
   id: string;
   layerId: string;
   locked: boolean;
@@ -248,6 +253,7 @@ export type PolylineObject = PolylineGeometry & {
 };
 
 export type CircleObject = CircleGeometry & {
+  fillOverride?: ModelFillOverride | null;
   id: string;
   layerId: string;
   locked: boolean;
@@ -257,6 +263,7 @@ export type CircleObject = CircleGeometry & {
 };
 
 export type ArcObject = ArcGeometry & {
+  fillOverride?: ModelFillOverride | null;
   id: string;
   layerId: string;
   locked: boolean;
@@ -272,6 +279,7 @@ export type RoomObject = {
   ceilingStructureOverride: LayeredAssembly | null;
   floorFinishOverride: LayeredAssembly | null;
   floorStructureOverride: LayeredAssembly | null;
+  fillOverride?: ModelFillOverride | null;
   id: string;
   layerId: string;
   name: string;
@@ -460,6 +468,7 @@ export const NEW_PROJECT_DOCUMENT: ModelDocument = {
 export function cloneArcObject(arc: ArcObject): ArcObject {
   return {
     ...cloneArcGeometry(arc),
+    ...(arc.fillOverride === undefined ? {} : { fillOverride: arc.fillOverride ? { ...arc.fillOverride } : null }),
     id: arc.id,
     layerId: arc.layerId,
     locked: arc.locked,
@@ -472,6 +481,7 @@ export function cloneArcObject(arc: ArcObject): ArcObject {
 export function cloneCircleObject(circle: CircleObject): CircleObject {
   return {
     ...cloneCircleGeometry(circle),
+    ...(circle.fillOverride === undefined ? {} : { fillOverride: circle.fillOverride ? { ...circle.fillOverride } : null }),
     id: circle.id,
     layerId: circle.layerId,
     locked: circle.locked,
@@ -485,6 +495,7 @@ export function cloneLineObject(line: LineObject): LineObject {
   return {
     ...cloneLineGeometry(line),
     architecturalRole: line.architecturalRole,
+    ...(line.fillOverride === undefined ? {} : { fillOverride: line.fillOverride ? { ...line.fillOverride } : null }),
     foundationSupportWallId: line.foundationSupportWallId,
     foundationWallTypeId: line.foundationWallTypeId,
     id: line.id,
@@ -499,7 +510,7 @@ export function cloneLineObject(line: LineObject): LineObject {
     wallEndJoinMode: line.wallEndJoinMode,
     wallReferenceLine: line.wallReferenceLine,
     wallTypeId: line.wallTypeId,
-    wallOpenings: line.wallOpenings.map((opening) => ({ ...opening, componentOverrides: opening.componentOverrides.map((override) => ({ ...override })) })),
+    wallOpenings: line.wallOpenings.map((opening) => ({ ...opening, ...(opening.fillOverride === undefined ? {} : { fillOverride: opening.fillOverride ? { ...opening.fillOverride } : null }), componentOverrides: opening.componentOverrides.map((override) => ({ ...override })) })),
   };
 }
 
@@ -589,6 +600,7 @@ export function clonePolylineObject(polyline: PolylineObject): PolylineObject {
   return {
     ...clonePolylineGeometry(polyline),
     architecturalRole: polyline.architecturalRole,
+    ...(polyline.fillOverride === undefined ? {} : { fillOverride: polyline.fillOverride ? { ...polyline.fillOverride } : null }),
     id: polyline.id,
     layerId: polyline.layerId,
     locked: polyline.locked,
@@ -602,6 +614,7 @@ export function clonePolylineObject(polyline: PolylineObject): PolylineObject {
 export function cloneBoxObject(object: BoxObject): BoxObject {
   return {
     ...cloneBoxModel(object),
+    ...(object.fillOverride === undefined ? {} : { fillOverride: object.fillOverride ? { ...object.fillOverride } : null }),
     groupId: object.groupId,
     id: object.id,
     layerId: object.layerId,
@@ -618,11 +631,11 @@ export function cloneLayer(layer: ModelLayer): ModelLayer {
 }
 
 export function cloneLayerSet(layerSet: LayerSet): LayerSet {
-  return { id: layerSet.id, layers: layerSet.layers.map((layer) => ({ ...layer })), name: layerSet.name };
+  return { fillsVisible: layerSet.fillsVisible, id: layerSet.id, layers: layerSet.layers.map((layer) => ({ ...layer })), name: layerSet.name };
 }
 
 export function cloneRoomAnnotation(annotation: RoomAnnotationObject): RoomAnnotationObject {
-  return { ...annotation, position: { ...annotation.position } };
+  return { ...annotation, ...(annotation.fillOverride === undefined ? {} : { fillOverride: annotation.fillOverride ? { ...annotation.fillOverride } : null }), position: { ...annotation.position } };
 }
 
 export function cloneSavedPlanView(view: SavedPlanView): SavedPlanView {
@@ -652,6 +665,7 @@ export function cloneRoomObject(room: RoomObject): RoomObject {
     ceilingStructureOverride: room.ceilingStructureOverride ? cloneLayeredAssembly(room.ceilingStructureOverride) : null,
     floorFinishOverride: room.floorFinishOverride ? cloneLayeredAssembly(room.floorFinishOverride) : null,
     floorStructureOverride: room.floorStructureOverride ? cloneLayeredAssembly(room.floorStructureOverride) : null,
+    ...(room.fillOverride === undefined ? {} : { fillOverride: room.fillOverride ? { ...room.fillOverride } : null }),
     id: room.id,
     layerId: room.layerId,
     name: room.name,
@@ -1543,6 +1557,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
       const other = b.arcs[index];
       return other !== undefined && arc.id === other.id && arc.layerId === other.layerId &&
         arc.locked === other.locked && arc.name === other.name && arc.storyId === other.storyId && arc.type === other.type &&
+        JSON.stringify(arc.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) &&
         arcGeometriesEqual(arc, other);
     }) &&
     a.circles.length === b.circles.length &&
@@ -1550,6 +1565,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
       const other = b.circles[index];
       return other !== undefined && circle.id === other.id && circle.layerId === other.layerId &&
         circle.locked === other.locked && circle.name === other.name && circle.storyId === other.storyId && circle.type === other.type &&
+        JSON.stringify(circle.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) &&
         circleGeometriesEqual(circle, other);
     }) &&
     a.groups.length === b.groups.length &&
@@ -1564,6 +1580,8 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         layer.id === other.id &&
         layer.name === other.name &&
         layer.color === other.color &&
+        layer.fillColor === other.fillColor &&
+        layer.fillVisible === other.fillVisible &&
         layer.printColor === other.printColor &&
         layer.lineStyle === other.lineStyle &&
         layer.lineWeight === other.lineWeight &&
@@ -1575,10 +1593,10 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.lines.every((line, index) => {
       const other = b.lines[index];
       return other !== undefined && line.id === other.id && line.layerId === other.layerId &&
-        line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
+        JSON.stringify(line.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         line.wallOpenings.length === other.wallOpenings.length && line.wallOpenings.every((opening, openingIndex) => {
           const otherOpening = other.wallOpenings[openingIndex];
-          return otherOpening !== undefined && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.layerId === otherOpening.layerId && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId && JSON.stringify(opening.componentOverrides) === JSON.stringify(otherOpening.componentOverrides);
+          return otherOpening !== undefined && JSON.stringify(opening.fillOverride ?? null) === JSON.stringify(otherOpening.fillOverride ?? null) && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.layerId === otherOpening.layerId && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId && JSON.stringify(opening.componentOverrides) === JSON.stringify(otherOpening.componentOverrides);
         }) &&
         lineGeometriesEqual(line, other);
     }) &&
@@ -1586,13 +1604,13 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.polylines.every((polyline, index) => {
       const other = b.polylines[index];
       return other !== undefined && polyline.id === other.id && polyline.layerId === other.layerId &&
-        polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.shape === other.shape && polyline.storyId === other.storyId &&
+        JSON.stringify(polyline.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.shape === other.shape && polyline.storyId === other.storyId &&
         polylineGeometriesEqual(polyline, other);
     }) &&
     (a.rooms ?? []).length === (b.rooms ?? []).length &&
     (a.rooms ?? []).every((room, index) => {
       const other = (b.rooms ?? [])[index];
-      return other !== undefined && room.id === other.id && room.layerId === other.layerId && room.name === other.name && room.roomType === other.roomType && room.storyId === other.storyId &&
+      return other !== undefined && JSON.stringify(room.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && room.id === other.id && room.layerId === other.layerId && room.name === other.name && room.roomType === other.roomType && room.storyId === other.storyId &&
         room.roughFloorOffset === other.roughFloorOffset && room.roughCeilingHeightOverride === other.roughCeilingHeightOverride &&
         room.boundaryWallIds.length === other.boundaryWallIds.length && room.boundaryWallIds.every((wallId, wallIndex) => wallId === other.boundaryWallIds[wallIndex]) &&
         polylineGeometriesEqual(room.boundary, other.boundary) &&
@@ -1614,6 +1632,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         other !== undefined &&
         object.id === other.id &&
         object.groupId === other.groupId &&
+        JSON.stringify(object.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) &&
         object.layerId === other.layerId &&
         object.locked === other.locked &&
         object.name === other.name &&
@@ -4503,6 +4522,8 @@ export function addLayer(document: ModelDocument): {
   const number = nextLayerNumber(document);
   const layer: ModelLayer = {
     color: LAYER_COLORS[(number - 1) % LAYER_COLORS.length],
+    fillColor: LAYER_COLORS[(number - 1) % LAYER_COLORS.length],
+    fillVisible: true,
     id: `layer-${String(number).padStart(2, "0")}`,
     lineStyle: "solid",
     lineWeight: 1,
@@ -4562,11 +4583,11 @@ export function modelObjectCategory(value: BoxObject | LineObject | PolylineObje
   return "line";
 }
 
-export function updateLayerAppearance(document: ModelDocument, layerId: string, change: Partial<Pick<ModelLayer, "color" | "lineStyle" | "lineWeight" | "printColor">>): ModelDocument | null {
+export function updateLayerAppearance(document: ModelDocument, layerId: string, change: Partial<Pick<ModelLayer, "color" | "fillColor" | "fillVisible" | "lineStyle" | "lineWeight" | "printColor">>): ModelDocument | null {
   const layer = findLayer(document, layerId);
   if (!layer) return null;
   const colorValid = (value: string | undefined) => value === undefined || /^#[0-9a-f]{6}$/i.test(value);
-  if (!colorValid(change.color) || !colorValid(change.printColor) || change.lineStyle !== undefined && !(["solid", "dashed", "dotted", "center"] satisfies ModelLineStyle[]).includes(change.lineStyle) || change.lineWeight !== undefined && (!Number.isInteger(change.lineWeight) || change.lineWeight < 1 || change.lineWeight > 10)) return null;
+  if (!colorValid(change.color) || !colorValid(change.fillColor) || !colorValid(change.printColor) || change.fillVisible !== undefined && typeof change.fillVisible !== "boolean" || change.lineStyle !== undefined && !(["solid", "dashed", "dotted", "center"] satisfies ModelLineStyle[]).includes(change.lineStyle) || change.lineWeight !== undefined && (!Number.isInteger(change.lineWeight) || change.lineWeight < 1 || change.lineWeight > 10)) return null;
   const next = cloneDocument(document);
   next.layers = next.layers.map((item) => item.id === layerId ? { ...item, ...change } : item);
   return syncActiveLayerSet(next);
@@ -4594,10 +4615,31 @@ export function duplicateLayerSet(document: ModelDocument, sourceId = document.a
   if (!source) return null;
   let number = 1;
   while (document.layerSets.some((set) => set.id === `layer-set-${String(number).padStart(2, "0")}`)) number += 1;
-  const nextSet: LayerSet = { id: `layer-set-${String(number).padStart(2, "0")}`, layers: document.layers.map(layerSetStateFromLayer), name: `Layer Set ${number}` };
+  const nextSet: LayerSet = { fillsVisible: source.fillsVisible, id: `layer-set-${String(number).padStart(2, "0")}`, layers: document.layers.map(layerSetStateFromLayer), name: `Layer Set ${number}` };
   const next = cloneDocument(document);
   next.layerSets.push(nextSet);
   next.activeLayerSetId = nextSet.id;
+  return next;
+}
+
+export function setActiveLayerSetFillsVisible(document: ModelDocument, fillsVisible: boolean): ModelDocument | null {
+  if (typeof fillsVisible !== "boolean" || !document.layerSets.some((set) => set.id === document.activeLayerSetId)) return null;
+  const next = syncActiveLayerSet(document);
+  next.layerSets = next.layerSets.map((set) => set.id === next.activeLayerSetId ? { ...set, fillsVisible } : set);
+  return next;
+}
+
+export function updateModelEntityFillOverride(document: ModelDocument, ref: ModelEntityRef, fillOverride: ModelFillOverride | null): ModelDocument | null {
+  if (fillOverride && (!/^#[0-9a-f]{6}$/i.test(fillOverride.color) || typeof fillOverride.visible !== "boolean")) return null;
+  if (!modelEntityIsEditable(document, ref)) return null;
+  const next = cloneDocument(document);
+  const apply = <T extends { fillOverride?: ModelFillOverride | null; id: string }>(items: T[]): T[] => items.map((item) => item.id === ref.id ? { ...item, fillOverride: fillOverride ? { ...fillOverride, color: fillOverride.color.toLowerCase() } : null } : item);
+  if (ref.kind === "box") next.objects = apply(next.objects);
+  else if (ref.kind === "line") next.lines = apply(next.lines);
+  else if (ref.kind === "polyline") next.polylines = apply(next.polylines);
+  else if (ref.kind === "circle") next.circles = apply(next.circles);
+  else if (ref.kind === "arc") next.arcs = apply(next.arcs);
+  else return null;
   return next;
 }
 
