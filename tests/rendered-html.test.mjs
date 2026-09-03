@@ -175,6 +175,10 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(materialLibrary, /textureAssetId: string \| null/);
   assert.match(materialLibrary, /architecturalMaterialsForRole/);
   assert.match(component, /Rough framing establishes reference elevations/);
+  assert.match(component, /Roof Design Defaults/);
+  assert.match(component, /Height above plate \/ heel/);
+  assert.match(component, /Peak at preview run/);
+  assert.match(component, /Underside bearing/);
   assert.match(component, /ELEVATION REFERENCE/);
   assert.match(component, /label="Reference elevation"/);
   assert.doesNotMatch(component, /Datum elevation|Datum anchor|Set as datum anchor/);

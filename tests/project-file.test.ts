@@ -98,6 +98,29 @@ test("upgrades version-46 projects with categorized Wall defaults", () => {
   ], ["exterior", "wall-type-02", "wall-type-05", "wall-type-03"]);
 });
 
+test("round-trips Roof defaults and upgrades version-47 projects", () => {
+  const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Roof Defaults Plan", updatedAt });
+  current.building.roofSettings.pitchRise = 9;
+  current.building.roofSettings.heightAbovePlate = 12.5;
+  current.building.roofSettings.framingMethod = "trusses";
+  const parsed = parseProjectDocument(serializeProjectDocument(current));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.project.building.roofSettings.pitchRise, 9);
+  assert.equal(parsed.project.building.roofSettings.heightAbovePlate, 12.5);
+  assert.equal(parsed.project.building.roofSettings.framingMethod, "trusses");
+
+  const legacy = structuredClone(current) as unknown as { building: Record<string, unknown>; version: number };
+  legacy.version = 47;
+  delete legacy.building.roofSettings;
+  const upgraded = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(upgraded.ok, true);
+  if (!upgraded.ok) return;
+  assert.equal(upgraded.project.version, PROJECT_FILE_VERSION);
+  assert.equal(upgraded.project.building.roofSettings.pitchRise, 6);
+  assert.equal(upgraded.project.building.roofSettings.framingMethod, "rafters");
+});
+
 test("upgrades version-42 projects with standard layers, Layer Sets, Saved Views, and Room annotation storage", () => {
   const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Version 42 Plan", updatedAt });
   const legacy = structuredClone(current) as unknown as Record<string, unknown>;

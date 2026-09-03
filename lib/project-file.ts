@@ -80,6 +80,7 @@ import {
   createDefaultProductAssetAlignment,
   createDefaultWallType,
   createDefaultWallFramingSettings,
+  createDefaultRoofSettings,
   FOUNDATION_WALL_CONDITIONS,
   OPENING_COMPONENT_DEPTH_ANCHORS,
   ASSEMBLY_LAYER_ROLES,
@@ -108,6 +109,7 @@ import {
   WALL_REFERENCE_LINES,
   WALL_STRUCTURAL_ROLES,
   WALL_USES,
+  ROOF_FRAMING_METHODS,
   wallTypeMatchesUse,
   createDefaultOpeningComponents,
   type AssemblyKind,
@@ -131,6 +133,8 @@ import {
   type ProductSourceFormat,
   type ProductObjectCategory,
   type ProductObjectType,
+  type RoofFramingMethod,
+  type RoofSettings,
   type StoryPurpose,
   type WallExteriorSide,
   type WallJoinMode,
@@ -151,7 +155,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 47;
+export const PROJECT_FILE_VERSION = 48;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -553,6 +557,30 @@ function readWallFramingSettings(value: unknown, supportsJunctionSettings: boole
   };
 }
 
+function readRoofSettings(value: unknown): RoofSettings | null {
+  if (!isRecord(value) ||
+    typeof value.framingMethod !== "string" || !ROOF_FRAMING_METHODS.includes(value.framingMethod as RoofFramingMethod) ||
+    !isFiniteNumber(value.pitchRise) || !isFiniteNumber(value.heightAbovePlate) || !isFiniteNumber(value.overhang) ||
+    !isFiniteNumber(value.rafterWidth) || !isFiniteNumber(value.rafterDepth) ||
+    !isFiniteNumber(value.birdsmouthSeatLength) || !isFiniteNumber(value.birdsmouthMaxNotchRatio) ||
+    !isFiniteNumber(value.fasciaThickness) || !isFiniteNumber(value.fasciaDepth) ||
+    !isFiniteNumber(value.subfasciaThickness) || !isFiniteNumber(value.subfasciaDepth)) return null;
+  return {
+    birdsmouthMaxNotchRatio: value.birdsmouthMaxNotchRatio,
+    birdsmouthSeatLength: value.birdsmouthSeatLength,
+    fasciaDepth: value.fasciaDepth,
+    fasciaThickness: value.fasciaThickness,
+    framingMethod: value.framingMethod as RoofFramingMethod,
+    heightAbovePlate: value.heightAbovePlate,
+    overhang: value.overhang,
+    pitchRise: value.pitchRise,
+    rafterDepth: value.rafterDepth,
+    rafterWidth: value.rafterWidth,
+    subfasciaDepth: value.subfasciaDepth,
+    subfasciaThickness: value.subfasciaThickness,
+  };
+}
+
 function readBuildingStory(value: unknown, supportsCeilingStructure: boolean, supportsStoryPurpose: boolean): BuildingStory | null {
   if (
     !isRecord(value) ||
@@ -610,7 +638,7 @@ function addMissingWallUseTypes(wallTypes: LayeredAssembly[]): LayeredAssembly[]
   return result;
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean, supportsRoofSettings: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -652,6 +680,8 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     ? (value.productObjectTypes as unknown[]).map(readProductObjectType)
     : [];
   if (productObjectTypes.some((productObjectType) => productObjectType === null)) return null;
+  const roofSettings = supportsRoofSettings ? readRoofSettings(value.roofSettings) : createDefaultRoofSettings();
+  if (!roofSettings) return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : legacyWallType.id;
   if (typeof activeWallTypeId !== "string") return null;
   const activeWallUse = supportsWallUseDefaults ? value.activeWallUse : "exterior";
@@ -691,6 +721,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     headerTypes: headerTypes as WallHeaderType[],
     openingTypes: openingTypes as WallOpeningType[],
     productObjectTypes: productObjectTypes as ProductObjectType[],
+    roofSettings,
     stories: stories as BuildingStory[],
     wallFraming,
     wallTypes,
@@ -1229,7 +1260,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47, version >= 48);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }

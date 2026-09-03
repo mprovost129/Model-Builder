@@ -42,7 +42,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 45
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 48
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs
@@ -153,6 +153,12 @@ polylines, rectangles, Circles, and Arcs.
   Wall Main layer and structural rough openings, with an optional 3D framing reveal;
   resolved Wall joins add selectable two/three-stud corners and none, three-stud,
   or ladder-blocking partition backing
+- Project-level Roof Design Defaults with conventional-rafter or truss framing,
+  pitch, Height Above Plate at the exterior bearing face, overhang, birdsmouth,
+  fascia, and subfascia inputs. A live section calculates Top of Plate, the
+  separate underside bearing reference, exterior heel, peak at a reference run,
+  fascia/subfascia elevations, roof angle, and notch limit; actual manual Roof
+  Plane entities and automatic roof generation remain tracked next phases
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling

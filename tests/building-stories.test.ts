@@ -5,6 +5,7 @@ import {
   applyFloorStructurePreset,
   assemblyTotalThickness,
   buildingStructureIsValid,
+  calculateRoofReferenceDimensions,
   calculateStoryElevations,
   cloneBuildingStructure,
   configureDoorPanelLayout,
@@ -19,6 +20,7 @@ import {
   productAssetSourceUnitScale,
   productObjectTypeIsValid,
   resolveWallHeaderType,
+  roofSettingsAreValid,
   wallOpeningTypeIsValid,
   wallFramingSettingsAreValid,
   wallHeaderTypeIsValid,
@@ -32,6 +34,26 @@ import {
   wallLayerDistanceRanges,
   wallReferenceDistanceFromExterior,
 } from "../lib/building-stories.ts";
+
+test("calculates heel-driven Roof Plane, peak, fascia, and birdsmouth references", () => {
+  const building = createDefaultBuildingStructure();
+  const [story] = calculateStoryElevations(building);
+  const result = calculateRoofReferenceDimensions(building.roofSettings, story.roughCeilingElevation, 144);
+  assert.ok(result);
+  assert.equal(result.topOfPlateElevation, 109.125);
+  assert.equal(result.rafterUndersideBearingElevation, 109.125);
+  assert.equal(result.heelElevation, 118.375);
+  assert.equal(result.peakElevation, 190.375);
+  assert.equal(result.fasciaTopElevation, 112.375);
+  assert.equal(result.fasciaBottomElevation, 105.125);
+  assert.equal(result.subfasciaBottomElevation, 106.875);
+  assert.equal(result.birdsmouthMaximumNotchDepth, 2.3125);
+  assert.equal(roofSettingsAreValid(building.roofSettings), true);
+
+  const invalid = cloneBuildingStructure(building);
+  invalid.roofSettings.pitchRise = 0;
+  assert.equal(buildingStructureIsValid(invalid), false);
+});
 
 test("defines deterministic product representation units, alignment, and preferred fallback rules", () => {
   const baseAsset = {

@@ -27,13 +27,15 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] Story table shows type, calculated rough-floor elevation, and ceiling / plate height.
 - [x] Quick editing for Story name, type, ceiling / plate height, and floor-structure preset.
 - [x] Active Foundation Wall, Wall, Door, and Window types can be selected before drawing.
+- [x] Roof framing method, pitch, Height Above Plate / heel, and overhang can be established before drawing.
+- [x] Project Setup derives Top of Plate from the highest Story and previews the calculated exterior heel.
 - [x] Separate project defaults for Exterior Wall, Interior Bearing Wall, and Interior Partition types.
 - [x] Wall drawing Properties includes a Wall Use selector that recalls the assigned default Type for each use.
 - [x] New and version-46-or-earlier projects receive a valid Interior Bearing Wall type when one is missing.
 - [x] Wall Types assigned as project defaults are protected from accidental deletion or reclassification until another default is chosen.
 - [x] Review checklist summarizes the model-driving setup before project creation.
 - [x] Detailed Story assembly cards are collapsible and calculated values are visually separated from editable inputs.
-- [x] Dedicated advanced Story, Foundation, Wall, Door/Window, Framing, Room, and Layer tools remain available.
+- [x] Dedicated advanced Story, Foundation, Wall, Roof, Door/Window, Framing, Room, and Layer tools remain available.
 - [x] Story floor/ceiling defaults and Room-level overrides use the same underlying model.
 
 ## Next setup work
@@ -55,6 +57,7 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - `ROOM_LAYER_VIEW_MILESTONE.md` — Room labels, layer controls, and saved plan views.
 - `FILL_AND_OBJECT_APPEARANCE_MILESTONE.md` — Layer-controlled fills and object overrides.
 - `TEMPORARY_WALL_DIMENSIONS_MILESTONE.md` — editable Wall-to-Wall temporary dimensions.
+- `ROOF_SYSTEM_MILESTONE.md` — heel-driven roof references, completed defaults, and the manual/automatic Roof Plane sequence.
 
 ## Acceptance checks
 

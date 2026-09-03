@@ -318,6 +318,7 @@ import {
   applyFloorStructurePreset,
   assemblyTotalThickness,
   buildingStructureIsValid,
+  calculateRoofReferenceDimensions,
   calculateStoryElevations,
   cloneBuildingStructure,
   cloneFoundationWallType,
@@ -350,6 +351,7 @@ import {
   wallLayerDistanceRanges,
   wallReferenceDistanceFromExterior,
   wallFramingSettingsAreValid,
+  roofSettingsAreValid,
   wallHeaderTypeRequiredMainThickness,
   WALL_LAYER_GROUPS,
   windowLitePatternForType,
@@ -369,6 +371,8 @@ import {
   type ManufacturerProductSource,
   type ProductAssetReference,
   type ProductObjectCategory,
+  type RoofFramingMethod,
+  type RoofSettings,
   type StoryPurpose,
   type WindowLitePattern,
   type WindowSashArrangement,
@@ -10647,6 +10651,123 @@ function WallFramingManagerDialog({
   );
 }
 
+function RoofDefaultsDialog({
+  building,
+  onCancel,
+  onSave,
+}: {
+  building: BuildingStructure;
+  onCancel: () => void;
+  onSave: (building: BuildingStructure) => void;
+}) {
+  const [draft, setDraft] = useState<RoofSettings>(() => ({ ...building.roofSettings }));
+  const [referenceRun, setReferenceRun] = useState(144);
+  const [error, setError] = useState("");
+  const activeStory = building.stories.at(-1)!;
+  const topOfPlate = calculateStoryElevations(building).find((item) => item.storyId === activeStory.id)?.roughCeilingElevation ?? 0;
+  const calculation = calculateRoofReferenceDimensions(draft, topOfPlate, referenceRun);
+  const replace = (change: Partial<RoofSettings>) => { setDraft((current) => ({ ...current, ...change })); setError(""); };
+
+  useEffect(() => {
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", closeWithEscape, true);
+    return () => window.removeEventListener("keydown", closeWithEscape, true);
+  }, [onCancel]);
+
+  const save = () => {
+    if (!roofSettingsAreValid(draft)) {
+      setError("Check the pitch, heel, overhang, framing, birdsmouth, fascia, and subfascia values.");
+      return;
+    }
+    const next = cloneBuildingStructure(building);
+    next.roofSettings = { ...draft };
+    onSave(next);
+  };
+
+  return (
+    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="story-manager roof-defaults-manager" role="dialog" aria-modal="true" aria-labelledby="roof-defaults-title">
+        <header className="story-manager-header"><div><strong id="roof-defaults-title">Roof Design Defaults</strong><span>Establish the exterior heel reference and calculated roof elevations before drawing Roof Planes.</span></div><button type="button" onClick={onCancel} aria-label="Close Roof Design Defaults">×</button></header>
+        <div className="roof-defaults-body">
+          <main className="story-editor roof-defaults-editor">
+            <section className="story-editor-summary foundation-editor-summary">
+              <label><span>Roof-bearing Story</span><output className="room-output">{activeStory.name}</output></label>
+              <label><span>Framing method</span><select value={draft.framingMethod} onChange={(event) => replace({ framingMethod: event.target.value as RoofFramingMethod })}><option value="rafters">Conventional rafters</option><option value="trusses">Roof trusses</option></select></label>
+              <label><span>Pitch</span><output className="room-output">{draft.pitchRise}:12</output></label>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Bearing &amp; Roof Plane</strong><span>The heel is located at the exterior face of the bearing wall or plate.</span></div></header>
+              <div className="foundation-field-grid">
+                <label className="story-field"><span>Top of plate / wall</span><output className="room-output">{formatSignedArchitectural(topOfPlate)}</output></label>
+                <label className="story-field"><span>Roof pitch · rise in 12</span><input type="number" min="0.25" max="24" step="0.0625" value={draft.pitchRise} onChange={(event) => replace({ pitchRise: Number(event.target.value) })} /></label>
+                <StoryDimensionInput key={`heel:${draft.heightAbovePlate}`} label="Height above plate / heel" value={draft.heightAbovePlate} onChange={(heightAbovePlate) => replace({ heightAbovePlate })} />
+                <StoryDimensionInput key={`overhang:${draft.overhang}`} label="Horizontal overhang" allowZero value={draft.overhang} onChange={(overhang) => replace({ overhang })} />
+              </div>
+              <p className="opening-type-note">The underside-of-rafter bearing reference begins at top of plate. Height Above Plate is a separate vertical dimension to the roof-plane heel at the exterior wall face.</p>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Rafter / Truss &amp; Birdsmouth</strong><span>Member defaults support both conventional rafters and trussed roofs.</span></div></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`rafter-width:${draft.rafterWidth}`} label="Member width" value={draft.rafterWidth} onChange={(rafterWidth) => replace({ rafterWidth })} />
+                <StoryDimensionInput key={`rafter-depth:${draft.rafterDepth}`} label="Member depth" value={draft.rafterDepth} onChange={(rafterDepth) => replace({ rafterDepth })} />
+                <StoryDimensionInput key={`seat:${draft.birdsmouthSeatLength}`} label="Birdsmouth seat" value={draft.birdsmouthSeatLength} onChange={(birdsmouthSeatLength) => replace({ birdsmouthSeatLength })} />
+                <label className="story-field"><span>Maximum notch</span><select value={draft.birdsmouthMaxNotchRatio} onChange={(event) => replace({ birdsmouthMaxNotchRatio: Number(event.target.value) })}><option value={0.2}>20% of member depth</option><option value={0.25}>25% of member depth</option><option value={0.333333}>33⅓% of member depth</option></select></label>
+              </div>
+              <p className="opening-type-note">For rafters, the final birdsmouth is resolved only after a Roof Plane has a bearing Wall. This setting is a project validation limit, not an engineered sizing approval.</p>
+            </section>
+            <section className="foundation-setting-section">
+              <header><div><strong>Fascia Assembly</strong><span>Board sizes are separate from their calculated elevations.</span></div></header>
+              <div className="foundation-field-grid">
+                <StoryDimensionInput key={`fascia-thickness:${draft.fasciaThickness}`} label="Fascia thickness" value={draft.fasciaThickness} onChange={(fasciaThickness) => replace({ fasciaThickness })} />
+                <StoryDimensionInput key={`fascia-depth:${draft.fasciaDepth}`} label="Fascia board depth" value={draft.fasciaDepth} onChange={(fasciaDepth) => replace({ fasciaDepth })} />
+                <StoryDimensionInput key={`subfascia-thickness:${draft.subfasciaThickness}`} label="Subfascia thickness" value={draft.subfasciaThickness} onChange={(subfasciaThickness) => replace({ subfasciaThickness })} />
+                <StoryDimensionInput key={`subfascia-depth:${draft.subfasciaDepth}`} label="Subfascia board depth" value={draft.subfasciaDepth} onChange={(subfasciaDepth) => replace({ subfasciaDepth })} />
+              </div>
+            </section>
+          </main>
+          <aside className="roof-reference-panel">
+            <header><strong>Live Roof Reference</strong><span>Exterior is left · schematic section</span></header>
+            <svg viewBox="0 0 420 250" role="img" aria-label="Roof heel, wall bearing, rafter pitch, and fascia reference diagram">
+              <rect x="195" y="134" width="80" height="100" className="roof-diagram-wall" />
+              <rect x="191" y="121" width="88" height="13" className="roof-diagram-plate" />
+              <path d="M 28 166 L 380 46 L 388 64 L 34 184 Z" className="roof-diagram-rafter" />
+              <path d="M 28 166 L 380 46" className="roof-diagram-plane" />
+              <path d="M 32 164 L 32 218" className="roof-diagram-fascia" />
+              <path d="M 48 160 L 48 207" className="roof-diagram-subfascia" />
+              <path d="M 191 121 L 191 134 M 179 121 L 179 84 M 175 84 L 183 84" className="roof-diagram-dimension" />
+              <circle cx="191" cy="121" r="4" className="roof-diagram-point" />
+              <text x="145" y="76">HEIGHT ABOVE PLATE</text>
+              <text x="202" y="116">EXTERIOR HEEL</text>
+              <text x="203" y="151">TOP OF PLATE</text>
+              <text x="287" y="58">{draft.pitchRise}:12 PITCH</text>
+              <text x="12" y="231">FASCIA</text>
+            </svg>
+            <StoryDimensionInput key={`reference-run:${referenceRun}`} label="Calculation preview run" value={referenceRun} onChange={setReferenceRun} />
+            {calculation ? <dl>
+              <div><dt>Top of plate / wall</dt><dd>{formatSignedArchitectural(calculation.topOfPlateElevation)}</dd></div>
+              <div><dt>Underside bearing</dt><dd>{formatSignedArchitectural(calculation.rafterUndersideBearingElevation)}</dd></div>
+              <div><dt>Exterior heel</dt><dd>{formatSignedArchitectural(calculation.heelElevation)}</dd></div>
+              <div><dt>Peak at preview run</dt><dd>{formatSignedArchitectural(calculation.peakElevation)}</dd></div>
+              <div><dt>Fascia top / bottom</dt><dd>{formatSignedArchitectural(calculation.fasciaTopElevation)} / {formatSignedArchitectural(calculation.fasciaBottomElevation)}</dd></div>
+              <div><dt>Subfascia top / bottom</dt><dd>{formatSignedArchitectural(calculation.subfasciaTopElevation)} / {formatSignedArchitectural(calculation.subfasciaBottomElevation)}</dd></div>
+              <div><dt>Maximum notch depth</dt><dd>{formatArchitectural(calculation.birdsmouthMaximumNotchDepth)}</dd></div>
+              <div><dt>Roof angle</dt><dd>{calculation.pitchAngleDegrees.toFixed(2)}°</dd></div>
+            </dl> : <p className="story-manager-error">Enter valid roof values to calculate the section.</p>}
+            <p>Peak height is a result, not a separate default. Each future Roof Plane will calculate it from its actual horizontal run.</p>
+          </aside>
+        </div>
+        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
+        <footer className="story-manager-footer"><span>Roof design defaults · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Roof Defaults</button></div></footer>
+      </section>
+    </div>
+  );
+}
+
 type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" | "ceilingStructureOverride" | "ceilingFinishOverride";
 
 function RoomManagerDialog({
@@ -10952,7 +11073,7 @@ function ProjectSetupDialog({
   initialName: string;
   mode: "edit" | "new";
   onCancel: () => void;
-  onOpenAdvanced: (target: "foundation" | "stories" | "walls") => void;
+  onOpenAdvanced: (target: "foundation" | "roof" | "stories" | "walls") => void;
   onSave: (name: string, document: ModelDocument) => void;
 }) {
   const [draft, setDraft] = useState(() => cloneDocument(document));
@@ -10966,6 +11087,9 @@ function ProjectSetupDialog({
   const activeWall = draft.building.wallTypes.find((type) => type.id === draft.building.activeWallTypeId) ?? draft.building.wallTypes[0];
   const activeDoor = draft.building.openingTypes.find((type) => type.id === draft.building.activeDoorTypeId);
   const activeWindow = draft.building.openingTypes.find((type) => type.id === draft.building.activeWindowTypeId);
+  const roofBearingStory = draft.building.stories.at(-1)!;
+  const roofBearingCalculation = calculateStoryElevations(draft.building).find((item) => item.storyId === roofBearingStory.id);
+  const roofReference = calculateRoofReferenceDimensions(draft.building.roofSettings, roofBearingCalculation?.roughCeilingElevation ?? 0, 144);
   const wallTypesForUse = (use: WallUse) => draft.building.wallTypes.filter((type) => wallTypeMatchesUse(type, use));
   const stepIndex = PROJECT_SETUP_STEPS.findIndex((item) => item.id === step);
 
@@ -11004,6 +11128,11 @@ function ProjectSetupDialog({
     const building = cloneBuildingStructure(draft.building);
     building.activeWallUse = use;
     building.activeWallTypeId = defaultWallTypeIdForUse(building, use);
+    changeBuilding(building);
+  };
+  const changeRoofDefaults = (change: Partial<RoofSettings>) => {
+    const building = cloneBuildingStructure(draft.building);
+    building.roofSettings = { ...building.roofSettings, ...change };
     changeBuilding(building);
   };
   const replaceSelectedStory = (change: Partial<typeof selectedStory>) => {
@@ -11064,6 +11193,11 @@ function ProjectSetupDialog({
       setError("Enter a project name between 1 and 120 characters.");
       return;
     }
+    if (!roofSettingsAreValid(draft.building.roofSettings)) {
+      setStep("defaults");
+      setError("Review the Roof pitch, heel, overhang, framing, birdsmouth, fascia, and subfascia values before continuing.");
+      return;
+    }
     if (!buildingStructureIsValid(draft.building)) {
       setStep("stories");
       setError("Review Story names, heights, and assemblies before continuing.");
@@ -11071,7 +11205,7 @@ function ProjectSetupDialog({
     }
     onSave(normalizedName, cloneDocument(draft));
   };
-  const openAdvanced = (target: "foundation" | "stories" | "walls") => {
+  const openAdvanced = (target: "foundation" | "roof" | "stories" | "walls") => {
     const normalizedName = name.trim();
     if (!normalizedName || !buildingStructureIsValid(draft.building)) {
       setError("Complete the required Project and Story settings before opening an advanced manager.");
@@ -11088,27 +11222,28 @@ function ProjectSetupDialog({
     { complete: Boolean(activeFoundation), label: "Foundation default", value: activeFoundation?.name ?? "Required" },
     { complete: Boolean(activeWall), label: "Starting Wall use", value: `${WALL_USE_LABELS[draft.building.activeWallUse]} · ${activeWall?.name ?? "Required"}` },
     { complete: ["exterior", "interior-bearing", "interior-partition"].every((use) => wallTypesForUse(use as WallUse).length > 0), label: "Wall defaults", value: "Exterior, bearing, and partition assigned" },
+    { complete: Boolean(roofReference), label: "Roof defaults", value: roofReference ? `${draft.building.roofSettings.pitchRise}:12 · heel ${formatSignedArchitectural(roofReference.heelElevation)}` : "Review required" },
   ];
 
   return (
     <div className="story-manager-backdrop project-setup-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <section className="project-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="project-setup-title">
         <header className="project-setup-header">
-          <div><strong id="project-setup-title">{mode === "new" ? "New Project Quick Setup" : "Project Setup Center"}</strong><span>{mode === "new" ? "Establish the building before drawing. Everything can be refined later." : "Review the project-wide settings that drive Stories, Rooms, Walls, and openings."}</span></div>
+          <div><strong id="project-setup-title">{mode === "new" ? "New Project Quick Setup" : "Project Setup Center"}</strong><span>{mode === "new" ? "Establish the building before drawing. Everything can be refined later." : "Review the project-wide settings that drive Stories, Rooms, Walls, roofs, and openings."}</span></div>
           <button type="button" onClick={onCancel} aria-label="Close Project Setup">×</button>
         </header>
         <div className="project-setup-layout">
           <nav className="project-setup-nav" aria-label="Project setup categories">
             <div className="project-setup-progress"><span>Setup progress</span><strong>{reviewItems.filter((item) => item.complete).length} of {reviewItems.length} ready</strong><i><b style={{ width: `${reviewItems.filter((item) => item.complete).length / reviewItems.length * 100}%` }} /></i></div>
             {PROJECT_SETUP_STEPS.map((item, index) => <button type="button" key={item.id} className={step === item.id ? "is-active" : ""} onClick={() => { setStep(item.id); setError(""); }}><b>{index + 1}</b><span><strong>{item.label}</strong><small>{item.note}</small></span></button>)}
-            <div className="project-setup-scope"><strong>Advanced managers</strong><span>Detailed assemblies stay in their dedicated editors so this setup remains readable. Current setup changes are applied first.</span>{mode === "edit" ? <><button type="button" onClick={() => openAdvanced("stories")}>Story &amp; Assemblies</button><button type="button" onClick={() => openAdvanced("foundation")}>Foundation Types</button><button type="button" onClick={() => openAdvanced("walls")}>Wall Types</button></> : <small>Create the project first, then use the advanced managers when needed.</small>}</div>
+            <div className="project-setup-scope"><strong>Advanced managers</strong><span>Detailed assemblies stay in their dedicated editors so this setup remains readable. Current setup changes are applied first.</span>{mode === "edit" ? <><button type="button" onClick={() => openAdvanced("stories")}>Story &amp; Assemblies</button><button type="button" onClick={() => openAdvanced("foundation")}>Foundation Types</button><button type="button" onClick={() => openAdvanced("walls")}>Wall Types</button><button type="button" onClick={() => openAdvanced("roof")}>Roof Design Defaults</button></> : <small>Create the project first, then use the advanced managers when needed.</small>}</div>
           </nav>
           <main className="project-setup-content">
             {step === "project" ? <>
               <header><span>1 · Project</span><strong>Name the job and choose a sensible starting structure.</strong><p>Only the project name is required. The remaining fields travel with the saved project and can be completed as information becomes available.</p></header>
               {mode === "new" ? <section className="project-template-grid" aria-label="Starting templates"><button type="button" onClick={() => applyTemplate("one-story")}><b>▱</b><strong>One Story</strong><span>First Floor with a wood-framed floor</span></button><button type="button" onClick={() => applyTemplate("basement")}><b>▤</b><strong>Basement + First Floor</strong><span>Separate Basement Story with a concrete slab</span></button><button type="button" onClick={() => applyTemplate("two-story-basement")}><b>▥</b><strong>Two Stories + Basement</strong><span>Basement, First Floor, and Second Floor</span></button></section> : null}
               <section className="project-setup-card"><header><strong>Project Information</strong><span>Saved in the .mbproj file</span></header><div className="project-setup-fields">
-                <label className="is-wide"><span>Project name *</span><input autoFocus value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setError(""); }} /></label>
+                <label className="is-wide"><span>Project name *</span><input value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setError(""); }} /></label>
                 <label><span>Project number</span><input value={draft.projectInformation.projectNumber} maxLength={80} onChange={(event) => changeProjectInformation({ projectNumber: event.target.value })} /></label>
                 <label><span>Project type</span><select value={draft.projectInformation.projectType} onChange={(event) => changeProjectInformation({ projectType: event.target.value as ProjectType })}>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>Client</span><input value={draft.projectInformation.clientName} maxLength={120} onChange={(event) => changeProjectInformation({ clientName: event.target.value })} /></label>
@@ -11128,6 +11263,7 @@ function ProjectSetupDialog({
                 <article><header><b>▰</b><div><strong>Foundation</strong><span>Support, footing, and sill edge</span></div></header><label><span>Active Foundation Wall type</span><select value={draft.building.activeFoundationWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeFoundationWallTypeId: event.target.value })}>{draft.building.foundationWallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Condition</dt><dd>{activeFoundation?.condition.replaceAll("-", " ")}</dd></div><div><dt>Sill plates</dt><dd>{activeFoundation?.sill.foundationPlateCount}</dd></div></dl></article>
                 <article><header><b>▥</b><div><strong>Walls</strong><span>Defaults by drawing use</span></div></header><label><span>Exterior Wall</span><select value={draft.building.defaultExteriorWallTypeId} onChange={(event) => changeWallDefault("exterior", event.target.value)}>{wallTypesForUse("exterior").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Bearing Wall</span><select value={draft.building.defaultInteriorBearingWallTypeId} onChange={(event) => changeWallDefault("interior-bearing", event.target.value)}>{wallTypesForUse("interior-bearing").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Partition</span><select value={draft.building.defaultInteriorPartitionWallTypeId} onChange={(event) => changeWallDefault("interior-partition", event.target.value)}>{wallTypesForUse("interior-partition").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Starting Wall use</span><select value={draft.building.activeWallUse} onChange={(event) => changeStartingWallUse(event.target.value as WallUse)}>{Object.entries(WALL_USE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><dl><div><dt>First Wall Type</dt><dd>{activeWall?.name ?? "—"}</dd></div><div><dt>Total thickness</dt><dd>{activeWall ? formatArchitectural(assemblyTotalThickness(activeWall)) : "—"}</dd></div></dl></article>
                 <article><header><b>▣</b><div><strong>Doors &amp; Windows</strong><span>Reusable opening Types</span></div></header><label><span>Active Door type</span><select value={draft.building.activeDoorTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeDoorTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "door").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Active Window type</span><select value={draft.building.activeWindowTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWindowTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "window").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Door</dt><dd>{activeDoor?.name}</dd></div><div><dt>Window</dt><dd>{activeWindow?.name}</dd></div></dl></article>
+                <article><header><b>⌂</b><div><strong>Roof</strong><span>Exterior heel and plane defaults</span></div></header><label><span>Framing method</span><select value={draft.building.roofSettings.framingMethod} onChange={(event) => changeRoofDefaults({ framingMethod: event.target.value as RoofFramingMethod })}><option value="rafters">Conventional rafters</option><option value="trusses">Roof trusses</option></select></label><label><span>Pitch · rise in 12</span><input type="number" min="0.25" max="24" step="0.0625" value={draft.building.roofSettings.pitchRise} onChange={(event) => changeRoofDefaults({ pitchRise: Number(event.target.value) })} /></label><StoryDimensionInput key={`setup-roof-heel:${draft.building.roofSettings.heightAbovePlate}`} label="Height above plate / heel" value={draft.building.roofSettings.heightAbovePlate} onChange={(heightAbovePlate) => changeRoofDefaults({ heightAbovePlate })} /><StoryDimensionInput key={`setup-roof-overhang:${draft.building.roofSettings.overhang}`} label="Horizontal overhang" allowZero value={draft.building.roofSettings.overhang} onChange={(overhang) => changeRoofDefaults({ overhang })} /><dl><div><dt>Top of plate</dt><dd>{roofBearingCalculation ? formatSignedArchitectural(roofBearingCalculation.roughCeilingElevation) : "—"}</dd></div><div><dt>Exterior heel</dt><dd>{roofReference ? formatSignedArchitectural(roofReference.heelElevation) : "—"}</dd></div></dl></article>
               </section><p className="project-setup-note">The Wall tool starts with the selected Wall use. While drawing, switch between Exterior, Interior Bearing, and Interior Partition without reopening Project Setup; each use recalls its assigned default Type.</p>
             </> : null}
             {step === "review" ? <>
@@ -11215,6 +11351,7 @@ export function ModelBuilderApp() {
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
   const [framingManagerOpen, setFramingManagerOpen] = useState(false);
+  const [roofDefaultsOpen, setRoofDefaultsOpen] = useState(false);
   const [openingTypeManagerOpen, setOpeningTypeManagerOpen] = useState(false);
   const [productLibraryOpen, setProductLibraryOpen] = useState(false);
   const [wallTypeManagerOpen, setWallTypeManagerOpen] = useState(false);
@@ -14502,6 +14639,17 @@ export function ModelBuilderApp() {
     setFileNotice({ text: building.wallFraming.showInModel ? "Wall framing is generated and visible in 3D." : "Wall framing defaults were saved with the project.", tone: "success" });
   }, [editor.present]);
 
+  const applyRoofDefaults = useCallback((building: BuildingStructure) => {
+    const next = updateDocumentBuilding(editor.present, building);
+    if (!next) {
+      setFileNotice({ text: "Roof defaults contain an invalid pitch, heel, overhang, member, birdsmouth, fascia, or subfascia value.", tone: "error" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setRoofDefaultsOpen(false);
+    setFileNotice({ text: `Roof defaults saved · ${building.roofSettings.pitchRise}:12 pitch with ${formatArchitectural(building.roofSettings.heightAbovePlate)} height above plate.`, tone: "success" });
+  }, [editor.present]);
+
   const applyRoomSettings = useCallback((next: ModelDocument) => {
     dispatch({ type: "commit", next });
     setRoomManagerOpen(false);
@@ -15404,7 +15552,7 @@ export function ModelBuilderApp() {
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
                   {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
-                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setProductLibraryOpen(true))}><span>Product Library…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
+                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setProductLibraryOpen(true))}><span>Product Library…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoofDefaultsOpen(true))}><span>Roof Design Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
                   {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
                 </div>
               ) : null}
@@ -15614,7 +15762,7 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={() => setWallTypeManagerOpen(true)} title="Define reusable Exterior, Main, and Interior wall assemblies"><b>▥</b><span>Wall Types</span></button>
                 <button type="button" onClick={() => setOpeningTypeManagerOpen(true)} title="Define reusable Door and Window unit sizes, rough openings, headers, and finish returns"><b>▣</b><span>Doors &amp;<br />Windows</span></button>
                 <button type="button" onClick={() => setProductLibraryOpen(true)} title="Browse project Door and Window products, set active defaults, and place into a selected Wall"><b>▦</b><span>Product<br />Library</span></button>
-                <button type="button" className="is-planned" disabled title="Roof standards will be added with roof modeling"><b>⌂</b><span>Roof</span><small>Planned</small></button>
+                <button type="button" onClick={() => setRoofDefaultsOpen(true)} title="Set roof pitch, exterior heel, bearing, overhang, birdsmouth, fascia, and subfascia defaults"><b>⌂</b><span>Roof</span></button>
                 <button type="button" onClick={() => setFramingManagerOpen(true)} title="Set generated Wall stud, plate, and opening-framing defaults"><b>╫</b><span>Framing</span></button>
                 <button type="button" className="is-planned" disabled title="Project material definitions are planned"><b>▧</b><span>Materials</span><small>Planned</small></button>
               </div>
@@ -16303,11 +16451,15 @@ export function ModelBuilderApp() {
                 <button type="button" className={editor.present.building.wallFraming.showInModel ? "building-browser-row is-active" : "building-browser-row"} onClick={() => setFramingManagerOpen(true)}><span className="building-browser-icon">╫</span><span><strong>{formatArchitectural(editor.present.building.wallFraming.studSpacing)} on center</strong><small>{editor.present.building.wallFraming.cornerStyle === "three-stud" ? "3-stud corners" : "2-stud corners"} · {editor.present.building.wallFraming.partitionBackingStyle === "ladder" ? "ladder backing" : editor.present.building.wallFraming.partitionBackingStyle === "three-stud" ? "3-stud backing" : "no backing"}</small></span>{editor.present.building.wallFraming.showInModel ? <b>VISIBLE</b> : null}</button>
               </section>
               <section className="building-browser-section">
+                <header><strong>Roof Defaults</strong><span>{editor.present.building.roofSettings.pitchRise}:12</span></header>
+                <button type="button" className="building-browser-row" onClick={() => setRoofDefaultsOpen(true)}><span className="building-browser-icon">⌂</span><span><strong>{editor.present.building.roofSettings.framingMethod === "rafters" ? "Conventional rafters" : "Roof trusses"}</strong><small>Heel {formatArchitectural(editor.present.building.roofSettings.heightAbovePlate)} above plate · overhang {formatArchitectural(editor.present.building.roofSettings.overhang)}</small></span></button>
+              </section>
+              <section className="building-browser-section">
                 <header><strong>Rooms · {activeStory.name}</strong><span>{activeStoryRoomCount}</span></header>
                 {editor.present.rooms.filter((room) => room.storyId === activeStory.id).map((room) => <button type="button" className="building-browser-row" key={room.id} onClick={() => setRoomManagerOpen(true)}><span className="building-browser-icon">▦</span><span><strong>{room.name}</strong><small>{(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {room.boundaryWallIds.length} Walls · {room.platformOpenings.length} Openings</small></span></button>)}
                 {!activeStoryRoomCount ? <div className="building-browser-empty"><span>No Rooms detected yet.</span><button type="button" onClick={() => setRoomManagerOpen(true)}>Open Room Manager</button></div> : null}
               </section>
-              <div className="building-browser-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setFramingManagerOpen(true)}>Framing</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
+              <div className="building-browser-actions"><button type="button" onClick={() => setStoryManagerOpen(true)}>Story Settings</button><button type="button" onClick={() => setWallTypeManagerOpen(true)}>Wall Types</button><button type="button" onClick={() => setRoofDefaultsOpen(true)}>Roof</button><button type="button" onClick={() => setFramingManagerOpen(true)}>Framing</button><button type="button" onClick={() => setRoomManagerOpen(true)}>Rooms</button></div>
             </section>
           )}
         </aside>
@@ -16352,10 +16504,11 @@ export function ModelBuilderApp() {
         </div>
       </footer>
       </>}
-      {projectSetupMode ? <ProjectSetupDialog document={projectSetupMode === "new" ? NEW_PROJECT_DOCUMENT : editor.present} initialName={projectSetupMode === "new" ? "Untitled Project" : normalizedProjectName} mode={projectSetupMode} onCancel={() => setProjectSetupMode(null)} onOpenAdvanced={(target) => { setProjectSetupMode(null); if (target === "stories") setStoryManagerOpen(true); else if (target === "foundation") setFoundationManagerOpen(true); else setWallTypeManagerOpen(true); }} onSave={applyProjectSetup} /> : null}
+      {projectSetupMode ? <ProjectSetupDialog document={projectSetupMode === "new" ? NEW_PROJECT_DOCUMENT : editor.present} initialName={projectSetupMode === "new" ? "Untitled Project" : normalizedProjectName} mode={projectSetupMode} onCancel={() => setProjectSetupMode(null)} onOpenAdvanced={(target) => { setProjectSetupMode(null); if (target === "stories") setStoryManagerOpen(true); else if (target === "foundation") setFoundationManagerOpen(true); else if (target === "roof") setRoofDefaultsOpen(true); else setWallTypeManagerOpen(true); }} onSave={applyProjectSetup} /> : null}
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
+      {roofDefaultsOpen ? <RoofDefaultsDialog building={editor.present.building} onCancel={() => setRoofDefaultsOpen(false)} onSave={applyRoofDefaults} /> : null}
       {openingTypeManagerOpen ? <OpeningTypeManagerDialog document={editor.present} onCancel={() => setOpeningTypeManagerOpen(false)} onSave={applyOpeningTypes} /> : null}
       {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onAssetUpdated={updateLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onCreateObjectType={createLibraryObjectType} onManageOpeningTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}

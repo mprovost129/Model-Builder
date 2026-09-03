@@ -46,6 +46,8 @@ export const WALL_STRUCTURAL_ROLES = ["bearing", "non-bearing"] as const;
 export type WallStructuralRole = (typeof WALL_STRUCTURAL_ROLES)[number];
 export const WALL_USES = ["exterior", "interior-bearing", "interior-partition"] as const;
 export type WallUse = (typeof WALL_USES)[number];
+export const ROOF_FRAMING_METHODS = ["rafters", "trusses"] as const;
+export type RoofFramingMethod = (typeof ROOF_FRAMING_METHODS)[number];
 export const OPENING_COMPONENT_ROLES = ["frame", "jamb", "sash", "panel", "glazing", "mullion", "trim", "threshold", "hardware"] as const;
 export type OpeningComponentRole = (typeof OPENING_COMPONENT_ROLES)[number];
 export const OPENING_COMPONENT_GEOMETRIES = ["perimeter", "panel", "panel-grid", "fixed-sash", "single-hung-sashes", "double-hung-sashes", "casement-sashes", "awning-sash", "sliding-sashes", "vertical-divider", "horizontal-divider", "vertical-prairie-divider", "horizontal-prairie-divider"] as const;
@@ -307,6 +309,40 @@ export type WallFramingSettings = {
   topPlateCount: number;
 };
 
+/** Project-wide defaults used by future manual and automatic Roof Planes. */
+export type RoofSettings = {
+  /** Maximum birdsmouth notch as a fraction of nominal rafter depth; validation only. */
+  birdsmouthMaxNotchRatio: number;
+  /** Horizontal bearing seat requested for a conventionally framed rafter. */
+  birdsmouthSeatLength: number;
+  fasciaDepth: number;
+  fasciaThickness: number;
+  framingMethod: RoofFramingMethod;
+  /** Vertical distance from top of plate to the roof-plane heel at the exterior wall face. */
+  heightAbovePlate: number;
+  overhang: number;
+  /** Inches of rise per twelve inches of horizontal run. */
+  pitchRise: number;
+  rafterDepth: number;
+  rafterWidth: number;
+  subfasciaDepth: number;
+  subfasciaThickness: number;
+};
+
+export type CalculatedRoofReferenceDimensions = {
+  birdsmouthMaximumNotchDepth: number;
+  fasciaBottomElevation: number;
+  fasciaTopElevation: number;
+  heelElevation: number;
+  peakElevation: number;
+  pitchAngleDegrees: number;
+  pitchRise: number;
+  rafterUndersideBearingElevation: number;
+  subfasciaBottomElevation: number;
+  subfasciaTopElevation: number;
+  topOfPlateElevation: number;
+};
+
 export type BuildingStructure = {
   activeDoorTypeId: string;
   activeFoundationWallTypeId: string;
@@ -323,6 +359,7 @@ export type BuildingStructure = {
   headerTypes: WallHeaderType[];
   openingTypes: WallOpeningType[];
   productObjectTypes: ProductObjectType[];
+  roofSettings: RoofSettings;
   stories: BuildingStory[];
   wallFraming: WallFramingSettings;
   wallTypes: LayeredAssembly[];
@@ -792,6 +829,23 @@ export function createDefaultWallFramingSettings(): WallFramingSettings {
   };
 }
 
+export function createDefaultRoofSettings(): RoofSettings {
+  return {
+    birdsmouthMaxNotchRatio: 0.25,
+    birdsmouthSeatLength: 3.5,
+    fasciaDepth: 7.25,
+    fasciaThickness: 0.75,
+    framingMethod: "rafters",
+    heightAbovePlate: 9.25,
+    overhang: 12,
+    pitchRise: 6,
+    rafterDepth: 9.25,
+    rafterWidth: 1.5,
+    subfasciaDepth: 5.5,
+    subfasciaThickness: 1.5,
+  };
+}
+
 export function createBuildingStory(id: string, name: string): BuildingStory {
   return {
     ceilingFinish: defaultCeilingFinish(id),
@@ -830,6 +884,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     headerTypes: createDefaultWallHeaderTypes(),
     openingTypes,
     productObjectTypes: [],
+    roofSettings: createDefaultRoofSettings(),
     stories: [createBuildingStory("story-01", "First Floor")],
     wallFraming: createDefaultWallFramingSettings(),
     wallTypes: createDefaultWallTypes(),
@@ -873,7 +928,46 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), productObjectTypes: building.productObjectTypes.map(cloneProductObjectType), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), productObjectTypes: building.productObjectTypes.map(cloneProductObjectType), roofSettings: { ...building.roofSettings }, stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+}
+
+export function roofSettingsAreValid(settings: RoofSettings): boolean {
+  const dimensions = [settings.birdsmouthSeatLength, settings.fasciaDepth, settings.fasciaThickness, settings.heightAbovePlate, settings.rafterDepth, settings.rafterWidth, settings.subfasciaDepth, settings.subfasciaThickness];
+  return ROOF_FRAMING_METHODS.includes(settings.framingMethod) &&
+    dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    Number.isFinite(settings.overhang) && settings.overhang >= 0 && settings.overhang <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(settings.overhang) &&
+    Number.isFinite(settings.pitchRise) && settings.pitchRise >= 0.25 && settings.pitchRise <= 24 && isSixteenth(settings.pitchRise) &&
+    Number.isFinite(settings.birdsmouthMaxNotchRatio) && settings.birdsmouthMaxNotchRatio >= 0.05 && settings.birdsmouthMaxNotchRatio <= 0.5;
+}
+
+/**
+ * Calculates the vertical roof references from the exterior bearing face.
+ * The underside bearing reference intentionally remains at top of plate; the
+ * birdsmouth solid itself is deferred until a Roof Plane is hosted by a Wall.
+ */
+export function calculateRoofReferenceDimensions(
+  settings: RoofSettings,
+  topOfPlateElevation: number,
+  horizontalRun: number,
+): CalculatedRoofReferenceDimensions | null {
+  if (!roofSettingsAreValid(settings) || !Number.isFinite(topOfPlateElevation) || !Number.isFinite(horizontalRun) || horizontalRun < 0) return null;
+  const slope = settings.pitchRise / 12;
+  const heelElevation = snapToSixteenth(topOfPlateElevation + settings.heightAbovePlate);
+  const fasciaTopElevation = snapToSixteenth(heelElevation - settings.overhang * slope);
+  const subfasciaTopElevation = fasciaTopElevation;
+  return {
+    birdsmouthMaximumNotchDepth: snapToSixteenth(settings.rafterDepth * settings.birdsmouthMaxNotchRatio),
+    fasciaBottomElevation: snapToSixteenth(fasciaTopElevation - settings.fasciaDepth),
+    fasciaTopElevation,
+    heelElevation,
+    peakElevation: snapToSixteenth(heelElevation + horizontalRun * slope),
+    pitchAngleDegrees: Math.atan(slope) * 180 / Math.PI,
+    pitchRise: settings.pitchRise,
+    rafterUndersideBearingElevation: snapToSixteenth(topOfPlateElevation),
+    subfasciaBottomElevation: snapToSixteenth(subfasciaTopElevation - settings.subfasciaDepth),
+    subfasciaTopElevation,
+    topOfPlateElevation: snapToSixteenth(topOfPlateElevation),
+  };
 }
 
 export function foundationSillStackHeight(type: FoundationWallType): number {
@@ -1213,7 +1307,8 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.headerTypes.length > MAXIMUM_WALL_HEADER_TYPE_COUNT ||
     !Array.isArray(building.productObjectTypes) ||
     building.productObjectTypes.length > MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT ||
-    !wallFramingSettingsAreValid(building.wallFraming)
+    !wallFramingSettingsAreValid(building.wallFraming) ||
+    !roofSettingsAreValid(building.roofSettings)
   ) {
     return false;
   }
