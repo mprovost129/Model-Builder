@@ -33,6 +33,8 @@ polylines, rectangles, Circles, and Arcs.
 - Column-aligned Layer Manager with inline naming, object counts, state controls, and search
 - Independent Layer line and fill properties, a Layer-Set-level Fills master that produces
   linework-only marketing views, and per-object By Layer fill overrides in Properties
+- Floor/Reference Display in Top view with Automatic, Below, Above, or Specific Story selection,
+  a dedicated Reference Display Layer Set, optional fills/details, and non-editable reference geometry
 - Parametric Length, Width, and Height fields
 - Feet-inch-fraction input and display to the nearest 1/16 inch
 - Live box resizing from exact overall dimensions
@@ -42,7 +44,7 @@ polylines, rectangles, Circles, and Arcs.
 - Persistent drawing layers with a current layer for newly created objects
 - Object-to-layer assignment from Properties
 - Layer naming, visibility, locking, color identification, and guarded deletion
-- Layer-aware viewport selection and project-file compatibility with versions 1 through 48
+- Layer-aware viewport selection and project-file compatibility with versions 1 through 52
 - Selected-object highlighting and box-specific property editing
 - Shift-click multi-selection in both the viewport and Model Explorer
 - Shared typed selection references across boxes, Lines, Polylines, Rectangles, Circles, and Arcs
@@ -283,7 +285,7 @@ polylines, rectangles, Circles, and Arcs.
 - Exact push or pull distance entry
 - Undo and Redo for dimensional changes and face movement
 - Versioned local project files using the `.mbproj` extension
-- Backward-compatible opening and automatic upgrading of version-1 through version-39 files
+- Backward-compatible opening and automatic upgrading of version-1 through version-51 files
 - New, Open, and Save controls with `Ctrl+O` and `Ctrl+S` shortcuts
 - Project-file validation and unsaved-change warnings
 - Automatic local draft recovery after refreshes, browser restarts, or an unexpected close
@@ -454,8 +456,8 @@ residential 3D foundation. See `docs/2D_TO_3D_HANDOFF_GATE.md` for the boundary.
 Model Builder saves a human-readable, versioned `.mbproj` file to the browser's
 Downloads folder. Open restores every box, its identity, dimensions, position,
 group membership, lock state, Z-axis rotation, 3D lines, polylines, rectangles, Circles, Arcs,
-the project name, unit settings, Story, Room, Platform Opening, placed Foundation Wall,
-Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, ordinary product object Types and instance links, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-45 files open and upgrade
+the project name, unit settings, Story, Floor Reference settings, Room, Platform Opening, placed Foundation Wall,
+Foundation Wall Type, Door/Window Type, placed Door/Window component overrides, ordinary product object Types and instance links, Wall Framing defaults, manufacturer product provenance and asset manifests, assembly definitions, and format metadata. Version-1 through version-51 files open and upgrade
 to the current format. Files with invalid geometry, duplicate object or group identities or
 names, unsupported units, excessive object counts, or a newer format version
 are rejected with a clear message instead of being partially loaded.

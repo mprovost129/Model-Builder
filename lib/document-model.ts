@@ -147,11 +147,14 @@ import {
 import {
   DEFAULT_LAYER_ID,
   DEFAULT_LAYER_SET_ID,
+  DEFAULT_REFERENCE_LAYER_SET_ID,
   DEFAULT_SAVED_PLAN_VIEW_ID,
+  REFERENCE_DISPLAY_MODES,
   ROOM_ANNOTATION_KINDS,
   STANDARD_LAYER_IDS,
   createDefaultLayerSet,
   createDefaultLayers,
+  createDefaultReferenceLayerSet,
   createDefaultSavedPlanView,
   layerSetStateFromLayer,
   type LayerSet,
@@ -168,13 +171,16 @@ import {
 export {
   DEFAULT_LAYER_ID,
   DEFAULT_LAYER_SET_ID,
+  DEFAULT_REFERENCE_LAYER_SET_ID,
   DEFAULT_SAVED_PLAN_VIEW_ID,
+  REFERENCE_DISPLAY_MODES,
   ROOM_ANNOTATION_KINDS,
   ROOM_TYPES,
   STANDARD_LAYER_IDS,
   STANDARD_LAYERS,
+  resolveReferenceStoryId,
 } from "../features/project-presentation.ts";
-export type { LayerSet, ModelFillOverride, ModelLayer, ModelLineStyle, ModelObjectCategory, RoomAnnotationKind, RoomAnnotationObject, RoomType, SavedPlanView } from "../features/project-presentation.ts";
+export type { LayerSet, ModelFillOverride, ModelLayer, ModelLineStyle, ModelObjectCategory, ReferenceDisplayMode, RoomAnnotationKind, RoomAnnotationObject, RoomType, SavedPlanView } from "../features/project-presentation.ts";
 
 export type BoxObject = BoxModel & {
   fillOverride?: ModelFillOverride | null;
@@ -503,7 +509,7 @@ export const DEFAULT_DOCUMENT: ModelDocument = {
   circles: [],
   groups: [],
   layers: createDefaultLayers(),
-  layerSets: [createDefaultLayerSet(createDefaultLayers())],
+  layerSets: [createDefaultLayerSet(createDefaultLayers()), createDefaultReferenceLayerSet(createDefaultLayers())],
   lines: [],
   objects: [
     {
@@ -535,7 +541,7 @@ export const NEW_PROJECT_DOCUMENT: ModelDocument = {
   circles: [],
   groups: [],
   layers: createDefaultLayers(),
-  layerSets: [createDefaultLayerSet(createDefaultLayers())],
+  layerSets: [createDefaultLayerSet(createDefaultLayers()), createDefaultReferenceLayerSet(createDefaultLayers())],
   lines: [],
   objects: [],
   polylines: [],
@@ -1809,6 +1815,7 @@ export function updateDocumentBuilding(
   const nextStoryIds = new Set(building.stories.map((story) => story.id));
   next.savedPlanViews = next.savedPlanViews.map((view) => ({
     ...view,
+    referenceDisplayEnabled: view.referenceDisplayEnabled && (view.referenceMode !== "specific" || Boolean(view.referenceStoryId && nextStoryIds.has(view.referenceStoryId))),
     referenceStoryId: view.referenceStoryId && nextStoryIds.has(view.referenceStoryId) ? view.referenceStoryId : null,
     storyId: nextStoryIds.has(view.storyId) ? view.storyId : building.activeStoryId,
   }));
@@ -5233,7 +5240,7 @@ export function renameLayerSet(document: ModelDocument, layerSetId: string, name
 }
 
 export function savePlanView(document: ModelDocument, input: Omit<SavedPlanView, "id">): ModelDocument | null {
-  if (!document.layerSets.some((set) => set.id === input.layerSetId) || !document.layers.some((layer) => layer.id === input.activeLayerId) || !document.building.stories.some((story) => story.id === input.storyId) || input.referenceStoryId !== null && !document.building.stories.some((story) => story.id === input.referenceStoryId) || !Number.isFinite(input.annotationScale) || input.annotationScale < 1 || input.annotationScale > 1200 || !input.name.trim() || input.name.trim().length > 80) return null;
+  if (!document.layerSets.some((set) => set.id === input.layerSetId) || !document.layerSets.some((set) => set.id === input.referenceLayerSetId) || !document.layers.some((layer) => layer.id === input.activeLayerId) || !document.building.stories.some((story) => story.id === input.storyId) || input.referenceStoryId !== null && !document.building.stories.some((story) => story.id === input.referenceStoryId) || !REFERENCE_DISPLAY_MODES.includes(input.referenceMode) || typeof input.referenceDisplayEnabled !== "boolean" || typeof input.referenceFillsVisible !== "boolean" || !Number.isFinite(input.annotationScale) || input.annotationScale < 1 || input.annotationScale > 1200 || !input.name.trim() || input.name.trim().length > 80) return null;
   let number = 1;
   while (document.savedPlanViews.some((view) => view.id === `saved-view-${String(number).padStart(2, "0")}`)) number += 1;
   const view: SavedPlanView = { ...input, id: `saved-view-${String(number).padStart(2, "0")}`, name: input.name.trim() };
@@ -5247,7 +5254,7 @@ export function updateSavedPlanView(document: ModelDocument, viewId: string, cha
   const current = document.savedPlanViews.find((view) => view.id === viewId);
   if (!current) return null;
   const updated = { ...current, ...change, name: change.name?.trim() || current.name };
-  if (!document.layerSets.some((set) => set.id === updated.layerSetId) || !document.layers.some((layer) => layer.id === updated.activeLayerId) || !document.building.stories.some((story) => story.id === updated.storyId) || updated.referenceStoryId !== null && !document.building.stories.some((story) => story.id === updated.referenceStoryId) || !Number.isFinite(updated.annotationScale) || updated.annotationScale < 1 || updated.annotationScale > 1200 || updated.name.length > 80) return null;
+  if (!document.layerSets.some((set) => set.id === updated.layerSetId) || !document.layerSets.some((set) => set.id === updated.referenceLayerSetId) || !document.layers.some((layer) => layer.id === updated.activeLayerId) || !document.building.stories.some((story) => story.id === updated.storyId) || updated.referenceStoryId !== null && !document.building.stories.some((story) => story.id === updated.referenceStoryId) || !REFERENCE_DISPLAY_MODES.includes(updated.referenceMode) || typeof updated.referenceDisplayEnabled !== "boolean" || typeof updated.referenceFillsVisible !== "boolean" || !Number.isFinite(updated.annotationScale) || updated.annotationScale < 1 || updated.annotationScale > 1200 || updated.name.length > 80) return null;
   const next = cloneDocument(document);
   next.savedPlanViews = next.savedPlanViews.map((view) => view.id === viewId ? updated : view);
   return next;
@@ -5293,7 +5300,11 @@ export function activateStoryPlanView(document: ModelDocument, storyId: string):
     annotationScale: current.annotationScale,
     layerSetId: document.activeLayerSetId,
     name,
-    referenceStoryId: null,
+    referenceDisplayEnabled: current.referenceDisplayEnabled,
+    referenceFillsVisible: current.referenceFillsVisible,
+    referenceLayerSetId: current.referenceLayerSetId,
+    referenceMode: current.referenceMode,
+    referenceStoryId: current.referenceStoryId,
     storyId,
     viewMode: current.viewMode,
   });

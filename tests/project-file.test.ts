@@ -66,7 +66,8 @@ test("round-trips a blank new plan with its project settings", () => {
   assert.equal(document.building.activeFoundationWallTypeId, document.building.foundationWallTypes[0].id);
   assert.equal(document.building.roofTypes.length, 1);
   assert.equal(document.building.activeRoofTypeId, document.building.roofTypes[0].id);
-  assert.equal(document.layerSets.length, 1);
+  assert.equal(document.layerSets.length, 2);
+  assert.equal(document.savedPlanViews[0].referenceLayerSetId, "layer-set-reference-display");
   assert.equal(document.savedPlanViews[0].viewMode, "top");
   assert.deepEqual(document.projectInformation, documentWithProjectInformation.projectInformation);
 });
@@ -80,6 +81,26 @@ test("upgrades version-45 projects with blank project information", () => {
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.deepEqual(projectToDocument(parsed.project).projectInformation, NEW_PROJECT_DOCUMENT.projectInformation);
+});
+
+test("upgrades version-51 Saved Plan Views with reference display defaults", () => {
+  const current = createProjectDocument({ createdAt, document: NEW_PROJECT_DOCUMENT, name: "Version 51 Plan", updatedAt });
+  const legacy = structuredClone(current) as unknown as { savedPlanViews: Array<Record<string, unknown>>; version: number };
+  legacy.version = 51;
+  legacy.savedPlanViews.forEach((view) => {
+    delete view.referenceDisplayEnabled;
+    delete view.referenceFillsVisible;
+    delete view.referenceLayerSetId;
+    delete view.referenceMode;
+  });
+  const parsed = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const view = parsed.project.savedPlanViews[0];
+  assert.equal(view.referenceDisplayEnabled, false);
+  assert.equal(view.referenceFillsVisible, false);
+  assert.equal(view.referenceLayerSetId, "layer-set-reference-display");
+  assert.equal(view.referenceMode, "automatic");
 });
 
 test("upgrades version-46 projects with categorized Wall defaults", () => {

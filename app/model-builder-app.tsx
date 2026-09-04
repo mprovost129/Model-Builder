@@ -245,6 +245,7 @@ import {
   removeRoofPlaneRole,
   removeWallRole,
   refreshRoomsForStory,
+  resolveReferenceStoryId,
   ROOM_TYPES,
   STANDARD_LAYER_IDS,
   resolveOpeningComponents,
@@ -319,12 +320,15 @@ import {
   type AlignmentMode,
   type ModelDocument,
   type ModelEntityRef,
+  type LayerSet,
   type OpeningComponentOverride,
   type ProjectInformation,
   type ProjectType,
+  type ReferenceDisplayMode,
   type RoomObject,
   type RoomAnnotationObject,
   type RoomHorizontalPlatformSolution,
+  type SavedPlanView,
   type FoundationWallVerticalExtent,
   type WallVerticalExtent,
 } from "@/lib/document-model";
@@ -474,8 +478,38 @@ import {
   type ViewTarget,
 } from "@/lib/view-navigation";
 
-function isStoryVisibleInView(viewTarget: ViewTarget, activeStoryId: string, storyId: string) {
-  return viewTarget.id !== "top" || storyId === activeStoryId;
+type StoryDisplayRole = "active" | "reference" | "hidden";
+
+function activeReferenceStoryId(document: ModelDocument) {
+  const view = document.savedPlanViews.find((candidate) => candidate.id === document.activeSavedPlanViewId);
+  return view ? resolveReferenceStoryId(view, document.building.stories.map((story) => story.id)) : null;
+}
+
+function storyDisplayRole(document: ModelDocument, viewTarget: ViewTarget, storyId: string): StoryDisplayRole {
+  if (viewTarget.id !== "top") return "active";
+  if (storyId === document.building.activeStoryId) return "active";
+  return storyId === activeReferenceStoryId(document) ? "reference" : "hidden";
+}
+
+function displayLayerForStory(document: ModelDocument, viewTarget: ViewTarget, storyId: string, layerId: string | null | undefined) {
+  const base = findLayer(document, layerId ?? null);
+  if (!base || storyDisplayRole(document, viewTarget, storyId) !== "reference") return base;
+  const savedView = document.savedPlanViews.find((candidate) => candidate.id === document.activeSavedPlanViewId);
+  const referenceSet = document.layerSets.find((set) => set.id === savedView?.referenceLayerSetId);
+  const state = referenceSet?.layers.find((candidate) => candidate.id === base.id);
+  return state ? { ...base, ...state } : base;
+}
+
+function resolvedStoryFill(document: ModelDocument, viewTarget: ViewTarget, storyId: string, layerId: string | null | undefined, object?: FillStyledObject | null) {
+  if (storyDisplayRole(document, viewTarget, storyId) !== "reference") return resolvedObjectFill(document, layerId, object);
+  const savedView = document.savedPlanViews.find((candidate) => candidate.id === document.activeSavedPlanViewId);
+  const layer = displayLayerForStory(document, viewTarget, storyId, layerId);
+  const referenceSet = document.layerSets.find((set) => set.id === savedView?.referenceLayerSetId);
+  const override = object?.fillOverride ?? null;
+  return {
+    color: override?.color ?? layer?.fillColor ?? layer?.color ?? "#7f95aa",
+    visible: Boolean(savedView?.referenceFillsVisible && (referenceSet?.fillsVisible ?? true) && (override?.visible ?? layer?.fillVisible ?? true)),
+  };
 }
 
 type DragStatus = {
@@ -1670,14 +1704,15 @@ function resolvedObjectFill(document: ModelDocument, layerId: string | null | un
   };
 }
 
-function setMeshOpacity(mesh: THREE.Mesh, visible: boolean, selected = false, hovered = false) {
+function setMeshOpacity(mesh: THREE.Mesh, visible: boolean, selected = false, hovered = false, reference = false) {
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   materials.forEach((material) => {
     if (!(material instanceof THREE.MeshStandardMaterial) && !(material instanceof THREE.MeshBasicMaterial)) return;
     const baseOpacity = typeof material.userData.baseOpacity === "number" ? material.userData.baseOpacity : 0.92;
     material.transparent = true;
-    material.opacity = visible ? selected || hovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity : 0;
-    material.depthWrite = visible && baseOpacity >= 0.8;
+    const resolvedOpacity = reference ? Math.min(0.28, baseOpacity * 0.32) : selected || hovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity;
+    material.opacity = visible ? resolvedOpacity : 0;
+    material.depthWrite = visible && !reference && baseOpacity >= 0.8;
   });
 }
 
@@ -7287,8 +7322,8 @@ function Viewport({
         objectViewsRef.current.set(object.id, view);
       }
       const { dimensions } = object;
-      const layer = findLayer(document, object.layerId);
-      const visible = (layer?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, object.storyId);
+      const layer = displayLayerForStory(document, viewTarget, object.storyId, object.layerId);
+      const visible = (layer?.visible ?? true) && storyDisplayRole(document, viewTarget, object.storyId) !== "hidden";
       view.mesh.visible = visible;
       view.edges.visible = visible;
       view.mesh.scale.set(dimensions.length, dimensions.width, dimensions.height);
@@ -7313,9 +7348,9 @@ function Viewport({
         lineViewsRef.current.set(line.id, view);
       }
       updateViewportLine(view, line);
-      const layer = findLayer(document, line.layerId);
+      const layer = displayLayerForStory(document, viewTarget, line.storyId, line.layerId);
       applyLayerAppearanceToViewportLine(view, layer);
-      view.line.visible = (layer?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, line.storyId);
+      view.line.visible = (layer?.visible ?? true) && storyDisplayRole(document, viewTarget, line.storyId) !== "hidden";
     });
     const currentWallIds = new Set(document.lines.filter((line) => line.architecturalRole !== null).map((line) => line.id));
     wallViewsRef.current.forEach((view, lineId) => {
@@ -7342,9 +7377,10 @@ function Viewport({
       const openingById = new Map(line.wallOpenings.map((opening) => [opening.id, opening]));
       [...view.meshes.filter((mesh) => Boolean(mesh.userData.openingComponentRole)), ...view.productMeshes].forEach((mesh) => {
         const opening = openingById.get(String(mesh.userData.wallOpeningId ?? ""));
-        if (opening) mesh.visible = findLayer(document, opening.layerId)?.visible ?? true;
+        if (opening) mesh.visible = displayLayerForStory(document, viewTarget, line.storyId, opening.layerId)?.visible ?? true;
       });
-      view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, line.storyId));
+      const wallLayer = displayLayerForStory(document, viewTarget, line.storyId, line.layerId);
+      view.group.visible = Boolean(vertical && wallType && (wallLayer?.visible ?? true) && storyDisplayRole(document, viewTarget, line.storyId) !== "hidden");
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
     const foundationWallJoinPlan = buildAutomaticFoundationWallJoinPlan(foundationWallLines, document.building.foundationWallTypes);
@@ -7359,7 +7395,8 @@ function Viewport({
       const vertical = foundationWallVerticalExtent(document, line);
       const foundationType = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
       if (vertical && foundationType) updateFoundationWallView(view, line, vertical, foundationType, foundationWallJoinPlan, foundationWallLinesById, foundationWallTypesById);
-      view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, line.storyId));
+      const foundationLayer = displayLayerForStory(document, viewTarget, line.storyId, line.layerId);
+      view.group.visible = Boolean(vertical && foundationType && (foundationLayer?.visible ?? true) && storyDisplayRole(document, viewTarget, line.storyId) !== "hidden");
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
     polylineViewsRef.current.forEach((view, polylineId) => {
@@ -7375,10 +7412,11 @@ function Viewport({
         polylineViewsRef.current.set(polyline.id, view);
       }
       updateViewportPolyline(view, polyline);
-      applyLayerAppearanceToViewportLine(view, findLayer(document, polyline.layerId));
-      const visible = (findLayer(document, polyline.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, polyline.storyId);
+      const layer = displayLayerForStory(document, viewTarget, polyline.storyId, polyline.layerId);
+      applyLayerAppearanceToViewportLine(view, layer);
+      const visible = (layer?.visible ?? true) && storyDisplayRole(document, viewTarget, polyline.storyId) !== "hidden";
       view.line.visible = visible && (polyline.architecturalRole !== "roof-plane" || viewTarget.id === "top");
-      if (view.fill) view.fill.visible = visible && resolvedObjectFill(document, polyline.layerId, polyline).visible && (polyline.width ?? 0) >= 1 / 16;
+      if (view.fill) view.fill.visible = visible && resolvedStoryFill(document, viewTarget, polyline.storyId, polyline.layerId, polyline).visible && (polyline.width ?? 0) >= 1 / 16;
     });
     const currentFloorIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "floor-platform").map((polyline) => polyline.id));
     floorPlatformViewsRef.current.forEach((view, polylineId) => {
@@ -7395,7 +7433,8 @@ function Viewport({
       }
       const story = document.building.stories.find((candidate) => candidate.id === polyline.storyId);
       if (story) updateFloorPlatformView(view, polyline, story);
-      view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, polyline.storyId));
+      const layer = displayLayerForStory(document, viewTarget, polyline.storyId, polyline.layerId);
+      view.group.visible = Boolean(story && (layer?.visible ?? true) && storyDisplayRole(document, viewTarget, polyline.storyId) !== "hidden");
     });
     const currentRoofPlaneIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").map((polyline) => polyline.id));
     roofPlaneViewsRef.current.forEach((view, polylineId) => {
@@ -7411,7 +7450,8 @@ function Viewport({
         roofPlaneViewsRef.current.set(polyline.id, view);
       }
       updateRoofPlaneView(view, document, polyline, viewTarget);
-      view.group.visible = Boolean((findLayer(document, polyline.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, polyline.storyId));
+      const layer = displayLayerForStory(document, viewTarget, polyline.storyId, polyline.layerId);
+      view.group.visible = Boolean((layer?.visible ?? true) && storyDisplayRole(document, viewTarget, polyline.storyId) !== "hidden");
     });
     const currentRoomIds = new Set(document.rooms.map((room) => room.id));
     roomPlatformViewsRef.current.forEach((view, roomId) => {
@@ -7432,7 +7472,7 @@ function Viewport({
         const wall = document.lines.find((line) => line.id === wallId);
         return Boolean(wall && (findLayer(document, wall.layerId)?.visible ?? true));
       });
-      view.group.visible = Boolean(solution && boundaryWallsVisible && isStoryVisibleInView(viewTarget, document.building.activeStoryId, room.storyId));
+      view.group.visible = Boolean(solution && boundaryWallsVisible && storyDisplayRole(document, viewTarget, room.storyId) !== "hidden");
     });
     const currentCircleIds = new Set(document.circles.map((circle) => circle.id));
     circleViewsRef.current.forEach((view, circleId) => {
@@ -7448,8 +7488,9 @@ function Viewport({
         circleViewsRef.current.set(circle.id, view);
       }
       updateViewportCircle(view, circle);
-      applyLayerAppearanceToViewportLine(view, findLayer(document, circle.layerId));
-      view.line.visible = (findLayer(document, circle.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, circle.storyId);
+      const layer = displayLayerForStory(document, viewTarget, circle.storyId, circle.layerId);
+      applyLayerAppearanceToViewportLine(view, layer);
+      view.line.visible = (layer?.visible ?? true) && storyDisplayRole(document, viewTarget, circle.storyId) !== "hidden";
     });
     const currentArcIds = new Set(document.arcs.map((arc) => arc.id));
     arcViewsRef.current.forEach((view, arcId) => {
@@ -7465,8 +7506,9 @@ function Viewport({
         arcViewsRef.current.set(arc.id, view);
       }
       updateViewportArc(view, arc);
-      applyLayerAppearanceToViewportLine(view, findLayer(document, arc.layerId));
-      view.line.visible = (findLayer(document, arc.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, arc.storyId);
+      const layer = displayLayerForStory(document, viewTarget, arc.storyId, arc.layerId);
+      applyLayerAppearanceToViewportLine(view, layer);
+      view.line.visible = (layer?.visible ?? true) && storyDisplayRole(document, viewTarget, arc.storyId) !== "hidden";
     });
     const selectedObject = findBoxObject(document, selectedObjectId);
     const selectedRefs = selectedEntityKeys
@@ -7597,8 +7639,10 @@ function Viewport({
       const primaryObject = objectId === selectedObjectId;
       const hoveredObject = hoveredEntityKey === cadEntityKey({ id: objectId, kind: "box" });
       const object = findBoxObject(document, objectId);
-      const layer = findLayer(document, object?.layerId ?? null);
-      const fill = resolvedObjectFill(document, object?.layerId, object);
+      if (!object) return;
+      const role = storyDisplayRole(document, viewTarget, object.storyId);
+      const layer = displayLayerForStory(document, viewTarget, object.storyId, object.layerId);
+      const fill = resolvedStoryFill(document, viewTarget, object.storyId, object.layerId, object);
       const fillColor = Number.parseInt(fill.color.slice(1), 16);
       view.materials.forEach((material, index) => {
         const selectedFace = objectId === selectedObjectId && index === selectedFaceIndex;
@@ -7606,26 +7650,37 @@ function Viewport({
           selectedFace ? 0xf2bd5b : selectedObject ? primaryObject ? 0xd7a64b : 0xa98345 : hoveredObject ? 0x4ba6c8 : fillColor,
         );
         material.emissive.setHex(selectedFace ? 0x4a2b06 : hoveredObject ? 0x082a38 : 0x000000);
-        material.opacity = fill.visible ? selectedObject || hoveredObject ? 0.95 : 0.84 : 0;
-        material.depthWrite = fill.visible;
+        material.opacity = fill.visible ? role === "reference" ? 0.28 : selectedObject || hoveredObject ? 0.95 : 0.84 : 0;
+        material.depthWrite = fill.visible && role !== "reference";
+        material.depthTest = viewTarget.id !== "top";
       });
       (view.edges.material as THREE.LineBasicMaterial).color.setHex(
         primaryObject ? 0xffe3a3 : selectedObject ? 0xd5b16d : hoveredObject ? 0x87d8f3 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x8da0b2,
       );
+      const edgeMaterial = view.edges.material as THREE.LineBasicMaterial;
+      edgeMaterial.transparent = role === "reference";
+      edgeMaterial.opacity = role === "reference" ? 0.62 : 1;
+      view.mesh.renderOrder = role === "reference" ? 2 : 4;
+      view.edges.renderOrder = role === "reference" ? 8 : 13;
     });
-  }, [arcMode, circleMode, copyMode, document, hoveredEntityKey, lineMode, moveMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, selectedEntityKeys, selectedFaceIndex, selectedObjectId, selectedObjectIds]);
+  }, [arcMode, circleMode, copyMode, document, hoveredEntityKey, lineMode, moveMode, polylineMode, rectangleMode, rotateMode, rotationBaseKey, selectedEntityKeys, selectedFaceIndex, selectedObjectId, selectedObjectIds, viewTarget]);
 
   useEffect(() => {
     lineViewsRef.current.forEach((view, lineId) => {
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: lineId, kind: "line" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: lineId, kind: "line" });
       const line = findLineObject(document, lineId);
-      const layer = findLayer(document, line?.layerId ?? null);
-      const fill = resolvedObjectFill(document, line?.layerId, line);
+      if (!line) return;
+      const role = storyDisplayRole(document, viewTarget, line.storyId);
+      const layer = displayLayerForStory(document, viewTarget, line.storyId, line.layerId);
+      const fill = resolvedStoryFill(document, viewTarget, line.storyId, line.layerId, line);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
+      view.material.transparent = role === "reference";
+      view.material.opacity = role === "reference" ? 0.62 : 1;
+      view.line.renderOrder = role === "reference" ? 7 : 12;
       view.fillMaterial?.color.setHex(selected ? 0xd9a53f : hovered ? 0x4fb7d6 : Number.parseInt(fill.color.slice(1), 16));
       if (view.fillMaterial) {
-        view.fill.visible = Boolean((findLayer(document, line?.layerId ?? null)?.visible ?? true) && fill.visible);
+        view.fill.visible = Boolean(role !== "hidden" && (layer?.visible ?? true) && fill.visible);
         view.fillMaterial.opacity = selected || hovered ? 0.58 : 0.38;
       }
       view.material.linewidth = selected || hovered ? 2 : 1;
@@ -7634,26 +7689,32 @@ function Viewport({
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: lineId, kind: "line" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: lineId, kind: "line" });
       const line = findLineObject(document, lineId);
-      const hostLayer = findLayer(document, line?.layerId ?? null);
+      if (!line) return;
+      const role = storyDisplayRole(document, viewTarget, line.storyId);
+      const hostLayer = displayLayerForStory(document, viewTarget, line.storyId, line.layerId);
       const openingById = new Map(line?.wallOpenings.map((opening) => [opening.id, opening]) ?? []);
       [...view.meshes, ...view.productMeshes].forEach((mesh) => {
         const opening = openingById.get(String(mesh.userData.wallOpeningId ?? ""));
         const owner = opening ?? line;
         const ownerLayerId = opening?.layerId ?? line?.layerId;
-        const fill = resolvedObjectFill(document, ownerLayerId, owner);
+        const fill = resolvedStoryFill(document, viewTarget, line.storyId, ownerLayerId, owner);
         const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         materials.forEach((material) => {
           if (!(material instanceof THREE.MeshStandardMaterial)) return;
           if (viewTarget.id === "top") material.color.set(fill.color);
           material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
         });
-        setMeshOpacity(mesh, fill.visible, selected, hovered);
+        setMeshOpacity(mesh, fill.visible, selected, hovered, role === "reference");
+        mesh.renderOrder = role === "reference" ? 2 : 4;
       });
       view.edges.forEach((edge) => {
         const opening = openingById.get(String(edge.userData.wallOpeningId ?? ""));
-        const edgeLayer = findLayer(document, opening?.layerId ?? line?.layerId ?? null) ?? hostLayer;
+        const edgeLayer = displayLayerForStory(document, viewTarget, line.storyId, opening?.layerId ?? line.layerId) ?? hostLayer;
         const edgeMaterial = edge.material as THREE.LineBasicMaterial;
         edgeMaterial.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : edgeLayer ? Number.parseInt(edgeLayer.color.slice(1), 16) : 0x263746);
+        edgeMaterial.transparent = role === "reference";
+        edgeMaterial.opacity = role === "reference" ? 0.62 : 0.94;
+        edge.renderOrder = role === "reference" ? 8 : 20;
         const sourceMesh = edge.userData.sourceMesh as THREE.Mesh | undefined;
         edge.visible = sourceMesh?.visible ?? true;
       });
@@ -7665,11 +7726,20 @@ function Viewport({
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: polylineId, kind: "polyline" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: polylineId, kind: "polyline" });
       const polyline = findPolylineObject(document, polylineId);
-      const layer = findLayer(document, polyline?.layerId ?? null);
-      const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
-      view.meshes.forEach((mesh) => setMeshOpacity(mesh, fill.visible, selected, hovered));
+      if (!polyline) return;
+      const role = storyDisplayRole(document, viewTarget, polyline.storyId);
+      const layer = displayLayerForStory(document, viewTarget, polyline.storyId, polyline.layerId);
+      const fill = resolvedStoryFill(document, viewTarget, polyline.storyId, polyline.layerId, polyline);
+      view.meshes.forEach((mesh) => {
+        setMeshOpacity(mesh, fill.visible, selected, hovered, role === "reference");
+        mesh.renderOrder = role === "reference" ? 2 : 4;
+      });
       view.edges.forEach((edge) => {
-        (edge.material as THREE.LineBasicMaterial).color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x6d4f39);
+        const material = edge.material as THREE.LineBasicMaterial;
+        material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x6d4f39);
+        material.transparent = role === "reference";
+        material.opacity = role === "reference" ? 0.62 : 0.92;
+        edge.renderOrder = role === "reference" ? 8 : 14;
       });
       view.materials.forEach((material) => {
         material.color.set(fill.color);
@@ -7683,27 +7753,42 @@ function Viewport({
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: polylineId, kind: "polyline" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: polylineId, kind: "polyline" });
       const polyline = findPolylineObject(document, polylineId);
-      const layer = findLayer(document, polyline?.layerId ?? null);
-      const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
+      if (!polyline) return;
+      const role = storyDisplayRole(document, viewTarget, polyline.storyId);
+      const layer = displayLayerForStory(document, viewTarget, polyline.storyId, polyline.layerId);
+      const fill = resolvedStoryFill(document, viewTarget, polyline.storyId, polyline.layerId, polyline);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
+      view.material.transparent = role === "reference";
+      view.material.opacity = role === "reference" ? 0.62 : 1;
+      view.line.renderOrder = role === "reference" ? 7 : 12;
       if (view.fillMaterial) view.fillMaterial.color.setHex(Number.parseInt(fill.color.slice(1), 16));
-      if (view.fill) view.fill.visible = Boolean((layer?.visible ?? true) && fill.visible && (polyline?.width ?? 0) >= 1 / 16 && (viewTarget.id !== "top" || polyline?.storyId === document.building.activeStoryId));
+      if (view.fill) {
+        view.fill.visible = Boolean(role !== "hidden" && (layer?.visible ?? true) && fill.visible && polyline.width >= 1 / 16);
+        view.fill.renderOrder = role === "reference" ? 6 : 11;
+      }
     });
     floorPlatformViewsRef.current.forEach((view, polylineId) => {
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: polylineId, kind: "polyline" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: polylineId, kind: "polyline" });
       const polyline = findPolylineObject(document, polylineId);
-      const layer = findLayer(document, polyline?.layerId ?? null);
-      const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
+      if (!polyline) return;
+      const role = storyDisplayRole(document, viewTarget, polyline.storyId);
+      const layer = displayLayerForStory(document, viewTarget, polyline.storyId, polyline.layerId);
+      const fill = resolvedStoryFill(document, viewTarget, polyline.storyId, polyline.layerId, polyline);
       view.meshes.forEach((mesh) => {
         const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         materials.forEach((material) => {
           if (material instanceof THREE.MeshStandardMaterial && viewTarget.id === "top") material.color.set(fill.color);
         });
-        setMeshOpacity(mesh, fill.visible, selected, hovered);
+        setMeshOpacity(mesh, fill.visible, selected, hovered, role === "reference");
+        mesh.renderOrder = role === "reference" ? 2 : 4;
       });
       view.edges.forEach((edge) => {
-        (edge.material as THREE.LineBasicMaterial).color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x263746);
+        const material = edge.material as THREE.LineBasicMaterial;
+        material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x263746);
+        material.transparent = role === "reference";
+        material.opacity = role === "reference" ? 0.62 : 0.92;
+        edge.renderOrder = role === "reference" ? 8 : 14;
       });
       view.materials.forEach((material) => {
         material.emissive.setHex(selected ? 0x422906 : hovered ? 0x063345 : 0x000000);
@@ -7729,20 +7814,30 @@ function Viewport({
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: circleId, kind: "circle" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: circleId, kind: "circle" });
       const circle = findCircleObject(document, circleId);
-      const layer = findLayer(document, circle?.layerId ?? null);
+      if (!circle) return;
+      const role = storyDisplayRole(document, viewTarget, circle.storyId);
+      const layer = displayLayerForStory(document, viewTarget, circle.storyId, circle.layerId);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
+      view.material.transparent = role === "reference";
+      view.material.opacity = role === "reference" ? 0.62 : 1;
+      view.line.renderOrder = role === "reference" ? 7 : 12;
     });
-  }, [document, hoveredEntityKey, selectedEntityKeys]);
+  }, [document, hoveredEntityKey, selectedEntityKeys, viewTarget]);
 
   useEffect(() => {
     arcViewsRef.current.forEach((view, arcId) => {
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: arcId, kind: "arc" }));
       const hovered = hoveredEntityKey === cadEntityKey({ id: arcId, kind: "arc" });
       const arc = findArcObject(document, arcId);
-      const layer = findLayer(document, arc?.layerId ?? null);
+      if (!arc) return;
+      const role = storyDisplayRole(document, viewTarget, arc.storyId);
+      const layer = displayLayerForStory(document, viewTarget, arc.storyId, arc.layerId);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
+      view.material.transparent = role === "reference";
+      view.material.opacity = role === "reference" ? 0.62 : 1;
+      view.line.renderOrder = role === "reference" ? 7 : 12;
     });
-  }, [document, hoveredEntityKey, selectedEntityKeys]);
+  }, [document, hoveredEntityKey, selectedEntityKeys, viewTarget]);
 
   useEffect(() => {
     if (fitViewSignal > 0) fitViewRef.current?.();
@@ -9697,6 +9792,55 @@ function StoryAssemblyEditor({
       </div>
     </details>
   );
+}
+
+function ReferenceDisplayDialog({
+  layerSets,
+  onCancel,
+  onSave,
+  stories,
+  view,
+}: {
+  layerSets: readonly LayerSet[];
+  onCancel: () => void;
+  onSave: (view: SavedPlanView) => void;
+  stories: BuildingStructure["stories"];
+  view: SavedPlanView;
+}) {
+  const [draft, setDraft] = useState(() => ({ ...view }));
+  const orderedStoryIds = stories.map((story) => story.id);
+  const availableStories = stories.filter((story) => story.id !== draft.storyId);
+  const resolvedStoryId = resolveReferenceStoryId({ ...draft, referenceDisplayEnabled: true }, orderedStoryIds);
+  const resolvedStory = stories.find((story) => story.id === resolvedStoryId);
+  const currentStory = stories.find((story) => story.id === draft.storyId);
+  const selectMode = (referenceMode: ReferenceDisplayMode) => {
+    const fallbackStoryId = availableStories[0]?.id ?? null;
+    setDraft((current) => ({
+      ...current,
+      referenceMode,
+      referenceStoryId: referenceMode === "specific" && (!current.referenceStoryId || current.referenceStoryId === current.storyId)
+        ? fallbackStoryId
+        : current.referenceStoryId,
+    }));
+  };
+
+  return <div className="story-manager-backdrop" role="presentation">
+    <section className="reference-display-dialog" role="dialog" aria-modal="true" aria-labelledby="reference-display-title">
+      <header className="story-manager-header"><div><strong id="reference-display-title">Floor / Reference Display</strong><span>Overlay another Story for coordination without making its objects editable.</span></div><button type="button" onClick={onCancel} aria-label="Close Floor Reference Display">×</button></header>
+      <div className="reference-display-body">
+        <section className="reference-current-floor"><span>Current editable floor</span><strong>{currentStory?.name ?? "Current Story"}</strong><small>Reference objects remain visible for alignment but cannot be selected or modified.</small></section>
+        <label className="reference-enable"><input type="checkbox" checked={draft.referenceDisplayEnabled} disabled={availableStories.length === 0} onChange={(event) => setDraft((current) => ({ ...current, referenceDisplayEnabled: event.target.checked }))} /><span><strong>Show reference floor</strong><small>{availableStories.length ? "Display the selected floor behind the active plan." : "Add another Story before enabling a reference."}</small></span></label>
+        <div className="reference-display-grid">
+          <label><span>Reference source</span><select value={draft.referenceMode} onChange={(event) => selectMode(event.target.value as ReferenceDisplayMode)}><option value="automatic">Automatic — below, otherwise above</option><option value="below">Floor below</option><option value="above">Floor above</option><option value="specific">Specific floor</option></select></label>
+          <label><span>Reference floor</span>{draft.referenceMode === "specific" ? <select value={draft.referenceStoryId ?? ""} onChange={(event) => setDraft((current) => ({ ...current, referenceStoryId: event.target.value || null }))}><option value="">Choose a floor</option>{availableStories.map((story) => <option value={story.id} key={story.id}>{story.name}</option>)}</select> : <output>{resolvedStory?.name ?? "No floor available"}</output>}</label>
+          <label><span>Reference Layer Set</span><select value={draft.referenceLayerSetId} onChange={(event) => setDraft((current) => ({ ...current, referenceLayerSetId: event.target.value }))}>{layerSets.map((set) => <option value={set.id} key={set.id}>{set.name}</option>)}</select></label>
+          <label className="reference-detail-toggle"><input type="checkbox" checked={draft.referenceFillsVisible} onChange={(event) => setDraft((current) => ({ ...current, referenceFillsVisible: event.target.checked }))} /><span><strong>Show fills and details</strong><small>Off keeps the reference as clean linework.</small></span></label>
+        </div>
+        <aside><strong>Visibility control</strong><span>The Reference Layer Set independently controls which Walls, fixtures, openings, annotations, and other object layers appear. Copy a Layer Set to create purpose-specific references such as “Plumbing Above” or “Wall Alignment.”</span></aside>
+      </div>
+      <footer className="story-manager-footer"><span>{draft.referenceDisplayEnabled ? resolvedStory ? `${resolvedStory.name} will display as a non-editable reference.` : "The selected direction has no available floor." : "Reference display is off for this Saved Plan View."}</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" disabled={draft.referenceDisplayEnabled && !resolvedStory} onClick={() => onSave(draft)}>Apply Reference</button></div></footer>
+    </section>
+  </div>;
 }
 
 function StoryManagerDialog({
@@ -11684,6 +11828,7 @@ export function ModelBuilderApp() {
   const [dragStatus, setDragStatus] = useState<DragStatus | null>(null);
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
   const [projectSetupMode, setProjectSetupMode] = useState<"edit" | "new" | null>(null);
+  const [referenceDisplayOpen, setReferenceDisplayOpen] = useState(false);
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
   const [framingManagerOpen, setFramingManagerOpen] = useState(false);
@@ -15233,6 +15378,10 @@ export function ModelBuilderApp() {
       annotationScale: activeSavedPlanView?.annotationScale ?? 48,
       layerSetId: editor.present.activeLayerSetId,
       name: normalized,
+      referenceDisplayEnabled: activeSavedPlanView?.referenceDisplayEnabled ?? false,
+      referenceFillsVisible: activeSavedPlanView?.referenceFillsVisible ?? false,
+      referenceLayerSetId: activeSavedPlanView?.referenceLayerSetId ?? editor.present.activeLayerSetId,
+      referenceMode: activeSavedPlanView?.referenceMode ?? "automatic",
       referenceStoryId: activeSavedPlanView?.referenceStoryId ?? null,
       storyId: editor.present.building.activeStoryId,
       viewMode: viewTarget.id === "front" || viewTarget.id === "right" || viewTarget.id === "perspective" ? viewTarget.id : "top",
@@ -15279,6 +15428,42 @@ export function ModelBuilderApp() {
     const next = updateSavedPlanView(editor.present, activeSavedPlanView.id, { annotationScale });
     if (next) dispatch({ type: "commit", next });
   }, [activeSavedPlanView, editor.present]);
+
+  const toggleReferenceDisplay = useCallback(() => {
+    if (!activeSavedPlanView) return;
+    const referenceDisplayEnabled = !activeSavedPlanView.referenceDisplayEnabled;
+    const candidate = { ...activeSavedPlanView, referenceDisplayEnabled };
+    if (referenceDisplayEnabled && !resolveReferenceStoryId(candidate, editor.present.building.stories.map((story) => story.id))) {
+      setFileNotice({ text: "No reference floor is available in the selected direction. Open Floor / Reference Display to choose another floor.", tone: "info" });
+      setReferenceDisplayOpen(true);
+      return;
+    }
+    const next = updateSavedPlanView(editor.present, activeSavedPlanView.id, { referenceDisplayEnabled });
+    if (!next) return;
+    dispatch({ type: "commit", next });
+    setSelectionForDocument(next, null);
+    setFileNotice({ text: referenceDisplayEnabled ? "Reference floor is visible as non-editable coordination linework." : "Reference floor is hidden.", tone: "success" });
+  }, [activeSavedPlanView, editor.present, setSelectionForDocument]);
+
+  const applyReferenceDisplay = useCallback((view: SavedPlanView) => {
+    const next = updateSavedPlanView(editor.present, view.id, {
+      referenceDisplayEnabled: view.referenceDisplayEnabled,
+      referenceFillsVisible: view.referenceFillsVisible,
+      referenceLayerSetId: view.referenceLayerSetId,
+      referenceMode: view.referenceMode,
+      referenceStoryId: view.referenceStoryId,
+    });
+    if (!next) {
+      setFileNotice({ text: "The reference display settings could not be applied. Check the floor and Layer Set selections.", tone: "info" });
+      return;
+    }
+    dispatch({ type: "commit", next });
+    setSelectionForDocument(next, null);
+    setReferenceDisplayOpen(false);
+    const resolvedId = resolveReferenceStoryId(next.savedPlanViews.find((candidate) => candidate.id === view.id) ?? view, next.building.stories.map((story) => story.id));
+    const resolvedName = next.building.stories.find((story) => story.id === resolvedId)?.name;
+    setFileNotice({ text: view.referenceDisplayEnabled && resolvedName ? `${resolvedName} is shown as the reference floor.` : "Reference display is off for this Plan View.", tone: "success" });
+  }, [editor.present, setSelectionForDocument]);
 
   const removeLayer = useCallback((layerId: string) => {
     const layer = findLayer(editor.present, layerId);
@@ -16019,9 +16204,9 @@ export function ModelBuilderApp() {
                 <div className="application-menu" role="menu" aria-label={`${label} menu`}>
                   {menu === "file" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(openDashboard)}><span>Dashboard</span><kbd>Home</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(newProject)}><span>New Plan</span><kbd>Ctrl+N</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(requestOpen)}><span>Open…</span><kbd>Ctrl+O</kbd></button><hr /><button type="button" role="menuitem" disabled={!hasActiveProject} onClick={() => runTopMenuCommand(saveProject)}><span>Save</span><kbd>Ctrl+S</kbd></button><button type="button" role="menuitem" disabled={!hasActiveProject} onClick={() => runTopMenuCommand(saveProjectAs)}><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button></> : null}
                   {menu === "edit" ? <><button type="button" role="menuitem" disabled={!editor.past.length} onClick={() => runTopMenuCommand(undo)}><span>Undo</span><kbd>Ctrl+Z</kbd></button><button type="button" role="menuitem" disabled={!editor.future.length} onClick={() => runTopMenuCommand(redo)}><span>Redo</span><kbd>Ctrl+Y</kbd></button><hr /><button type="button" role="menuitem" disabled={!selectionCanModify} onClick={() => runTopMenuCommand(eraseSelection)}><span>Erase Selection</span><kbd>Delete</kbd></button></> : null}
-                  {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
+                  {menu === "view" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.top))}><span>Top View</span><kbd>2D · Home</kbd></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => changeViewTarget(VIEW_PRESETS.perspective))}><span>3D Perspective</span><kbd>3D</kbd></button><hr /><button type="button" role="menuitem" disabled={editor.present.building.stories.length < 2 || viewTarget.id !== "top"} onClick={() => runTopMenuCommand(toggleReferenceDisplay)}><span>{activeSavedPlanView?.referenceDisplayEnabled ? "Hide" : "Show"} Reference Floor</span><kbd>REF</kbd></button><button type="button" role="menuitem" disabled={editor.present.building.stories.length < 2 || viewTarget.id !== "top"} onClick={() => runTopMenuCommand(() => setReferenceDisplayOpen(true))}><span>Floor / Reference Display…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFitViewSignal((value) => value + 1))}><span>Fit View</span><kbd>F</kbd></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoredInterfaceTheme(interfaceTheme === "light" ? "dark" : "light"))}><span>Use {interfaceTheme === "light" ? "Dark" : "Light"} Interface</span><kbd>{interfaceTheme === "light" ? "☾" : "☀"}</kbd></button></> : null}
                   {menu === "window" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("objects"))}><span>Model Explorer · Objects</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Model Explorer · Layers</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("building"))}><span>Model Explorer · Building</span></button></> : null}
-                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setProductLibraryOpen(true))}><span>Product Library…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoofDefaultsOpen(true))}><span>Roof Design Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
+                  {menu === "tools" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setStoryManagerOpen(true))}><span>Plan Settings…</span></button><button type="button" role="menuitem" disabled={editor.present.building.stories.length < 2 || viewTarget.id !== "top"} onClick={() => runTopMenuCommand(() => setReferenceDisplayOpen(true))}><span>Floor / Reference Display…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setWallTypeManagerOpen(true))}><span>Wall Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setProductLibraryOpen(true))}><span>Product Library…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setOpeningTypeManagerOpen(true))}><span>Door &amp; Window Types…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoofDefaultsOpen(true))}><span>Roof Design Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFramingManagerOpen(true))}><span>Wall Framing Defaults…</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setRoomManagerOpen(true))}><span>Rooms…</span></button><hr /><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setExplorerTab("layers"))}><span>Layer Manager</span></button></> : null}
                   {menu === "help" ? <><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Keyboard: Ctrl+O opens, Ctrl+S saves, Ctrl+Z undoes, Ctrl+Y redoes, and command aliases start drafting tools.", tone: "info" }))}><span>Keyboard Shortcuts</span></button><button type="button" role="menuitem" onClick={() => runTopMenuCommand(() => setFileNotice({ text: "Precision residential 2D and 3D modeling workspace.", tone: "info" }))}><span>About This Workspace</span></button></> : null}
                 </div>
               ) : null}
@@ -16064,6 +16249,8 @@ export function ModelBuilderApp() {
                 <button type="button" onClick={() => setStoryManagerOpen(true)} title="Set Stories, floor depth, finishes, and ceiling height"><b>≋</b><span>Plan Setup</span></button>
                 <button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title={`Draw Walls using ${activeWallType.name}`}><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Walls"}</span></button>
                 <button className={lineMode && foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && foundationWallMode ? finishLineMode : activateFoundationWallMode} title={`Draw Foundation Walls using ${activeFoundationWallType.name}`}><b>▰</b><span>{lineMode && foundationWallMode ? "Finish Foundation" : "Foundation Walls"}</span></button>
+                <button type="button" onClick={() => addSelectedWallOpening("door")} disabled={selectedLine?.architecturalRole !== "wall" || !selectedLineIsEditable} title={selectedLine?.architecturalRole === "wall" ? "Add the active Door Type to the selected Wall" : "Select a Wall, then add the active Door Type"}><b>▯</b><span>Add Door</span></button>
+                <button type="button" onClick={() => addSelectedWallOpening("window")} disabled={selectedLine?.architecturalRole !== "wall" || !selectedLineIsEditable} title={selectedLine?.architecturalRole === "wall" ? "Add the active Window Type to the selected Wall" : "Select a Wall, then add the active Window Type"}><b>▭</b><span>Add Window</span></button>
                 <button type="button" onClick={createRoofPlaneForSelectedWall} disabled={selectedLine?.architecturalRole !== "wall" || !selectedLineIsEditable} title="Create a manual Roof Plane from the selected Wall"><b>⌂</b><span>Roof Plane</span></button>
                 <button type="button" onClick={() => setRoomManagerOpen(true)} title="Detect enclosed Rooms and manage overrides"><b>▦</b><span>Rooms</span></button>
               </div>
@@ -16163,8 +16350,8 @@ export function ModelBuilderApp() {
         {activeRibbonTab === "Model" ? (
           <>
             <div className="ribbon-group">
-              <div className="ribbon-tools"><button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title="Draw layered walls on the active Story"><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Wall"}</span></button><button className={lineMode && foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && foundationWallMode ? finishLineMode : activateFoundationWallMode} title={`Draw concrete Foundation Walls using ${activeFoundationWallType.name}`}><b>▰</b><span>{lineMode && foundationWallMode ? "Finish Foundation" : "Foundation Wall"}</span></button><button className="primary-tool" type="button" onClick={addBox} title="Add a parametric box"><b>▰</b><span>Box</span></button></div>
-              <small>Primitives</small>
+              <div className="ribbon-tools"><button className={lineMode && wallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && wallMode ? finishLineMode : activateWallMode} title="Draw layered walls on the active Story"><b>▥</b><span>{lineMode && wallMode ? "Finish Wall" : "Wall"}</span></button><button className={lineMode && foundationWallMode ? "primary-tool is-engaged" : "primary-tool"} type="button" onClick={lineMode && foundationWallMode ? finishLineMode : activateFoundationWallMode} title={`Draw concrete Foundation Walls using ${activeFoundationWallType.name}`}><b>▰</b><span>{lineMode && foundationWallMode ? "Finish Foundation" : "Foundation Wall"}</span></button><button type="button" onClick={() => addSelectedWallOpening("door")} disabled={selectedLine?.architecturalRole !== "wall" || !selectedLineIsEditable} title="Add the active Door Type to the selected Wall"><b>▯</b><span>Add Door</span></button><button type="button" onClick={() => addSelectedWallOpening("window")} disabled={selectedLine?.architecturalRole !== "wall" || !selectedLineIsEditable} title="Add the active Window Type to the selected Wall"><b>▭</b><span>Add Window</span></button><button className="primary-tool" type="button" onClick={addBox} title="Add a parametric box"><b>▰</b><span>Box</span></button></div>
+              <small>Building objects</small>
             </div>
             <div className="ribbon-group">
               <div className="ribbon-tools compact-tools">
@@ -16270,6 +16457,10 @@ export function ModelBuilderApp() {
           <button type="button" className="story-step-button" onClick={() => stepActiveStory(-1)} disabled={storyNavigationDisabled || activeStoryIndex <= 0} aria-label="Move down one floor" title={activeStoryIndex > 0 ? `Move down to ${editor.present.building.stories[activeStoryIndex - 1]?.name}` : "No lower floor"}>↓</button>
           <span title="Active floor"><small>Floor</small><strong>{activeStory.name}</strong></span>
           <button type="button" className="story-step-button" onClick={() => stepActiveStory(1)} disabled={storyNavigationDisabled || activeStoryIndex >= editor.present.building.stories.length - 1} aria-label="Move up one floor" title={activeStoryIndex < editor.present.building.stories.length - 1 ? `Move up to ${editor.present.building.stories[activeStoryIndex + 1]?.name}` : "No higher floor"}>↑</button>
+        </div>
+        <div className="reference-toolbar-control" role="group" aria-label="Floor reference display">
+          <button type="button" className={activeSavedPlanView?.referenceDisplayEnabled ? "is-engaged" : ""} onClick={toggleReferenceDisplay} disabled={editor.present.building.stories.length < 2 || viewTarget.id !== "top"} aria-pressed={activeSavedPlanView?.referenceDisplayEnabled ?? false} title="Show or hide the non-editable reference floor">{activeSavedPlanView?.referenceDisplayEnabled ? "Reference On" : "Reference Off"}</button>
+          <button type="button" onClick={() => setReferenceDisplayOpen(true)} disabled={editor.present.building.stories.length < 2 || viewTarget.id !== "top"} title="Choose the reference floor, Layer Set, and fill display" aria-label="Open Floor and Reference Display settings">▾</button>
         </div>
         <button type="button" onClick={createSavedPlanView}>Save View As…</button>
         <output>{activeStory.name} · {viewTarget.id === "top" ? "Plan" : viewTarget.label}</output>
@@ -17042,6 +17233,7 @@ export function ModelBuilderApp() {
           <span className="status-readout unit-status" title="Architectural feet and inches">FT-IN</span>
           <button type="button" className={cadDraftingSettings.gridVisible ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, gridVisible: !current.gridVisible }))} title={`Grid Display (F7) · ${formatDraftingSpacing(cadDraftingSettings.gridSpacing)} spacing`} aria-label="Toggle model space grid" aria-pressed={cadDraftingSettings.gridVisible}>GRID</button>
           <button type="button" className={activeLayerSet?.fillsVisible ?? true ? "status-toggle is-on" : "status-toggle"} onClick={toggleActiveLayerSetFills} title="Show or hide all fills for the active Layer Set" aria-pressed={activeLayerSet?.fillsVisible ?? true}>FILLS</button>
+          <button type="button" className={activeSavedPlanView?.referenceDisplayEnabled ? "status-toggle is-on" : "status-toggle"} onClick={toggleReferenceDisplay} disabled={editor.present.building.stories.length < 2 || viewTarget.id !== "top"} title="Reference Floor Display" aria-pressed={activeSavedPlanView?.referenceDisplayEnabled ?? false}>REF</button>
           <span className="status-readout snap-status" title="Cursor snap increment">SNAP <b>{formatDraftingSpacing(cadDraftingSettings.snapIncrement)}</b></span>
           <button type="button" className={cadDraftingSettings.objectSnapEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, objectSnapEnabled: !current.objectSnapEnabled }))} title="Object Snap (F3)" aria-pressed={cadDraftingSettings.objectSnapEnabled}>OSNAP</button>
           <button type="button" className={cadDraftingSettings.orthoEnabled ? "status-toggle is-on" : "status-toggle"} onClick={() => setCadDraftingSettings((current) => ({ ...current, orthoEnabled: !current.orthoEnabled }))} title="Ortho Mode (F8)" aria-pressed={cadDraftingSettings.orthoEnabled}>ORTHO</button>
@@ -17053,6 +17245,7 @@ export function ModelBuilderApp() {
       </footer>
       </>}
       {projectSetupMode ? <ProjectSetupDialog document={projectSetupMode === "new" ? NEW_PROJECT_DOCUMENT : editor.present} initialName={projectSetupMode === "new" ? "Untitled Project" : normalizedProjectName} mode={projectSetupMode} onCancel={() => setProjectSetupMode(null)} onOpenAdvanced={(target) => { setProjectSetupMode(null); if (target === "stories") setStoryManagerOpen(true); else if (target === "foundation") setFoundationManagerOpen(true); else if (target === "roof") setRoofDefaultsOpen(true); else setWallTypeManagerOpen(true); }} onSave={applyProjectSetup} /> : null}
+      {referenceDisplayOpen && activeSavedPlanView ? <ReferenceDisplayDialog layerSets={editor.present.layerSets} onCancel={() => setReferenceDisplayOpen(false)} onSave={applyReferenceDisplay} stories={editor.present.building.stories} view={activeSavedPlanView} /> : null}
       {storyManagerOpen ? <StoryManagerDialog building={editor.present.building} onCancel={() => setStoryManagerOpen(false)} onSave={applyStorySettings} /> : null}
       {foundationManagerOpen ? <FoundationWallManagerDialog building={editor.present.building} onCancel={() => setFoundationManagerOpen(false)} onSave={applyFoundationWallTypes} /> : null}
       {framingManagerOpen ? <WallFramingManagerDialog building={editor.present.building} onCancel={() => setFramingManagerOpen(false)} onSave={applyWallFraming} /> : null}
@@ -17061,7 +17254,7 @@ export function ModelBuilderApp() {
       {productLibraryOpen ? <ProductLibraryDialog building={editor.present.building} selectedWallName={selectedLine?.architecturalRole === "wall" ? selectedLine.name : null} onActivate={activateLibraryProduct} onAssetAttached={attachLibraryProductAsset} onAssetUpdated={updateLibraryProductAsset} onCancel={() => setProductLibraryOpen(false)} onCreateObjectType={createLibraryObjectType} onManageOpeningTypes={() => { setProductLibraryOpen(false); setOpeningTypeManagerOpen(true); }} onPlace={placeLibraryProduct} /> : null}
       {wallTypeManagerOpen ? <WallTypeManagerDialog building={editor.present.building} onCancel={() => setWallTypeManagerOpen(false)} onSave={applyWallTypes} /> : null}
       {roomManagerOpen ? <RoomManagerDialog document={editor.present} initialRoomId={roomManagerInitialRoomId} onCancel={() => { setRoomManagerOpen(false); setRoomManagerInitialRoomId(null); }} onSave={(next) => { setRoomManagerInitialRoomId(null); applyRoomSettings(next); }} /> : null}
-      {nameEntryDialog ? <NameEntryDialog description={nameEntryDialog.kind === "rename-layer-set" ? "Use a clear name for this reusable layer display configuration." : "This view will remember the Story, Layer Set, annotation scale, and view direction."} initialValue={nameEntryDialog.initialValue} label={nameEntryDialog.kind === "rename-layer-set" ? "Layer Set name" : "Saved Plan View name"} onCancel={() => setNameEntryDialog(null)} onSubmit={submitNameEntry} submitLabel={nameEntryDialog.kind === "rename-layer-set" ? "Rename Set" : "Save View"} title={nameEntryDialog.kind === "rename-layer-set" ? "Rename Layer Set" : "Save Current Plan View"} /> : null}
+      {nameEntryDialog ? <NameEntryDialog description={nameEntryDialog.kind === "rename-layer-set" ? "Use a clear name for this reusable layer display configuration." : "This view will remember the Story, Layer Set, annotation scale, view direction, and Floor Reference settings."} initialValue={nameEntryDialog.initialValue} label={nameEntryDialog.kind === "rename-layer-set" ? "Layer Set name" : "Saved Plan View name"} onCancel={() => setNameEntryDialog(null)} onSubmit={submitNameEntry} submitLabel={nameEntryDialog.kind === "rename-layer-set" ? "Rename Set" : "Save View"} title={nameEntryDialog.kind === "rename-layer-set" ? "Rename Layer Set" : "Save Current Plan View"} /> : null}
     </main>
   );
 }

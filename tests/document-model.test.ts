@@ -81,6 +81,7 @@ import {
   removeWallRole,
   refreshRoomsForStory,
   resolveOpeningComponents,
+  resolveReferenceStoryId,
   platformOpeningContinuity,
   platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
@@ -104,6 +105,7 @@ import {
   updateLayerAppearance,
   updatePlatformOpening,
   updateRoofPlane,
+  updateSavedPlanView,
   wallOpeningRoughBottom,
   wallVerticalExtent,
   updateCircleGrip,
@@ -494,7 +496,7 @@ test("stores complete layer appearance in reusable Layer Sets and Saved Plan Vie
   const permit = activateLayerSet(original, styled.activeLayerSetId);
   assert.ok(permit);
   assert.equal(permit.layers.find((layer) => layer.id === STANDARD_LAYER_IDS.wall)?.lineWeight, 5);
-  const saved = savePlanView(permit, { activeLayerId: permit.activeLayerId, annotationScale: 48, layerSetId: permit.activeLayerSetId, name: "First Floor Permit", referenceStoryId: null, storyId: permit.building.activeStoryId, viewMode: "top" });
+  const saved = savePlanView(permit, { activeLayerId: permit.activeLayerId, annotationScale: 48, layerSetId: permit.activeLayerSetId, name: "First Floor Permit", referenceDisplayEnabled: false, referenceFillsVisible: false, referenceLayerSetId: permit.activeLayerSetId, referenceMode: "automatic", referenceStoryId: null, storyId: permit.building.activeStoryId, viewMode: "top" });
   assert.ok(saved);
   const restored = activateSavedPlanView(saved, saved.activeSavedPlanViewId);
   assert.ok(restored);
@@ -525,6 +527,43 @@ test("moves between Stories through coherent working Plan Views", () => {
   const secondFloorAgain = activateStoryPlanView(firstFloor, secondStoryId);
   assert.ok(secondFloorAgain);
   assert.equal(secondFloorAgain.savedPlanViews.length, savedViewCount);
+});
+
+test("resolves and preserves non-editable floor references in Saved Plan Views", () => {
+  const firstStoryId = DEFAULT_DOCUMENT.building.activeStoryId;
+  const building = addBuildingStory(DEFAULT_DOCUMENT.building, firstStoryId, "above");
+  const secondStoryId = building.activeStoryId;
+  building.activeStoryId = firstStoryId;
+  const configured = updateDocumentBuilding(DEFAULT_DOCUMENT, building);
+  assert.ok(configured);
+
+  const view = configured.savedPlanViews.find((candidate) => candidate.id === configured.activeSavedPlanViewId);
+  assert.ok(view);
+  const referenced = updateSavedPlanView(configured, view.id, {
+    referenceDisplayEnabled: true,
+    referenceFillsVisible: false,
+    referenceLayerSetId: configured.activeLayerSetId,
+    referenceMode: "above",
+    referenceStoryId: null,
+  });
+  assert.ok(referenced);
+  const referencedView = referenced.savedPlanViews.find((candidate) => candidate.id === referenced.activeSavedPlanViewId);
+  assert.ok(referencedView);
+  assert.equal(resolveReferenceStoryId(referencedView, referenced.building.stories.map((story) => story.id)), secondStoryId);
+
+  const secondFloor = activateStoryPlanView(referenced, secondStoryId);
+  assert.ok(secondFloor);
+  const secondView = secondFloor.savedPlanViews.find((candidate) => candidate.id === secondFloor.activeSavedPlanViewId);
+  assert.ok(secondView);
+  assert.equal(secondView.referenceDisplayEnabled, true);
+  assert.equal(secondView.referenceMode, "above");
+  assert.equal(resolveReferenceStoryId(secondView, secondFloor.building.stories.map((story) => story.id)), null);
+
+  const lookBelow = updateSavedPlanView(secondFloor, secondView.id, { referenceMode: "below" });
+  assert.ok(lookBelow);
+  const lookBelowView = lookBelow.savedPlanViews.find((candidate) => candidate.id === lookBelow.activeSavedPlanViewId);
+  assert.ok(lookBelowView);
+  assert.equal(resolveReferenceStoryId(lookBelowView, lookBelow.building.stories.map((story) => story.id)), firstStoryId);
 });
 
 test("stores the fill master per Layer Set and lets one object leave By Layer", () => {

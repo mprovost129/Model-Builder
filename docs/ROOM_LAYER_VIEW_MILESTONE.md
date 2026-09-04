@@ -15,7 +15,7 @@ The building model already supports Story defaults, Room overrides, layered wall
 - Room detection preserves Room identity and Room settings when its enclosing wall loop is unchanged. Linked annotations preserve their identities through the same update.
 - New Rooms default to the `Unassigned` Room type.
 - The rough ceiling-height annotation is two-way linked to the Room structure setting. Editing an inherited value creates a Room override; it never changes the Story default.
-- Layer Sets save the display state of all layers. Saved Plan Views bind a Story, Layer Set, current layer, annotation scale, reference Story, and camera mode.
+- Layer Sets save the display state of all layers. Saved Plan Views bind a Story, Layer Set, current layer, annotation scale, camera mode, and a complete Floor Reference configuration.
 - Project files remain versioned and older files are upgraded on open.
 
 ## Acceptance criteria
@@ -28,6 +28,9 @@ The building model already supports Story defaults, Room overrides, layered wall
 - [x] Activating a Plan View restores its Story, Layer Set, current layer, annotation scale, and camera mode.
 - [x] Compact floor arrows move through the ordered Stories, reusing a compatible Plan View or creating one working view on first visit.
 - [x] Top plan view displays and selects only the active Story; 3D views continue to show the complete building.
+- [x] Top plan view can overlay one non-editable reference Story chosen automatically, above, below, or explicitly.
+- [x] A Saved Plan View stores the reference toggle, source mode, specific Story, independent Reference Layer Set, and fills/details choice.
+- [x] New and migrated projects include a dedicated Reference Display Layer Set for independent object-category visibility.
 - [x] Model Explorer lists the active Story's entities and its Building tab can activate any Story directly.
 - [x] Detecting Rooms creates linked Room Label, area, interior-dimension, and rough-ceiling annotations.
 - [x] A Room Label defaults to `Unassigned`, supports a quick Room-type change, and opens Room Manager on double-click.
@@ -38,8 +41,8 @@ The building model already supports Story defaults, Room overrides, layered wall
 
 ## Verification record
 
-- Project-file schema advanced to version 43 with migration coverage from version 42 and all earlier supported formats.
-- Current automated verification: 350 unit tests, production build, two rendered-page checks, and lint all pass.
+- Project-file schema advanced to version 52 with migration coverage from version 51 and all earlier supported formats.
+- Current automated verification: 352 unit tests, the production build, two rendered-page checks, and lint all pass.
 - Visible workflow verification: blank top-view plan, Layer Set copy/rename, Saved Plan View creation, four connected Walls, Room detection, Room Manager, Room-type quick change, and linked ceiling-height editing.
 - The environment does not support native browser prompts, so the new Layer Set and Saved Plan View naming actions use an accessible in-app dialog.
 

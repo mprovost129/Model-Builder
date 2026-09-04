@@ -53,12 +53,15 @@ import {
 } from "./document-model.ts";
 import {
   DEFAULT_LAYER_SET_ID,
+  DEFAULT_REFERENCE_LAYER_SET_ID,
   DEFAULT_SAVED_PLAN_VIEW_ID,
   MODEL_LINE_STYLES,
+  REFERENCE_DISPLAY_MODES,
   ROOM_ANNOTATION_KINDS,
   STANDARD_LAYER_IDS,
   STANDARD_LAYERS,
   createDefaultLayerSet,
+  createDefaultReferenceLayerSet,
   createDefaultSavedPlanView,
   mergeStandardLayers,
   type LayerSetState,
@@ -157,7 +160,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 51;
+export const PROJECT_FILE_VERSION = 52;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -1146,9 +1149,24 @@ function readLayerSet(value: unknown, supportsFillAppearance: boolean): LayerSet
   return layers.some((layer) => layer === null) ? null : { fillsVisible: supportsFillAppearance ? value.fillsVisible as boolean : true, id: value.id, layers: layers as LayerSetState[], name: value.name.trim() };
 }
 
-function readSavedPlanView(value: unknown): SavedPlanView | null {
+function readSavedPlanView(value: unknown, supportsReferenceDisplaySettings: boolean): SavedPlanView | null {
   if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 80 || typeof value.activeLayerId !== "string" || typeof value.layerSetId !== "string" || typeof value.storyId !== "string" || !(value.referenceStoryId === null || typeof value.referenceStoryId === "string") || !isFiniteNumber(value.annotationScale) || value.annotationScale < 1 || value.annotationScale > 1200 || !["front", "perspective", "right", "top"].includes(String(value.viewMode))) return null;
-  return { activeLayerId: value.activeLayerId, annotationScale: value.annotationScale, id: value.id, layerSetId: value.layerSetId, name: value.name.trim(), referenceStoryId: value.referenceStoryId as string | null, storyId: value.storyId, viewMode: value.viewMode as SavedPlanView["viewMode"] };
+  const referenceStoryId = value.referenceStoryId as string | null;
+  if (supportsReferenceDisplaySettings && (typeof value.referenceDisplayEnabled !== "boolean" || typeof value.referenceFillsVisible !== "boolean" || typeof value.referenceLayerSetId !== "string" || !REFERENCE_DISPLAY_MODES.includes(value.referenceMode as SavedPlanView["referenceMode"]))) return null;
+  return {
+    activeLayerId: value.activeLayerId,
+    annotationScale: value.annotationScale,
+    id: value.id,
+    layerSetId: value.layerSetId,
+    name: value.name.trim(),
+    referenceDisplayEnabled: supportsReferenceDisplaySettings ? value.referenceDisplayEnabled as boolean : referenceStoryId !== null,
+    referenceFillsVisible: supportsReferenceDisplaySettings ? value.referenceFillsVisible as boolean : false,
+    referenceLayerSetId: supportsReferenceDisplaySettings ? value.referenceLayerSetId as string : DEFAULT_REFERENCE_LAYER_SET_ID,
+    referenceMode: supportsReferenceDisplaySettings ? value.referenceMode as SavedPlanView["referenceMode"] : referenceStoryId ? "specific" : "automatic",
+    referenceStoryId,
+    storyId: value.storyId,
+    viewMode: value.viewMode as SavedPlanView["viewMode"],
+  };
 }
 
 function readCircleObject(value: unknown, supportsStories: boolean, fallbackStoryId: string): CircleObject | null {
@@ -1528,7 +1546,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   if (version >= 43) {
     if (!Array.isArray(value.layerSets) || value.layerSets.length < 1 || value.layerSets.length > 32 || typeof value.activeLayerSetId !== "string" || !Array.isArray(value.savedPlanViews) || value.savedPlanViews.length < 1 || value.savedPlanViews.length > 64 || typeof value.activeSavedPlanViewId !== "string" || !Array.isArray(value.roomAnnotations) || value.roomAnnotations.length > MAXIMUM_ROOM_COUNT * ROOM_ANNOTATION_KINDS.length) return { ok: false, error: "The project Layer Set, Saved View, or Room annotation configuration is missing or invalid." };
     const parsedSets = value.layerSets.map((set) => readLayerSet(set, version >= 44));
-    const parsedViews = value.savedPlanViews.map(readSavedPlanView);
+    const parsedViews = value.savedPlanViews.map((view) => readSavedPlanView(view, version >= 52));
     const parsedAnnotations = value.roomAnnotations.map(readRoomAnnotation);
     if (parsedSets.some((set) => set === null) || parsedViews.some((view) => view === null) || parsedAnnotations.some((annotation) => annotation === null)) return { ok: false, error: "One or more Layer Sets, Saved Views, or Room annotations are invalid." };
     layerSets = (parsedSets as LayerSet[]).map((set) => version >= 44 ? set : ({
@@ -1539,12 +1557,15 @@ export function parseProjectDocument(content: string): ProjectParseResult {
         return { ...state, fillColor: layer?.fillColor ?? state.color, fillVisible: layer?.fillVisible ?? true };
       }),
     }));
+    if (version < 52 && !layerSets.some((set) => set.id === DEFAULT_REFERENCE_LAYER_SET_ID)) {
+      layerSets.push(createDefaultReferenceLayerSet(layers));
+    }
     savedPlanViews = parsedViews as SavedPlanView[];
     roomAnnotations = parsedAnnotations as RoomAnnotationObject[];
     activeLayerSetId = value.activeLayerSetId;
     activeSavedPlanViewId = value.activeSavedPlanViewId;
   } else {
-    layerSets = [createDefaultLayerSet(layers)];
+    layerSets = [createDefaultLayerSet(layers), createDefaultReferenceLayerSet(layers)];
     activeLayerSetId = DEFAULT_LAYER_SET_ID;
     savedPlanViews = [createDefaultSavedPlanView(building.activeStoryId)];
     activeSavedPlanViewId = DEFAULT_SAVED_PLAN_VIEW_ID;
@@ -1555,7 +1576,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
   }
   const roomDocument: ModelDocument = { activeLayerSetId, activeLayerId, activeSavedPlanViewId, arcs, building, circles, groups, layers, layerSets, lines, objects: validObjects, polylines, projectInformation, rooms, roomAnnotations, savedPlanViews };
   if (new Set(layerSets.map((set) => set.id)).size !== layerSets.length || !layerSets.some((set) => set.id === activeLayerSetId) || layerSets.some((set) => set.layers.length !== layers.length || new Set(set.layers.map((layer) => layer.id)).size !== layers.length || set.layers.some((layer) => !layerIds.has(layer.id)))) return { ok: false, error: "Layer Set identities or layer references are invalid." };
-  if (new Set(savedPlanViews.map((view) => view.id)).size !== savedPlanViews.length || !savedPlanViews.some((view) => view.id === activeSavedPlanViewId) || savedPlanViews.some((view) => !layerSets.some((set) => set.id === view.layerSetId) || !layerIds.has(view.activeLayerId) || !storyIds.has(view.storyId) || view.referenceStoryId !== null && !storyIds.has(view.referenceStoryId))) return { ok: false, error: "Saved Plan View identities or references are invalid." };
+  if (new Set(savedPlanViews.map((view) => view.id)).size !== savedPlanViews.length || !savedPlanViews.some((view) => view.id === activeSavedPlanViewId) || savedPlanViews.some((view) => !layerSets.some((set) => set.id === view.layerSetId) || !layerSets.some((set) => set.id === view.referenceLayerSetId) || !layerIds.has(view.activeLayerId) || !storyIds.has(view.storyId) || view.referenceStoryId !== null && !storyIds.has(view.referenceStoryId))) return { ok: false, error: "Saved Plan View identities or references are invalid." };
   if (version >= 24) {
     if (new Set(rooms.map((room) => room.id)).size !== rooms.length || rooms.some((room) => !roomObjectIsValid(room, roomDocument))) return { ok: false, error: "One or more Rooms reference invalid Stories, Walls, or settings." };
     const annotationKeys = roomAnnotations.map((annotation) => `${annotation.roomId}:${annotation.kind}`);

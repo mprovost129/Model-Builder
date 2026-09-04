@@ -85,6 +85,8 @@ export const ROOM_TYPES = [
 export type RoomType = (typeof ROOM_TYPES)[number] | string;
 
 export type SavedPlanViewMode = "front" | "perspective" | "right" | "top";
+export const REFERENCE_DISPLAY_MODES = ["automatic", "below", "above", "specific"] as const;
+export type ReferenceDisplayMode = (typeof REFERENCE_DISPLAY_MODES)[number];
 
 export type SavedPlanView = {
   activeLayerId: string;
@@ -92,6 +94,10 @@ export type SavedPlanView = {
   id: string;
   layerSetId: string;
   name: string;
+  referenceDisplayEnabled: boolean;
+  referenceFillsVisible: boolean;
+  referenceLayerSetId: string;
+  referenceMode: ReferenceDisplayMode;
   referenceStoryId: string | null;
   storyId: string;
   viewMode: SavedPlanViewMode;
@@ -99,6 +105,7 @@ export type SavedPlanView = {
 
 export const DEFAULT_LAYER_ID = "layer-default";
 export const DEFAULT_LAYER_SET_ID = "layer-set-working-plan";
+export const DEFAULT_REFERENCE_LAYER_SET_ID = "layer-set-reference-display";
 export const DEFAULT_SAVED_PLAN_VIEW_ID = "saved-view-working-plan";
 
 export const STANDARD_LAYER_IDS: Record<ModelObjectCategory, string> = {
@@ -156,6 +163,20 @@ export function createDefaultLayerSet(layers: readonly ModelLayer[]): LayerSet {
   return { fillsVisible: true, id: DEFAULT_LAYER_SET_ID, layers: layers.map(layerSetStateFromLayer), name: "Working Plan" };
 }
 
+export function createDefaultReferenceLayerSet(layers: readonly ModelLayer[]): LayerSet {
+  return {
+    fillsVisible: true,
+    id: DEFAULT_REFERENCE_LAYER_SET_ID,
+    layers: layers.map((layerValue) => ({
+      ...layerSetStateFromLayer(layerValue),
+      color: "#7f98a7",
+      lineWeight: Math.min(layerValue.lineWeight, 2),
+      printColor: "#7f98a7",
+    })),
+    name: "Reference Display",
+  };
+}
+
 export function createDefaultSavedPlanView(storyId: string): SavedPlanView {
   return {
     activeLayerId: DEFAULT_LAYER_ID,
@@ -163,10 +184,28 @@ export function createDefaultSavedPlanView(storyId: string): SavedPlanView {
     id: DEFAULT_SAVED_PLAN_VIEW_ID,
     layerSetId: DEFAULT_LAYER_SET_ID,
     name: "Working Plan View",
+    referenceDisplayEnabled: false,
+    referenceFillsVisible: false,
+    referenceLayerSetId: DEFAULT_REFERENCE_LAYER_SET_ID,
+    referenceMode: "automatic",
     referenceStoryId: null,
     storyId,
     viewMode: "top",
   };
+}
+
+export function resolveReferenceStoryId(view: SavedPlanView, orderedStoryIds: readonly string[]): string | null {
+  if (!view.referenceDisplayEnabled || view.viewMode !== "top") return null;
+  if (view.referenceMode === "specific") {
+    return view.referenceStoryId && view.referenceStoryId !== view.storyId && orderedStoryIds.includes(view.referenceStoryId)
+      ? view.referenceStoryId
+      : null;
+  }
+  const activeIndex = orderedStoryIds.indexOf(view.storyId);
+  if (activeIndex < 0) return null;
+  if (view.referenceMode === "above") return orderedStoryIds[activeIndex + 1] ?? null;
+  if (view.referenceMode === "below") return orderedStoryIds[activeIndex - 1] ?? null;
+  return orderedStoryIds[activeIndex - 1] ?? orderedStoryIds[activeIndex + 1] ?? null;
 }
 
 export function mergeStandardLayers(layers: readonly ModelLayer[]): ModelLayer[] {

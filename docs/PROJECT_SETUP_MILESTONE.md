@@ -38,6 +38,8 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] Dedicated advanced Story, Foundation, Wall, Roof, Door/Window, Framing, Room, and Layer tools remain available.
 - [x] Story floor/ceiling defaults and Room-level overrides use the same underlying model.
 - [x] Plan View selection restores its assigned Story and Layer Set; floor up/down controls navigate the ordered Story stack.
+- [x] Saved Plan Views retain an independent Floor Reference configuration: on/off, automatic/below/above/specific Story, Reference Layer Set, and fills/details.
+- [x] New and migrated projects include a separate Reference Display Layer Set so reference visibility can be edited without changing the active floor display.
 
 ## Next setup work
 
@@ -69,3 +71,6 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] Quick Setup does not hide or replace the detailed assembly editors.
 - [x] Wall-default behavior shown in Quick Setup and Drawing Properties is backed by saved project data.
 - [x] Unsupported measurement formats remain labeled as planned rather than presented as working.
+- [x] Floor references remain non-editable and are controlled independently from the active Story.
+
+See `ALPHA_TEST_CHECKLIST.md` for the end-to-end user test and `TEST_READINESS_AUDIT.md` for the current product boundary.
