@@ -169,11 +169,17 @@ polylines, rectangles, Circles, and Arcs.
   structural plane. The default includes shingles, zero-thickness underlayment,
   roof sheathing, a rafter/insulation zone, and interior ceiling finish. Properties
   report exact net layer coverage while 3D views show positive-thickness layers as
-  separate solids. Net plan and sloped surface area plus exact sloped eave, rake,
-  and joined edge lengths preserve the geometry needed for later lumber, sheathing,
-  roofing, waste, and accessory takeoff. Version-50 project files retain Roof Types
-  and per-plane assignments. Automatic roof generation, framing-member layouts,
-  waste factors, and exact offset-layer join cleanup remain later phases
+  separate solids. Unambiguous planes also generate common-rafter or truss top-chord
+  stations at an editable spacing, plus fascia, subfascia, and one owned ridge board
+  at joined horizontal ridges. A per-plane 3D reveal replaces the continuous framing
+  zone with these discrete members. Properties report counts and gross lengths while
+  explicitly excluding complex hip, valley, clipped, and concave stations. Net plan
+  and sloped surface area plus exact sloped eave, rake, and joined edge lengths preserve
+  the geometry needed for later lumber, sheathing, roofing, waste, and accessory
+  takeoff. Version-51 project files retain Roof Types, per-plane assignments, and
+  framing-layout settings. Automatic roof generation, complete trusses, jack/hip/
+  valley framing, birdsmouth cuts, waste factors, and exact offset-layer join cleanup
+  remain later phases
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling

@@ -1148,6 +1148,22 @@ test("round-trips a manual Roof Plane with its per-plane heel and pitch settings
   assert.equal(restored.polylines[0].roofTypeId, restored.building.activeRoofTypeId);
   assert.deepEqual(restored.building.roofTypes, polygonDocument.building.roofTypes);
 
+  const version50 = structuredClone(project) as unknown as { building: { roofSettings: Record<string, unknown> }; polylines: Array<{ roofSettings: Record<string, unknown> }>; version: number };
+  version50.version = 50;
+  for (const settings of [version50.building.roofSettings, ...version50.polylines.map((polyline) => polyline.roofSettings)]) {
+    delete settings.framingSpacing;
+    delete settings.ridgeBoardDepth;
+    delete settings.ridgeBoardThickness;
+    delete settings.showFramingInModel;
+  }
+  const upgradedFraming = parseProjectDocument(JSON.stringify(version50));
+  assert.equal(upgradedFraming.ok, true);
+  if (!upgradedFraming.ok) return;
+  const upgradedFramingDocument = projectToDocument(upgradedFraming.project);
+  assert.equal(upgradedFramingDocument.building.roofSettings.framingSpacing, 16);
+  assert.equal(upgradedFramingDocument.polylines[0].roofSettings?.ridgeBoardDepth, 11.25);
+  assert.equal(upgradedFramingDocument.polylines[0].roofSettings?.showFramingInModel, false);
+
   const legacy = structuredClone(project) as unknown as { building: Record<string, unknown>; polylines: Array<Record<string, unknown>>; version: number };
   legacy.version = 49;
   delete legacy.building.activeRoofTypeId;

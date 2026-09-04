@@ -50,10 +50,20 @@ test("calculates heel-driven Roof Plane, peak, fascia, and birdsmouth references
   assert.equal(result.subfasciaBottomElevation, 106.875);
   assert.equal(result.birdsmouthMaximumNotchDepth, 2.3125);
   assert.equal(roofSettingsAreValid(building.roofSettings), true);
+  assert.equal(building.roofSettings.framingSpacing, 16);
+  assert.equal(building.roofSettings.ridgeBoardDepth, 11.25);
+  assert.equal(building.roofSettings.showFramingInModel, false);
 
   const invalid = cloneBuildingStructure(building);
   invalid.roofSettings.pitchRise = 0;
   assert.equal(buildingStructureIsValid(invalid), false);
+  const invalidSpacing = cloneBuildingStructure(building);
+  invalidSpacing.roofSettings.framingSpacing = 0;
+  assert.equal(buildingStructureIsValid(invalidSpacing), false);
+  invalidSpacing.roofSettings.framingSpacing = 3.9375;
+  assert.equal(buildingStructureIsValid(invalidSpacing), false);
+  invalidSpacing.roofSettings.framingSpacing = 4;
+  assert.equal(buildingStructureIsValid(invalidSpacing), true);
 });
 
 test("defines reusable Roof Types above and below the structural Roof Plane", () => {

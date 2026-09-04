@@ -157,7 +157,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 50;
+export const PROJECT_FILE_VERSION = 51;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -561,25 +561,31 @@ function readWallFramingSettings(value: unknown, supportsJunctionSettings: boole
   };
 }
 
-function readRoofSettings(value: unknown): RoofSettings | null {
+function readRoofSettings(value: unknown, supportsFramingLayout: boolean): RoofSettings | null {
+  const defaults = createDefaultRoofSettings();
   if (!isRecord(value) ||
     typeof value.framingMethod !== "string" || !ROOF_FRAMING_METHODS.includes(value.framingMethod as RoofFramingMethod) ||
     !isFiniteNumber(value.pitchRise) || !isFiniteNumber(value.heightAbovePlate) || !isFiniteNumber(value.overhang) ||
     !isFiniteNumber(value.rafterWidth) || !isFiniteNumber(value.rafterDepth) ||
     !isFiniteNumber(value.birdsmouthSeatLength) || !isFiniteNumber(value.birdsmouthMaxNotchRatio) ||
     !isFiniteNumber(value.fasciaThickness) || !isFiniteNumber(value.fasciaDepth) ||
-    !isFiniteNumber(value.subfasciaThickness) || !isFiniteNumber(value.subfasciaDepth)) return null;
+    !isFiniteNumber(value.subfasciaThickness) || !isFiniteNumber(value.subfasciaDepth) ||
+    (supportsFramingLayout && (!isFiniteNumber(value.framingSpacing) || !isFiniteNumber(value.ridgeBoardDepth) || !isFiniteNumber(value.ridgeBoardThickness) || typeof value.showFramingInModel !== "boolean"))) return null;
   return {
     birdsmouthMaxNotchRatio: value.birdsmouthMaxNotchRatio,
     birdsmouthSeatLength: value.birdsmouthSeatLength,
     fasciaDepth: value.fasciaDepth,
     fasciaThickness: value.fasciaThickness,
     framingMethod: value.framingMethod as RoofFramingMethod,
+    framingSpacing: supportsFramingLayout ? value.framingSpacing as number : defaults.framingSpacing,
     heightAbovePlate: value.heightAbovePlate,
     overhang: value.overhang,
     pitchRise: value.pitchRise,
     rafterDepth: value.rafterDepth,
     rafterWidth: value.rafterWidth,
+    ridgeBoardDepth: supportsFramingLayout ? value.ridgeBoardDepth as number : defaults.ridgeBoardDepth,
+    ridgeBoardThickness: supportsFramingLayout ? value.ridgeBoardThickness as number : defaults.ridgeBoardThickness,
+    showFramingInModel: supportsFramingLayout ? value.showFramingInModel as boolean : defaults.showFramingInModel,
     subfasciaDepth: value.subfasciaDepth,
     subfasciaThickness: value.subfasciaThickness,
   };
@@ -642,7 +648,7 @@ function addMissingWallUseTypes(wallTypes: LayeredAssembly[]): LayeredAssembly[]
   return result;
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean, supportsRoofSettings: boolean, supportsRoofTypes: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean, supportsRoofSettings: boolean, supportsRoofTypes: boolean, supportsRoofFramingLayout: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -684,7 +690,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     ? (value.productObjectTypes as unknown[]).map(readProductObjectType)
     : [];
   if (productObjectTypes.some((productObjectType) => productObjectType === null)) return null;
-  const roofSettings = supportsRoofSettings ? readRoofSettings(value.roofSettings) : createDefaultRoofSettings();
+  const roofSettings = supportsRoofSettings ? readRoofSettings(value.roofSettings, supportsRoofFramingLayout) : createDefaultRoofSettings();
   if (!roofSettings) return null;
   if (supportsRoofTypes && !Array.isArray(value.roofTypes)) return null;
   const roofTypes = supportsRoofTypes
@@ -1015,7 +1021,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   };
 }
 
-function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegmentsAndWidth: boolean, supportsStories: boolean, supportsRoofPlanes: boolean, supportsRoofTypes: boolean, fallbackStoryId: string, fallbackRoofTypeId: string): PolylineObject | null {
+function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegmentsAndWidth: boolean, supportsStories: boolean, supportsRoofPlanes: boolean, supportsRoofTypes: boolean, supportsRoofFramingLayout: boolean, fallbackStoryId: string, fallbackRoofTypeId: string): PolylineObject | null {
   if (!isRecord(value) || value.type !== "polyline" || !Array.isArray(value.vertices) || typeof value.closed !== "boolean") return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -1045,7 +1051,7 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
       : supportsRoofPlanes && value.architecturalRole === "roof-plane"
         ? "roof-plane"
       : undefined;
-  const roofSettings = supportsRoofPlanes && architecturalRole === "roof-plane" ? readRoofSettings(value.roofSettings) : null;
+  const roofSettings = supportsRoofPlanes && architecturalRole === "roof-plane" ? readRoofSettings(value.roofSettings, supportsRoofFramingLayout) : null;
   if (supportsRoofPlanes && architecturalRole === "roof-plane" && !(value.roofBearingWallId === null || typeof value.roofBearingWallId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.roofBearingWallId))) return null;
   const roofBearingWallId = supportsRoofPlanes && architecturalRole === "roof-plane" ? value.roofBearingWallId as string | null : null;
   const roofTypeId = supportsRoofPlanes && architecturalRole === "roof-plane"
@@ -1282,7 +1288,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47, version >= 48, version >= 50);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47, version >= 48, version >= 50, version >= 51);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }
@@ -1456,7 +1462,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.polylines) || value.polylines.length > MAXIMUM_POLYLINE_COUNT) {
       return { ok: false, error: "The project polyline collection is missing or invalid." };
     }
-    const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, version >= 49, version >= 50, fallbackStoryId, building.activeRoofTypeId));
+    const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, version >= 49, version >= 50, version >= 51, fallbackStoryId, building.activeRoofTypeId));
     if (parsedPolylines.some((polyline) => polyline === null)) return { ok: false, error: "One or more drawing polylines are invalid." };
     polylines = (parsedPolylines as PolylineObject[]).map((polyline) => version >= 43 || polyline.architecturalRole !== "floor-platform" ? polyline : { ...polyline, layerId: STANDARD_LAYER_IDS["floor-platform"] });
     if (new Set(polylines.map((polyline) => polyline.id)).size !== polylines.length ||

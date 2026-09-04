@@ -47,6 +47,11 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [ ] Complete exact ridge/eave/fascia/subfascia component solids; the current structural surface and reference elevations are calculated.
 - [ ] Birdsmouth solid generated from the hosted Wall plate, member geometry, seat length, and maximum-notch validation rule.
 - [x] Reusable layered Roof Types for sheathing, zero-thickness underlayment, roofing, framing/insulation zones, and finish components above/below the structural plane. Types can be named, duplicated, deleted, selected as the project default, and assigned per Roof Plane.
+- [x] Version-51 project files preserve framing spacing, ridge-board size, and the per-plane 3D framing-reveal preference; version-50 and earlier files receive reviewed defaults.
+- [x] Unambiguous rectangular or ridge-bounded Roof Planes generate discrete common-rafter or truss top-chord stations from the true sloped surface, with stable member identities, cross sections, material, station offsets, and gross lengths.
+- [x] Eaves generate separate fascia and subfascia members; joined horizontal ridge edges generate one deterministically owned ridge board rather than a duplicate from each plane.
+- [x] Roof Properties report member counts and gross lengths and explicitly identify complex stations that are excluded rather than guessed.
+- [x] A per-plane 3D framing reveal fades continuous roof layers and replaces the framing zone with discrete generated members.
 - [ ] Multi-plane junction cleanup, roof-opening joins, and explicit priority rules for complex intersections. The two-plane manual Join is complete.
 
 ## Material takeoff readiness
@@ -55,7 +60,8 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [x] Derive net sloped surface area from each plane's exact plan area and pitch.
 - [x] Derive named eave, rake, ridge, hip, valley, and transition edge lengths directly from joined geometry.
 - [x] Derive material-ready net coverage and geometric volume for every Roof Type layer; zero-thickness membranes retain coverage without false solid volume.
-- [ ] Add framing layouts for common rafters, jack rafters, hips, valleys, ridges, trusses, outlookers, fascia, and subfascia.
+- [x] Add gross-length layouts for common rafters, truss top-chord stations, horizontal ridge boards, fascia, and subfascia where the Roof Plane boundary is unambiguous.
+- [ ] Add complete truss assemblies and framing layouts for jack rafters, hip rafters, valley rafters, structural ridges, outlookers, and complex clipped/concave boundaries.
 - [ ] Add openings, laps, stock-length optimization, waste factors, bundle/square rounding, and a reviewable material schedule. Net geometry must remain separate from purchasing allowances.
 
 ## Later: automatic roof generation
@@ -75,3 +81,5 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - A Wall-created Roof Plane starts with a 12-foot inward run as an explicit editable starting value; it is not an automatic roof proposal.
 - Layer coverage is net geometric area. Purchasing quantities must add explicit user-controlled waste and packaging rules later.
 - The current layered 3D solids follow each plane correctly. Exact offset-layer cleanup where multiple Roof Planes join remains part of the multi-plane junction milestone.
+- Generated roof-framing lengths are labeled gross. Ridge-face trimming, birdsmouth cuts, end cuts, stock-length optimization, and waste must be resolved before they become purchasing quantities.
+- A truss Roof Plane currently generates only top-chord stations. It does not claim that web members, bottom chords, bearing details, or an engineered truss design have been generated.

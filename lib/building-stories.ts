@@ -322,6 +322,8 @@ export type RoofSettings = {
   fasciaDepth: number;
   fasciaThickness: number;
   framingMethod: RoofFramingMethod;
+  /** On-center spacing for common rafters or truss top-chord stations. */
+  framingSpacing: number;
   /** Vertical distance from top of plate to the roof-plane heel at the exterior wall face. */
   heightAbovePlate: number;
   overhang: number;
@@ -329,6 +331,10 @@ export type RoofSettings = {
   pitchRise: number;
   rafterDepth: number;
   rafterWidth: number;
+  ridgeBoardDepth: number;
+  ridgeBoardThickness: number;
+  /** Reveals discrete framing members while fading continuous roof layers in 3D. */
+  showFramingInModel: boolean;
   subfasciaDepth: number;
   subfasciaThickness: number;
 };
@@ -843,11 +849,15 @@ export function createDefaultRoofSettings(): RoofSettings {
     fasciaDepth: 7.25,
     fasciaThickness: 0.75,
     framingMethod: "rafters",
+    framingSpacing: 16,
     heightAbovePlate: 9.25,
     overhang: 12,
     pitchRise: 6,
     rafterDepth: 9.25,
     rafterWidth: 1.5,
+    ridgeBoardDepth: 11.25,
+    ridgeBoardThickness: 1.5,
+    showFramingInModel: false,
     subfasciaDepth: 5.5,
     subfasciaThickness: 1.5,
   };
@@ -957,9 +967,11 @@ export function cloneBuildingStructure(building: BuildingStructure): BuildingStr
 }
 
 export function roofSettingsAreValid(settings: RoofSettings): boolean {
-  const dimensions = [settings.birdsmouthSeatLength, settings.fasciaDepth, settings.fasciaThickness, settings.heightAbovePlate, settings.rafterDepth, settings.rafterWidth, settings.subfasciaDepth, settings.subfasciaThickness];
+  const dimensions = [settings.birdsmouthSeatLength, settings.fasciaDepth, settings.fasciaThickness, settings.heightAbovePlate, settings.rafterDepth, settings.rafterWidth, settings.ridgeBoardDepth, settings.ridgeBoardThickness, settings.subfasciaDepth, settings.subfasciaThickness];
   return ROOF_FRAMING_METHODS.includes(settings.framingMethod) &&
+    typeof settings.showFramingInModel === "boolean" &&
     dimensions.every((value) => Number.isFinite(value) && value >= 1 / 16 && value <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(value)) &&
+    Number.isFinite(settings.framingSpacing) && settings.framingSpacing >= 4 && settings.framingSpacing <= 96 && isSixteenth(settings.framingSpacing) &&
     Number.isFinite(settings.overhang) && settings.overhang >= 0 && settings.overhang <= MAXIMUM_ASSEMBLY_THICKNESS && isSixteenth(settings.overhang) &&
     Number.isFinite(settings.pitchRise) && settings.pitchRise >= 0.25 && settings.pitchRise <= 24 && isSixteenth(settings.pitchRise) &&
     Number.isFinite(settings.birdsmouthMaxNotchRatio) && settings.birdsmouthMaxNotchRatio >= 0.05 && settings.birdsmouthMaxNotchRatio <= 0.5;

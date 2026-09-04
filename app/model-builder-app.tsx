@@ -424,6 +424,7 @@ import {
   type AutomaticWallJoinPlan,
 } from "@/lib/wall-joins";
 import { wallFramingSolids } from "@/lib/wall-framing";
+import { roofFramingLayout } from "@/lib/roof-framing";
 import { nearestParallelWallClearDimensions, setParallelWallDimension } from "@/lib/wall-clear-dimensions";
 import {
   automaticFoundationWallJoinCount,
@@ -1813,6 +1814,7 @@ function updateRoofPlaneView(view: FloorPlatformView, document: ModelDocument, p
   if (!triangles.length) return;
   const basePositions = polyline.vertices.map((point, index) => new THREE.Vector3(point.x, point.y, eaveZ + geometry.boundaryDepths[index] * risePerInch));
   const normal = new THREE.Vector3(-geometry.inwardNormal.x * risePerInch, -geometry.inwardNormal.y * risePerInch, 1).normalize();
+  const framingReveal = polyline.roofSettings!.showFramingInModel;
   const addRoofLayer = (innerOffset: number, outerOffset: number, color: string | number, materialName: string, layerName: string) => {
     if (Math.abs(outerOffset - innerOffset) < 1 / 16) return;
     const vertexCount = basePositions.length;
@@ -1834,7 +1836,8 @@ function updateRoofPlaneView(view: FloorPlatformView, document: ModelDocument, p
     buffer.setIndex(indices);
     buffer.computeVertexNormals();
     const definition = architecturalMaterialByName(materialName);
-    const material = new THREE.MeshStandardMaterial({ color: definition?.model.color ?? color, metalness: definition?.model.metalness ?? 0, opacity: 0.88, roughness: definition?.model.roughness ?? 0.84, side: THREE.DoubleSide, transparent: true });
+    const material = new THREE.MeshStandardMaterial({ color: definition?.model.color ?? color, depthWrite: !framingReveal, metalness: definition?.model.metalness ?? 0, opacity: framingReveal ? 0.18 : 0.88, roughness: definition?.model.roughness ?? 0.84, side: THREE.DoubleSide, transparent: true });
+    material.userData.baseOpacity = material.opacity;
     const mesh = new THREE.Mesh(buffer, material);
     mesh.userData.polylineId = polyline.id;
     mesh.userData.roofLayer = layerName;
@@ -1846,12 +1849,38 @@ function updateRoofPlaneView(view: FloorPlatformView, document: ModelDocument, p
   const layerTakeoffs = roofPlaneLayerTakeoffGeometry(document, polyline);
   if (layerTakeoffs?.some((layer) => layer.thickness > 0)) {
     layerTakeoffs.forEach((layer) => {
+      if (framingReveal && layer.role === "framing") return;
       const nearOffset = layer.roofSide === "exterior" ? layer.outerOffset - layer.thickness : layer.outerOffset + layer.thickness;
       addRoofLayer(Math.min(nearOffset, layer.outerOffset), Math.max(nearOffset, layer.outerOffset), FLOOR_LAYER_COLORS[layer.role], layer.material, layer.name);
     });
   } else {
     addRoofLayer(-1 / 32, 1 / 32, 0xd7b99a, "", "Structural Roof Plane");
   }
+  if (framingReveal) roofFramingLayout(document, polyline)?.members.forEach((member) => {
+    const start = new THREE.Vector3(member.start.x, member.start.y, member.start.z);
+    const end = new THREE.Vector3(member.end.x, member.end.y, member.end.z);
+    const xAxis = end.clone().sub(start).normalize();
+    const zAxis = member.orientation === "roof-normal" ? normal.clone() : new THREE.Vector3(0, 0, 1);
+    const yAxis = zAxis.clone().cross(xAxis).normalize();
+    if (xAxis.lengthSq() < 1e-8 || yAxis.lengthSq() < 1e-8) return;
+    const correctedZ = xAxis.clone().cross(yAxis).normalize();
+    const center = start.clone().add(end).multiplyScalar(0.5).addScaledVector(correctedZ, -member.depth / 2);
+    const memberGeometry = new THREE.BoxGeometry(member.grossLength, member.width, member.depth);
+    const materialName = member.material.toLocaleLowerCase();
+    const color = member.kind === "ridge-board" ? 0xa86837 : member.kind === "fascia" ? 0xc58b52 : member.kind === "subfascia" ? 0xb77a45 : member.kind === "truss-top-chord" ? 0xbf8750 : 0xd1a06a;
+    const memberMaterial = new THREE.MeshStandardMaterial({ color, metalness: materialName.includes("steel") ? 0.42 : 0, opacity: 1, roughness: 0.76 });
+    memberMaterial.userData.baseOpacity = 1;
+    const mesh = new THREE.Mesh(memberGeometry, memberMaterial);
+    mesh.position.copy(center);
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, correctedZ));
+    mesh.userData.polylineId = polyline.id;
+    mesh.userData.roofFramingMember = member.kind;
+    mesh.userData.roofFramingMemberId = member.id;
+    mesh.userData.roofFramingMaterial = member.material;
+    view.group.add(mesh);
+    view.meshes.push(mesh);
+    view.materials.push(memberMaterial);
+  });
   rebuildPlatformEdges(view);
 
   const takeoff = roofPlaneTakeoffGeometry(document, polyline);
@@ -10959,7 +10988,7 @@ function RoofDefaultsDialog({
 
   const save = () => {
     if (!roofSettingsAreValid(draft)) {
-      setError("Check the pitch, heel, overhang, framing, birdsmouth, fascia, and subfascia values.");
+      setError("Check the pitch, heel, overhang, framing spacing, member sizes, ridge, birdsmouth, fascia, and subfascia values.");
       return;
     }
     const next = cloneBuildingStructure(building);
@@ -10997,16 +11026,20 @@ function RoofDefaultsDialog({
             <section className="foundation-setting-section">
               <header><div><strong>Rafter / Truss &amp; Birdsmouth</strong><span>Member defaults support both conventional rafters and trussed roofs.</span></div></header>
               <div className="foundation-field-grid">
-                <StoryDimensionInput key={`rafter-width:${draft.rafterWidth}`} label="Member width" value={draft.rafterWidth} onChange={(rafterWidth) => replace({ rafterWidth })} />
-                <StoryDimensionInput key={`rafter-depth:${draft.rafterDepth}`} label="Member depth" value={draft.rafterDepth} onChange={(rafterDepth) => replace({ rafterDepth })} />
+                <StoryDimensionInput key={`framing-spacing:${draft.framingSpacing}`} label="On-center spacing" value={draft.framingSpacing} onChange={(framingSpacing) => replace({ framingSpacing })} />
+                <StoryDimensionInput key={`rafter-width:${draft.rafterWidth}`} label="Rafter / top-chord width" value={draft.rafterWidth} onChange={(rafterWidth) => replace({ rafterWidth })} />
+                <StoryDimensionInput key={`rafter-depth:${draft.rafterDepth}`} label="Rafter / top-chord depth" value={draft.rafterDepth} onChange={(rafterDepth) => replace({ rafterDepth })} />
                 <StoryDimensionInput key={`seat:${draft.birdsmouthSeatLength}`} label="Birdsmouth seat" value={draft.birdsmouthSeatLength} onChange={(birdsmouthSeatLength) => replace({ birdsmouthSeatLength })} />
                 <label className="story-field"><span>Maximum notch</span><select value={draft.birdsmouthMaxNotchRatio} onChange={(event) => replace({ birdsmouthMaxNotchRatio: Number(event.target.value) })}><option value={0.2}>20% of member depth</option><option value={0.25}>25% of member depth</option><option value={0.333333}>33⅓% of member depth</option></select></label>
+                <label className="foundation-check"><input type="checkbox" checked={draft.showFramingInModel} onChange={(event) => replace({ showFramingInModel: event.target.checked })} /><span><strong>Show discrete framing in 3D</strong><small>Fade continuous layers and reveal generated members.</small></span></label>
               </div>
-              <p className="opening-type-note">For rafters, the final birdsmouth is resolved only after a Roof Plane has a bearing Wall. This setting is a project validation limit, not an engineered sizing approval.</p>
+              <p className="opening-type-note">Rectangular and ridge-bounded planes generate common rafters or truss top-chord stations. Full truss webs, birdsmouth cuts, and stations ending at hips, valleys, openings, or clipped edges remain explicitly unresolved rather than estimated.</p>
             </section>
             <section className="foundation-setting-section">
-              <header><div><strong>Fascia Assembly</strong><span>Board sizes are separate from their calculated elevations.</span></div></header>
+              <header><div><strong>Ridge &amp; Fascia Assembly</strong><span>Board sizes are separate from their calculated elevations and gross lengths.</span></div></header>
               <div className="foundation-field-grid">
+                <StoryDimensionInput key={`ridge-thickness:${draft.ridgeBoardThickness}`} label="Ridge board thickness" value={draft.ridgeBoardThickness} onChange={(ridgeBoardThickness) => replace({ ridgeBoardThickness })} />
+                <StoryDimensionInput key={`ridge-depth:${draft.ridgeBoardDepth}`} label="Ridge board depth" value={draft.ridgeBoardDepth} onChange={(ridgeBoardDepth) => replace({ ridgeBoardDepth })} />
                 <StoryDimensionInput key={`fascia-thickness:${draft.fasciaThickness}`} label="Fascia thickness" value={draft.fasciaThickness} onChange={(fasciaThickness) => replace({ fasciaThickness })} />
                 <StoryDimensionInput key={`fascia-depth:${draft.fasciaDepth}`} label="Fascia board depth" value={draft.fasciaDepth} onChange={(fasciaDepth) => replace({ fasciaDepth })} />
                 <StoryDimensionInput key={`subfascia-thickness:${draft.subfasciaThickness}`} label="Subfascia thickness" value={draft.subfasciaThickness} onChange={(subfasciaThickness) => replace({ subfasciaThickness })} />
@@ -11491,7 +11524,7 @@ function ProjectSetupDialog({
     }
     if (!roofSettingsAreValid(draft.building.roofSettings)) {
       setStep("defaults");
-      setError("Review the Roof pitch, heel, overhang, framing, birdsmouth, fascia, and subfascia values before continuing.");
+      setError("Review the Roof pitch, heel, overhang, framing spacing, member sizes, ridge, birdsmouth, fascia, and subfascia values before continuing.");
       return;
     }
     if (!buildingStructureIsValid(draft.building)) {
@@ -11518,7 +11551,7 @@ function ProjectSetupDialog({
     { complete: Boolean(activeFoundation), label: "Foundation default", value: activeFoundation?.name ?? "Required" },
     { complete: Boolean(activeWall), label: "Starting Wall use", value: `${WALL_USE_LABELS[draft.building.activeWallUse]} · ${activeWall?.name ?? "Required"}` },
     { complete: ["exterior", "interior-bearing", "interior-partition"].every((use) => wallTypesForUse(use as WallUse).length > 0), label: "Wall defaults", value: "Exterior, bearing, and partition assigned" },
-    { complete: Boolean(roofReference && activeRoofType), label: "Roof defaults", value: roofReference && activeRoofType ? `${activeRoofType.name} · ${draft.building.roofSettings.pitchRise}:12 · heel ${formatSignedArchitectural(roofReference.heelElevation)}` : "Review required" },
+    { complete: Boolean(roofReference && activeRoofType), label: "Roof defaults", value: roofReference && activeRoofType ? `${activeRoofType.name} · ${draft.building.roofSettings.pitchRise}:12 · ${formatArchitectural(draft.building.roofSettings.framingSpacing)} O.C.` : "Review required" },
   ];
 
   return (
@@ -11559,7 +11592,7 @@ function ProjectSetupDialog({
                 <article><header><b>▰</b><div><strong>Foundation</strong><span>Support, footing, and sill edge</span></div></header><label><span>Active Foundation Wall type</span><select value={draft.building.activeFoundationWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeFoundationWallTypeId: event.target.value })}>{draft.building.foundationWallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Condition</dt><dd>{activeFoundation?.condition.replaceAll("-", " ")}</dd></div><div><dt>Sill plates</dt><dd>{activeFoundation?.sill.foundationPlateCount}</dd></div></dl></article>
                 <article><header><b>▥</b><div><strong>Walls</strong><span>Defaults by drawing use</span></div></header><label><span>Exterior Wall</span><select value={draft.building.defaultExteriorWallTypeId} onChange={(event) => changeWallDefault("exterior", event.target.value)}>{wallTypesForUse("exterior").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Bearing Wall</span><select value={draft.building.defaultInteriorBearingWallTypeId} onChange={(event) => changeWallDefault("interior-bearing", event.target.value)}>{wallTypesForUse("interior-bearing").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Partition</span><select value={draft.building.defaultInteriorPartitionWallTypeId} onChange={(event) => changeWallDefault("interior-partition", event.target.value)}>{wallTypesForUse("interior-partition").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Starting Wall use</span><select value={draft.building.activeWallUse} onChange={(event) => changeStartingWallUse(event.target.value as WallUse)}>{Object.entries(WALL_USE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><dl><div><dt>First Wall Type</dt><dd>{activeWall?.name ?? "—"}</dd></div><div><dt>Total thickness</dt><dd>{activeWall ? formatArchitectural(assemblyTotalThickness(activeWall)) : "—"}</dd></div></dl></article>
                 <article><header><b>▣</b><div><strong>Doors &amp; Windows</strong><span>Reusable opening Types</span></div></header><label><span>Active Door type</span><select value={draft.building.activeDoorTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeDoorTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "door").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Active Window type</span><select value={draft.building.activeWindowTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWindowTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "window").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Door</dt><dd>{activeDoor?.name}</dd></div><div><dt>Window</dt><dd>{activeWindow?.name}</dd></div></dl></article>
-                <article><header><b>⌂</b><div><strong>Roof</strong><span>Assembly, exterior heel, and plane defaults</span></div></header><label><span>Active Roof Type</span><select value={draft.building.activeRoofTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeRoofTypeId: event.target.value })}>{draft.building.roofTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Framing method</span><select value={draft.building.roofSettings.framingMethod} onChange={(event) => changeRoofDefaults({ framingMethod: event.target.value as RoofFramingMethod })}><option value="rafters">Conventional rafters</option><option value="trusses">Roof trusses</option></select></label><label><span>Pitch · rise in 12</span><input type="number" min="0.25" max="24" step="0.0625" value={draft.building.roofSettings.pitchRise} onChange={(event) => changeRoofDefaults({ pitchRise: Number(event.target.value) })} /></label><StoryDimensionInput key={`setup-roof-heel:${draft.building.roofSettings.heightAbovePlate}`} label="Height above plate / heel" value={draft.building.roofSettings.heightAbovePlate} onChange={(heightAbovePlate) => changeRoofDefaults({ heightAbovePlate })} /><StoryDimensionInput key={`setup-roof-overhang:${draft.building.roofSettings.overhang}`} label="Horizontal overhang" allowZero value={draft.building.roofSettings.overhang} onChange={(overhang) => changeRoofDefaults({ overhang })} /><dl><div><dt>Assembly depth</dt><dd>{activeRoofType ? formatArchitectural(assemblyTotalThickness(activeRoofType)) : "—"}</dd></div><div><dt>Top of plate</dt><dd>{roofBearingCalculation ? formatSignedArchitectural(roofBearingCalculation.roughCeilingElevation) : "—"}</dd></div><div><dt>Exterior heel</dt><dd>{roofReference ? formatSignedArchitectural(roofReference.heelElevation) : "—"}</dd></div></dl></article>
+                <article><header><b>⌂</b><div><strong>Roof</strong><span>Assembly, exterior heel, and plane defaults</span></div></header><label><span>Active Roof Type</span><select value={draft.building.activeRoofTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeRoofTypeId: event.target.value })}>{draft.building.roofTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Framing method</span><select value={draft.building.roofSettings.framingMethod} onChange={(event) => changeRoofDefaults({ framingMethod: event.target.value as RoofFramingMethod })}><option value="rafters">Conventional rafters</option><option value="trusses">Roof trusses</option></select></label><StoryDimensionInput key={`setup-roof-spacing:${draft.building.roofSettings.framingSpacing}`} label="Framing spacing" value={draft.building.roofSettings.framingSpacing} onChange={(framingSpacing) => changeRoofDefaults({ framingSpacing })} /><label><span>Pitch · rise in 12</span><input type="number" min="0.25" max="24" step="0.0625" value={draft.building.roofSettings.pitchRise} onChange={(event) => changeRoofDefaults({ pitchRise: Number(event.target.value) })} /></label><StoryDimensionInput key={`setup-roof-heel:${draft.building.roofSettings.heightAbovePlate}`} label="Height above plate / heel" value={draft.building.roofSettings.heightAbovePlate} onChange={(heightAbovePlate) => changeRoofDefaults({ heightAbovePlate })} /><StoryDimensionInput key={`setup-roof-overhang:${draft.building.roofSettings.overhang}`} label="Horizontal overhang" allowZero value={draft.building.roofSettings.overhang} onChange={(overhang) => changeRoofDefaults({ overhang })} /><dl><div><dt>Assembly depth</dt><dd>{activeRoofType ? formatArchitectural(assemblyTotalThickness(activeRoofType)) : "—"}</dd></div><div><dt>Top of plate</dt><dd>{roofBearingCalculation ? formatSignedArchitectural(roofBearingCalculation.roughCeilingElevation) : "—"}</dd></div><div><dt>Exterior heel</dt><dd>{roofReference ? formatSignedArchitectural(roofReference.heelElevation) : "—"}</dd></div></dl></article>
               </section><p className="project-setup-note">The Wall tool starts with the selected Wall use. While drawing, switch between Exterior, Interior Bearing, and Interior Partition without reopening Project Setup; each use recalls its assigned default Type.</p>
             </> : null}
             {step === "review" ? <>
@@ -16331,6 +16364,9 @@ export function ModelBuilderApp() {
                 const takeoff = roofPlaneTakeoffGeometry(editor.present, selectedPolyline);
                 const roofType = editor.present.building.roofTypes.find((candidate) => candidate.id === selectedPolyline.roofTypeId) ?? editor.present.building.roofTypes[0];
                 const layerTakeoffs = roofPlaneLayerTakeoffGeometry(editor.present, selectedPolyline);
+                const framingLayout = roofFramingLayout(editor.present, selectedPolyline);
+                const stationMembers = framingLayout?.members.filter((member) => member.kind === "common-rafter" || member.kind === "truss-top-chord") ?? [];
+                const ridgeMembers = framingLayout?.members.filter((member) => member.kind === "ridge-board") ?? [];
                 const edgeTotals = takeoff?.edges.reduce<Record<string, number>>((totals, edge) => {
                   totals[edge.role] = (totals[edge.role] ?? 0) + edge.slopedLength;
                   return totals;
@@ -16347,6 +16383,9 @@ export function ModelBuilderApp() {
                 return geometry && reference && selectedPolyline.roofSettings ? <>
                   <PropertyGridRow label="Roof Type"><select className="property-cell-select" value={selectedPolyline.roofTypeId ?? editor.present.building.activeRoofTypeId} onChange={(event) => assignSelectedRoofType(event.target.value)} aria-label="Roof Type" disabled={!selectedPolylineIsEditable}>{editor.present.building.roofTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
                   {roofType ? <PropertyGridRow label="Assembly"><span className="property-readout">Above {formatArchitectural(roofType.layers.filter((layer) => layer.roofSide === "exterior").reduce((total, layer) => total + layer.thickness, 0))} · below {formatArchitectural(roofType.layers.filter((layer) => layer.roofSide === "interior").reduce((total, layer) => total + layer.thickness, 0))}</span></PropertyGridRow> : null}
+                  <PropertyGridRow label="Framing method"><select className="property-cell-select" value={selectedPolyline.roofSettings.framingMethod} onChange={(event) => updateSelectedRoofPlane({ framingMethod: event.target.value as RoofFramingMethod })} aria-label="Roof framing method" disabled={!selectedPolylineIsEditable}><option value="rafters">Conventional rafters</option><option value="trusses">Roof truss top chords</option></select></PropertyGridRow>
+                  <ArchitecturalPropertyField key={`${selectedPolyline.id}:framing-spacing:${selectedPolyline.roofSettings.framingSpacing}`} label="Framing spacing" value={selectedPolyline.roofSettings.framingSpacing} onCommit={(framingSpacing) => updateSelectedRoofPlane({ framingSpacing })} />
+                  <PropertyGridRow label="Framing view"><button className={selectedPolyline.roofSettings.showFramingInModel ? "property-cell-button is-locked" : "property-cell-button"} type="button" onClick={() => updateSelectedRoofPlane({ showFramingInModel: !selectedPolyline.roofSettings!.showFramingInModel })} disabled={!selectedPolylineIsEditable}>{selectedPolyline.roofSettings.showFramingInModel ? "Visible — hide" : "Hidden — show in 3D"}</button></PropertyGridRow>
                   <PropertyGridRow label="Bearing"><span className="property-readout">{selectedPolyline.roofBearingWallId ? `${findLineObject(editor.present, selectedPolyline.roofBearingWallId)?.name ?? "Missing Wall"} · exterior Main face` : "Detached manual plane"}</span></PropertyGridRow>
                   <PropertyGridRow label="Top of plate"><span className="property-readout">{formatSignedArchitectural(reference.topOfPlateElevation)}</span></PropertyGridRow>
                   <ArchitecturalPropertyField key={`${selectedPolyline.id}:eave:${geometry.eaveStart.x}:${geometry.eaveStart.y}:${geometry.eaveEnd.x}:${geometry.eaveEnd.y}`} label="Eave length" value={Math.hypot(geometry.eaveEnd.x - geometry.eaveStart.x, geometry.eaveEnd.y - geometry.eaveStart.y)} onCommit={(eaveLength) => updateSelectedRoofPlane({ eaveLength })} />
@@ -16368,7 +16407,13 @@ export function ModelBuilderApp() {
                     <PropertyGridRow label="Joined edges"><span className="property-readout">{sharedEdgeSummary || "Not joined"}</span></PropertyGridRow>
                   </> : null}
                   {layerTakeoffs?.map((layer) => <PropertyGridRow key={layer.layerId} label={layer.name}><span className="property-readout">{layer.material} · {(layer.surfaceArea / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft{layer.thickness > 0 ? ` · ${formatArchitectural(layer.thickness)}` : " · membrane"}</span></PropertyGridRow>)}
-                  {layerTakeoffs ? <p className="property-grid-note">Layer coverage uses the exact net sloped Roof Plane area. Waste factors, rolls, bundles, and framing-member layouts remain separate estimating inputs.</p> : null}
+                  {layerTakeoffs ? <p className="property-grid-note">Layer coverage uses the exact net sloped Roof Plane area. Waste factors, rolls, bundles, and purchasing allowances remain separate estimating inputs.</p> : null}
+                  {framingLayout ? <>
+                    <PropertyGridRow label={selectedPolyline.roofSettings.framingMethod === "rafters" ? "Common rafters" : "Top-chord stations"}><span className="property-readout">{stationMembers.length} · {formatArchitectural(stationMembers.reduce((total, member) => total + member.grossLength, 0))} gross</span></PropertyGridRow>
+                    <PropertyGridRow label="Ridge board"><span className="property-readout">{ridgeMembers.length ? `${ridgeMembers.length} · ${formatArchitectural(ridgeMembers.reduce((total, member) => total + member.grossLength, 0))} gross` : "No joined ridge"}</span></PropertyGridRow>
+                    <PropertyGridRow label="Fascia / subfascia"><span className="property-readout">{formatArchitectural(framingLayout.members.filter((member) => member.kind === "fascia").reduce((total, member) => total + member.grossLength, 0))} each</span></PropertyGridRow>
+                    {framingLayout.unsupportedStationCount ? <p className="property-grid-note">{framingLayout.unsupportedStationCount} station{framingLayout.unsupportedStationCount === 1 ? "" : "s"} end at a hip, valley, clipped, concave, or otherwise complex boundary. They are excluded until jack-rafter and complex-intersection framing is implemented.</p> : <p className="property-grid-note">Gross member lengths are derived from the Roof Plane. Ridge-face trimming, birdsmouth cuts, end cuts, stock optimization, and waste remain separate future calculations.</p>}
+                  </> : null}
                   <div className="property-action-row">
                     <button type="button" onClick={addSelectedRoofBoundaryVertex} disabled={!selectedPolylineIsEditable}>Add Edge Point</button>
                     <button type="button" onClick={simplifySelectedRoofBoundary} disabled={!selectedPolylineIsEditable || selectedPolyline.vertices.length <= 3}>Simplify Boundary</button>
@@ -16917,7 +16962,7 @@ export function ModelBuilderApp() {
               </section>
               <section className="building-browser-section">
                 <header><strong>Roof Types &amp; Defaults</strong><span>{editor.present.building.roofTypes.length}</span></header>
-                <button type="button" className="building-browser-row is-active" onClick={() => setRoofDefaultsOpen(true)}><span className="building-browser-icon">⌂</span><span><strong>{editor.present.building.roofTypes.find((type) => type.id === editor.present.building.activeRoofTypeId)?.name ?? "Roof Type"}</strong><small>{editor.present.building.roofSettings.framingMethod === "rafters" ? "Conventional rafters" : "Roof trusses"} · {editor.present.building.roofSettings.pitchRise}:12 · heel {formatArchitectural(editor.present.building.roofSettings.heightAbovePlate)}</small></span><b>ACTIVE</b></button>
+                <button type="button" className="building-browser-row is-active" onClick={() => setRoofDefaultsOpen(true)}><span className="building-browser-icon">⌂</span><span><strong>{editor.present.building.roofTypes.find((type) => type.id === editor.present.building.activeRoofTypeId)?.name ?? "Roof Type"}</strong><small>{editor.present.building.roofSettings.framingMethod === "rafters" ? "Conventional rafters" : "Roof trusses"} · {formatArchitectural(editor.present.building.roofSettings.framingSpacing)} O.C. · {editor.present.building.roofSettings.showFramingInModel ? "framing visible" : "framing hidden"}</small></span><b>ACTIVE</b></button>
                 {editor.present.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").map((roofPlane) => {
                   const geometry = roofPlaneGeometry(roofPlane);
                   const roofType = editor.present.building.roofTypes.find((type) => type.id === roofPlane.roofTypeId);
