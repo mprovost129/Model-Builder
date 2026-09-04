@@ -228,6 +228,7 @@ import {
   modelSelectionRotationBase,
   modelSelectionScaleBase,
   objectIsEditable,
+  joinRoofPlanes,
   lineIsEditable,
   polylineIsEditable,
   renameGroup,
@@ -294,6 +295,8 @@ import {
   roomHorizontalPlatformSolution,
   roofPlaneGeometry,
   roofPlaneReferenceDimensions,
+  roofPlaneSurfaceElevation,
+  roofPlaneTakeoffGeometry,
   matchRoofPlaneFascia,
   updateRoofPlane,
   updateRoofPlaneFasciaTop,
@@ -1819,6 +1822,25 @@ function updateRoofPlaneView(view: FloorPlatformView, document: ModelDocument, p
   view.meshes.push(mesh);
   view.materials.push(material);
   rebuildPlatformEdges(view);
+
+  const takeoff = roofPlaneTakeoffGeometry(document, polyline);
+  const joinedEdgeColors: Record<string, number> = { hip: 0xb66e35, ridge: 0x397ca2, transition: 0x8261a8, valley: 0x2f8f83 };
+  takeoff?.edges.filter((edge) => edge.joinedRoofPlaneId).forEach((edge) => {
+    const startZ = roofPlaneSurfaceElevation(document, polyline, edge.start);
+    const endZ = roofPlaneSurfaceElevation(document, polyline, edge.end);
+    if (startZ === null || endZ === null) return;
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: joinedEdgeColors[edge.role] ?? 0x397ca2, depthTest: false, toneMapped: false });
+    const joinedEdge = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(edge.start.x, edge.start.y, startZ + 1 / 8),
+      new THREE.Vector3(edge.end.x, edge.end.y, endZ + 1 / 8),
+    ]), edgeMaterial);
+    joinedEdge.renderOrder = 20;
+    joinedEdge.userData.roofEdgeRole = edge.role;
+    joinedEdge.userData.joinedRoofPlaneId = edge.joinedRoofPlaneId;
+    view.group.add(joinedEdge);
+    view.outlines.push(joinedEdge);
+    view.outlineMaterials.push(edgeMaterial);
+  });
 
   const bearingMaterial = new THREE.LineDashedMaterial({ color: 0x3f7592, dashSize: 6, depthTest: false, gapSize: 3, opacity: 0.95, transparent: true });
   const bearingLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
@@ -8628,12 +8650,12 @@ function BreakControl({ mode, onCancel, stage }: { mode: BreakMode; onCancel: ()
   );
 }
 
-function JoinControl({ onJoin, selectionCount }: { onJoin: () => boolean; selectionCount: number }) {
+function JoinControl({ onJoin, roofPlanes = false, selectionCount }: { onJoin: () => boolean; roofPlanes?: boolean; selectionCount: number }) {
   return (
-    <PropertyGridSection className="join-panel" title="Join" meta="Endpoint chain">
-      <PropertyGridRow label="Selected"><span className="property-readout">{selectionCount} open curves</span></PropertyGridRow>
-      <div className="property-action-row single-action"><button type="button" onClick={onJoin}>Join Selected Curves</button></div>
-      <p className="property-grid-note">Creates one native Line, Arc, Circle, or Polyline when the selected endpoints form one unbranched chain at a common elevation.</p>
+    <PropertyGridSection className="join-panel" title="Join" meta={roofPlanes ? "Roof surfaces" : "Endpoint chain"}>
+      <PropertyGridRow label="Selected"><span className="property-readout">{selectionCount} {roofPlanes ? "Roof Planes" : "open curves"}</span></PropertyGridRow>
+      <div className="property-action-row single-action"><button type="button" onClick={onJoin}>Join Selected {roofPlanes ? "Roofs" : "Curves"}</button></div>
+      <p className="property-grid-note">{roofPlanes ? "Trims both planes to their exact 3D surface intersection and derives the shared ridge, hip, valley, or transition edge for future takeoff." : "Creates one native Line, Arc, Circle, or Polyline when the selected endpoints form one unbranched chain at a common elevation."}</p>
     </PropertyGridSection>
   );
 }
@@ -11766,9 +11788,18 @@ export function ModelBuilderApp() {
     modelEntityIsEditable(editor.present, selectedOffsetRef) &&
     (selectedOffsetRef.kind !== "polyline" || !findPolylineObject(editor.present, selectedOffsetRef.id)?.closed),
   );
-  const selectionCanJoin = selectedEntityRefs.length >= 2 && selectedEntityRefs.every((ref) =>
+  const selectedRoofPlanes = selectedEntityRefs
+    .filter((ref) => ref.kind === "polyline")
+    .map((ref) => findPolylineObject(editor.present, ref.id))
+    .filter((polyline): polyline is PolylineObject => polyline?.architecturalRole === "roof-plane");
+  const selectionCanJoinRoofPlanes = selectedEntityRefs.length === 2 &&
+    selectedRoofPlanes.length === 2 &&
+    selectedRoofPlanes[0].storyId === selectedRoofPlanes[1].storyId &&
+    selectedRoofPlanes.every((polyline) => polylineIsEditable(editor.present, polyline));
+  const selectionCanJoinCurves = selectedEntityRefs.length >= 2 && selectedEntityRefs.every((ref) =>
     (ref.kind === "line" || ref.kind === "arc" || (ref.kind === "polyline" && !findPolylineObject(editor.present, ref.id)?.closed)) &&
     modelEntityIsEditable(editor.present, ref));
+  const selectionCanJoin = selectionCanJoinCurves || selectionCanJoinRoofPlanes;
   const selectedExplodePolylines = selectedEntityRefs
     .filter((ref) => ref.kind === "polyline")
     .map((ref) => findPolylineObject(editor.present, ref.id))
@@ -12579,8 +12610,20 @@ export function ModelBuilderApp() {
 
   const joinSelection = useCallback(() => {
     if (!selectionCanJoin) {
-      setFileNotice({ text: "Select at least two unlocked, endpoint-connected Lines, Arcs, or open Polylines before using Join.", tone: "info" });
+      setFileNotice({ text: "Select two overlapping Roof Planes, or at least two unlocked endpoint-connected curves, before using Join.", tone: "info" });
       return false;
+    }
+    if (selectionCanJoinRoofPlanes) {
+      const result = joinRoofPlanes(editor.present, selectedRoofPlanes[0].id, selectedRoofPlanes[1].id);
+      if (!result) {
+        setFileNotice({ text: "Roof Join needs two intersecting, nonparallel Roof Planes on the same Story, with each protected eave on its own side of the calculated intersection.", tone: "error" });
+        return false;
+      }
+      activateSelectMode();
+      dispatch({ type: "commit", next: result.document });
+      applyCadSelection(result.document, selectedEntityRefs, selectedEntityRefs.at(-1) ?? null);
+      setFileNotice({ text: `Joined the Roof Planes at a calculated ${result.edge.role}. The shared edge and net roof areas are ready for future material calculations.`, tone: "success" });
+      return true;
     }
     const primaryRef: CadEntityRef | null = selectedLineId
       ? { id: selectedLineId, kind: "line" }
@@ -12599,7 +12642,7 @@ export function ModelBuilderApp() {
     applyCadSelection(result.document, [result.ref], result.ref);
     setFileNotice({ text: `Joined ${selectedEntityRefs.length} entities into one native ${result.ref.kind === "polyline" ? "Polyline" : result.ref.kind === "arc" ? "Arc" : result.ref.kind === "circle" ? "Circle" : "Line"}.`, tone: "success" });
     return true;
-  }, [activateSelectMode, applyCadSelection, editor.present, selectedArcId, selectedEntityRefs, selectedLineId, selectedPolylineId, selectionCanJoin]);
+  }, [activateSelectMode, applyCadSelection, editor.present, selectedArcId, selectedEntityRefs, selectedLineId, selectedPolylineId, selectedRoofPlanes, selectionCanJoin, selectionCanJoinRoofPlanes]);
 
   const explodeSelection = useCallback(() => {
     if (!selectionCanExplode) {
@@ -15881,7 +15924,7 @@ export function ModelBuilderApp() {
                 <button type="button" className={extendMode ? "is-engaged" : ""} onClick={extendMode ? finishTrimExtendMode : activateExtendMode} disabled={!selectionCanExtend} title="Extend the nearest open endpoint to a visible boundary"><b>↦</b><span>{extendMode ? "Cancel Extend" : "Extend"}</span></button>
                 <button type="button" className={breakMode === "break" ? "is-engaged" : ""} onClick={() => breakMode === "break" ? finishBreakMode(true) : activateBreakMode("break")} title="Remove the portion between two points on a native curve"><b>⫯</b><span>{breakMode === "break" ? "Cancel Break" : "Break"}</span></button>
                 <button type="button" className={breakMode === "break-at-point" ? "is-engaged" : ""} onClick={() => breakMode === "break-at-point" ? finishBreakMode(true) : activateBreakMode("break-at-point")} title="Split an open native curve at one point"><b>⋮</b><span>{breakMode === "break-at-point" ? "Cancel Point" : "Break Point"}</span></button>
-                <button type="button" onClick={joinSelection} disabled={!selectionCanJoin} title="Join endpoint-connected Lines, Arcs, and open Polylines into one native curve"><b>⌇</b><span>Join</span></button>
+                <button type="button" onClick={joinSelection} disabled={!selectionCanJoin} title={selectionCanJoinRoofPlanes ? "Trim two selected Roof Planes to their calculated surface intersection" : "Join endpoint-connected Lines, Arcs, and open Polylines into one native curve"}><b>⌇</b><span>Join</span></button>
                 <button type="button" onClick={explodeSelection} disabled={!selectionCanExplode} title="Explode selected Rectangles and Polylines into native Lines and Arcs"><b>✣</b><span>Explode</span></button>
                 <button type="button" className={lengthenMode ? "is-engaged" : ""} onClick={lengthenMode ? () => finishLengthenMode(true) : activateLengthenMode} disabled={!selectionCanLengthen} title="Lengthen one Line, Arc, or open Polyline by Delta, Total, Percent, or Dynamic"><b>↤</b><span>{lengthenMode ? "Cancel Lengthen" : "Lengthen"}</span></button>
                 <button type="button" className={chamferMode ? "is-engaged" : ""} onClick={chamferMode ? () => finishChamferMode(true) : activateChamferMode} title="Chamfer two Lines or every corner of one selected Polyline"><b>⌿</b><span>{chamferMode ? "Cancel Chamfer" : "Chamfer"}</span></button>
@@ -15966,7 +16009,7 @@ export function ModelBuilderApp() {
                 <button type="button" className={extendMode ? "is-engaged" : ""} onClick={extendMode ? finishTrimExtendMode : activateExtendMode} disabled={!selectionCanExtend} title="Extend the nearest open endpoint to a visible boundary"><b>↦</b><span>{extendMode ? "Cancel Extend" : "Extend"}</span></button>
                 <button type="button" className={breakMode === "break" ? "is-engaged" : ""} onClick={() => breakMode === "break" ? finishBreakMode(true) : activateBreakMode("break")} title="Remove the portion between two points on a native curve"><b>⫯</b><span>{breakMode === "break" ? "Cancel Break" : "Break"}</span></button>
                 <button type="button" className={breakMode === "break-at-point" ? "is-engaged" : ""} onClick={() => breakMode === "break-at-point" ? finishBreakMode(true) : activateBreakMode("break-at-point")} title="Split an open native curve at one point"><b>⋮</b><span>{breakMode === "break-at-point" ? "Cancel Point" : "Break Point"}</span></button>
-                <button type="button" onClick={joinSelection} disabled={!selectionCanJoin} title="Join endpoint-connected Lines, Arcs, and open Polylines into one native curve"><b>⌇</b><span>Join</span></button>
+                <button type="button" onClick={joinSelection} disabled={!selectionCanJoin} title={selectionCanJoinRoofPlanes ? "Trim two selected Roof Planes to their calculated surface intersection" : "Join endpoint-connected Lines, Arcs, and open Polylines into one native curve"}><b>⌇</b><span>Join</span></button>
                 <button type="button" onClick={explodeSelection} disabled={!selectionCanExplode} title="Explode selected Rectangles and Polylines into native Lines and Arcs"><b>✣</b><span>Explode</span></button>
                 <button type="button" className={lengthenMode ? "is-engaged" : ""} onClick={lengthenMode ? () => finishLengthenMode(true) : activateLengthenMode} disabled={!selectionCanLengthen} title="Lengthen one Line, Arc, or open Polyline by Delta, Total, Percent, or Dynamic"><b>↤</b><span>{lengthenMode ? "Cancel Lengthen" : "Lengthen"}</span></button>
                 <button type="button" className={chamferMode ? "is-engaged" : ""} onClick={chamferMode ? () => finishChamferMode(true) : activateChamferMode} title="Chamfer two Lines or every corner of one selected Polyline"><b>⌿</b><span>{chamferMode ? "Cancel Chamfer" : "Chamfer"}</span></button>
@@ -16177,6 +16220,15 @@ export function ModelBuilderApp() {
               {selectedPolyline.architecturalRole === "roof-plane" ? (() => {
                 const geometry = roofPlaneGeometry(selectedPolyline);
                 const reference = roofPlaneReferenceDimensions(editor.present, selectedPolyline);
+                const takeoff = roofPlaneTakeoffGeometry(editor.present, selectedPolyline);
+                const edgeTotals = takeoff?.edges.reduce<Record<string, number>>((totals, edge) => {
+                  totals[edge.role] = (totals[edge.role] ?? 0) + edge.slopedLength;
+                  return totals;
+                }, {}) ?? {};
+                const sharedEdgeSummary = (["ridge", "hip", "valley", "transition"] as const)
+                  .filter((role) => edgeTotals[role])
+                  .map((role) => `${role[0].toUpperCase()}${role.slice(1)} ${formatArchitectural(edgeTotals[role])}`)
+                  .join(" · ");
                 const fasciaMatchOptions = editor.present.polylines.flatMap((candidate) => {
                   if (candidate.id === selectedPolyline.id || candidate.architecturalRole !== "roof-plane") return [];
                   const candidateReference = roofPlaneReferenceDimensions(editor.present, candidate);
@@ -16196,6 +16248,13 @@ export function ModelBuilderApp() {
                   <PropertyGridRow label="Fascia bottom"><span className="property-readout">{formatSignedArchitectural(reference.fasciaBottomElevation)}</span></PropertyGridRow>
                   <RoofPlaneFasciaMatchControl key={`${selectedPolyline.id}:fascia-match:${fasciaMatchOptions.map((option) => option.id).join(":")}`} onMatch={matchSelectedRoofPlaneFascia} options={fasciaMatchOptions} />
                   <PropertyGridRow label="Subfascia"><span className="property-readout">Top {formatSignedArchitectural(reference.subfasciaTopElevation)} · bottom {formatSignedArchitectural(reference.subfasciaBottomElevation)}</span></PropertyGridRow>
+                  {takeoff ? <>
+                    <PropertyGridRow label="Net plan area"><span className="property-readout">{(takeoff.planArea / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft</span></PropertyGridRow>
+                    <PropertyGridRow label="Net roof area"><span className="property-readout">{(takeoff.surfaceArea / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft · {takeoff.slopeFactor.toFixed(3)} slope factor</span></PropertyGridRow>
+                    <PropertyGridRow label="Eave edge"><span className="property-readout">{formatArchitectural(edgeTotals.eave ?? 0)}</span></PropertyGridRow>
+                    <PropertyGridRow label="Rake edges"><span className="property-readout">{formatArchitectural(edgeTotals.rake ?? 0)}</span></PropertyGridRow>
+                    <PropertyGridRow label="Joined edges"><span className="property-readout">{sharedEdgeSummary || "Not joined"}</span></PropertyGridRow>
+                  </> : null}
                   <div className="property-action-row">
                     <button type="button" onClick={addSelectedRoofBoundaryVertex} disabled={!selectedPolylineIsEditable}>Add Edge Point</button>
                     <button type="button" onClick={simplifySelectedRoofBoundary} disabled={!selectedPolylineIsEditable || selectedPolyline.vertices.length <= 3}>Simplify Boundary</button>
@@ -16306,7 +16365,7 @@ export function ModelBuilderApp() {
               <MirrorControl keepSource={mirrorKeepSource} mirrorMode={mirrorMode} onFinish={finishMirrorMode} onKeepSourceChange={setMirrorKeepSource} onQuickMirror={quickMirrorSelection} onStart={activateMirrorMode} selectionCount={selectedEntityRefs.length} />
               {selectionCanOffset ? <OffsetControl key={`offset:${selectedOffsetRef?.kind}:${selectedOffsetRef?.id}:${offsetDistance}`} distance={offsetDistance} keepSource={offsetKeepSource} offsetMode={offsetMode} onDistanceChange={setOffsetDistance} onFinish={finishOffsetMode} onKeepSourceChange={setOffsetKeepSource} onStart={activateOffsetMode} /> : null}
               {selectionCanTrim ? <TrimExtendControl canExtend={selectionCanExtend} extendMode={extendMode} onExtend={activateExtendMode} onFinish={finishTrimExtendMode} onTrim={activateTrimMode} trimMode={trimMode} /> : null}
-              {selectionCanJoin ? <JoinControl onJoin={joinSelection} selectionCount={selectedEntityRefs.length} /> : null}
+              {selectionCanJoin ? <JoinControl onJoin={joinSelection} roofPlanes={selectionCanJoinRoofPlanes} selectionCount={selectedEntityRefs.length} /> : null}
               {selectionCanExplode ? <ExplodeControl hasWidth={selectedExplodeHasWidth} onExplode={explodeSelection} segmentCount={selectedExplodeSegmentCount} selectionCount={selectedEntityRefs.length} /> : null}
               {selectionCanLengthen ? <LengthenControl key={`lengthen:${lengthenMethod}:${lengthenValue}`} method={lengthenMethod} mode={lengthenMode} onFinish={() => finishLengthenMode(true)} onMethodChange={(method) => { setLengthenMethod(method); if (lengthenMode) finishLengthenMode(true); }} onStart={activateLengthenMode} onValueChange={(value) => { setLengthenValue(value); if (lengthenMode) finishLengthenMode(true); }} value={lengthenValue} /> : null}
             </>
@@ -16326,7 +16385,7 @@ export function ModelBuilderApp() {
             <PropertyGridSection title="Plan Editing" meta="Editable Roof Boundary">
               <PropertyGridRow label="Eave grips"><span className="property-readout">Adjust bearing-line start or end</span></PropertyGridRow>
               <PropertyGridRow label="Blue grips"><span className="property-readout">Shape hips, valleys, rakes, and clips</span></PropertyGridRow>
-              <p className="property-grid-note">The gold eave edge preserves the bearing reference. Add an edge point, then drag its blue grip to shape the Roof Plane. Horizontal Run scales the full boundary depth. Move, Rotate, Mirror, or Copy detaches a plane from its original Wall.</p>
+              <p className="property-grid-note">The gold eave edge preserves the bearing reference. Add an edge point, then drag its blue grip to shape the Roof Plane. Horizontal Run scales the full boundary depth. Shift-select two overlapping Roof Planes and use Join to calculate their shared 3D edge. Move, Rotate, Mirror, or Copy detaches a plane from its original Wall.</p>
             </PropertyGridSection>
           ) : selectedPolyline?.shape === "rectangle" && rectangleSupportsConstrainedGrips(selectedPolyline) ? (
             <RectangleGeometryControl elevationLocked={selectedPolyline.architecturalRole === "floor-platform"} key={`${selectedPolyline.id}:${selectedPolyline.elevation}:${selectedPolyline.vertices.map((point) => `${point.x},${point.y}`).join(":")}`} rectangle={selectedPolyline} onUpdate={updateSelectedPolyline} />

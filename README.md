@@ -163,8 +163,13 @@ polylines, rectangles, Circles, and Arcs.
   elevation, or a matched fascia elevation from another plane. Their protected
   gold eave edge retains the bearing reference while blue boundary grips and
   add/simplify controls create hips, valleys, rakes, and clipped polygon edges;
-  the resulting polygon is preserved in project files and triangulated as one
-  calculated sloped surface in 3D. Automatic roof generation remains a later phase
+  two selected overlapping planes can be trimmed to their exact calculated 3D
+  intersection with a derived ridge, hip, valley, or transition role. Each plane
+  reports net plan and sloped surface area plus exact sloped eave, rake, and joined
+  edge lengths, preserving the geometry needed for later lumber, sheathing, roofing,
+  waste, and accessory takeoff. The resulting polygons are preserved in project
+  files and triangulated as calculated sloped surfaces in 3D. Automatic roof
+  generation remains a later phase
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling

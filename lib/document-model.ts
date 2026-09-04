@@ -273,6 +273,29 @@ export type RoofPlaneGeometry = {
   totalDepth: number;
 };
 
+export type RoofEdgeRole = "eave" | "ridge" | "hip" | "valley" | "rake" | "transition";
+
+export type RoofPlaneEdgeMeasurement = {
+  end: PlanPoint;
+  joinedRoofPlaneId: string | null;
+  planLength: number;
+  role: RoofEdgeRole;
+  slopedLength: number;
+  start: PlanPoint;
+};
+
+export type RoofPlaneTakeoffGeometry = {
+  edges: RoofPlaneEdgeMeasurement[];
+  planArea: number;
+  slopeFactor: number;
+  surfaceArea: number;
+};
+
+export type RoofPlaneJoinResult = {
+  document: ModelDocument;
+  edge: RoofPlaneEdgeMeasurement;
+};
+
 export type CircleObject = CircleGeometry & {
   fillOverride?: ModelFillOverride | null;
   id: string;
@@ -2756,6 +2779,165 @@ export function roofPlaneReferenceDimensions(document: ModelDocument, polyline: 
   if (!geometry || !settings) return null;
   const topOfPlate = calculateStoryElevations(document.building).find((item) => item.storyId === polyline.storyId)?.roughCeilingElevation;
   return topOfPlate === undefined ? null : calculateRoofReferenceDimensions(settings, topOfPlate, geometry.horizontalRun);
+}
+
+type RoofSurfaceEquation = { c: number; gradient: PlanPoint };
+
+function roofSurfaceEquation(document: ModelDocument, polyline: PolylineObject): RoofSurfaceEquation | null {
+  const geometry = roofPlaneGeometry(polyline);
+  const reference = roofPlaneReferenceDimensions(document, polyline);
+  if (!geometry || !reference || !polyline.roofSettings) return null;
+  const slope = polyline.roofSettings.pitchRise / 12;
+  const gradient = { x: geometry.inwardNormal.x * slope, y: geometry.inwardNormal.y * slope };
+  return {
+    c: reference.fasciaTopElevation - gradient.x * geometry.eaveStart.x - gradient.y * geometry.eaveStart.y,
+    gradient,
+  };
+}
+
+export function roofPlaneSurfaceElevation(document: ModelDocument, polyline: PolylineObject, point: PlanPoint): number | null {
+  const equation = roofSurfaceEquation(document, polyline);
+  return equation ? equation.gradient.x * point.x + equation.gradient.y * point.y + equation.c : null;
+}
+
+function planPointsClose(first: PlanPoint, second: PlanPoint, tolerance = 1e-8): boolean {
+  return Math.hypot(first.x - second.x, first.y - second.y) <= tolerance;
+}
+
+function roofEdgesCoincident(firstStart: PlanPoint, firstEnd: PlanPoint, secondStart: PlanPoint, secondEnd: PlanPoint): boolean {
+  return planPointsClose(firstStart, secondStart) && planPointsClose(firstEnd, secondEnd) ||
+    planPointsClose(firstStart, secondEnd) && planPointsClose(firstEnd, secondStart);
+}
+
+function straightPolygonSignedArea(vertices: PlanPoint[]): number {
+  return vertices.reduce((total, point, index) => {
+    const next = vertices[(index + 1) % vertices.length];
+    return total + point.x * next.y - next.x * point.y;
+  }, 0) / 2;
+}
+
+function roofEdgeInteriorNormal(polyline: PolylineObject, index: number): PlanPoint | null {
+  const start = polyline.vertices[index];
+  const end = polyline.vertices[(index + 1) % polyline.vertices.length];
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1 / 16) return null;
+  const side = straightPolygonSignedArea(polyline.vertices) >= 0 ? 1 : -1;
+  return { x: -dy / length * side, y: dx / length * side };
+}
+
+function classifyJoinedRoofEdge(document: ModelDocument, first: PolylineObject, firstIndex: number, second: PolylineObject, secondIndex: number): RoofEdgeRole | null {
+  const firstEquation = roofSurfaceEquation(document, first);
+  const secondEquation = roofSurfaceEquation(document, second);
+  const firstInterior = roofEdgeInteriorNormal(first, firstIndex);
+  const secondInterior = roofEdgeInteriorNormal(second, secondIndex);
+  if (!firstEquation || !secondEquation || !firstInterior || !secondInterior) return null;
+  const firstInsideRise = firstEquation.gradient.x * firstInterior.x + firstEquation.gradient.y * firstInterior.y;
+  const secondInsideRise = secondEquation.gradient.x * secondInterior.x + secondEquation.gradient.y * secondInterior.y;
+  const start = first.vertices[firstIndex];
+  const end = first.vertices[(firstIndex + 1) % first.vertices.length];
+  const startZ = roofPlaneSurfaceElevation(document, first, start);
+  const endZ = roofPlaneSurfaceElevation(document, first, end);
+  if (startZ === null || endZ === null) return null;
+  if (firstInsideRise < -1e-7 && secondInsideRise < -1e-7) return Math.abs(endZ - startZ) <= 1 / 16 ? "ridge" : "hip";
+  if (firstInsideRise > 1e-7 && secondInsideRise > 1e-7) return "valley";
+  return "transition";
+}
+
+export function roofPlaneTakeoffGeometry(document: ModelDocument, polyline: PolylineObject): RoofPlaneTakeoffGeometry | null {
+  const geometry = roofPlaneGeometry(polyline);
+  const equation = roofSurfaceEquation(document, polyline);
+  if (!geometry || !equation || !polyline.roofSettings) return null;
+  const adjacentPlanes = document.polylines.filter((candidate) => candidate.id !== polyline.id && candidate.storyId === polyline.storyId && candidate.architecturalRole === "roof-plane" && roofPlaneGeometry(candidate));
+  const edges = polyline.vertices.map((start, index): RoofPlaneEdgeMeasurement => {
+    const end = polyline.vertices[(index + 1) % polyline.vertices.length];
+    let role: RoofEdgeRole = index === 0 ? "eave" : "rake";
+    let joinedRoofPlaneId: string | null = null;
+    for (const candidate of adjacentPlanes) {
+      const candidateIndex = candidate.vertices.findIndex((candidateStart, edgeIndex) => {
+        if (index === 0 || edgeIndex === 0) return false;
+        const candidateEnd = candidate.vertices[(edgeIndex + 1) % candidate.vertices.length];
+        if (!roofEdgesCoincident(start, end, candidateStart, candidateEnd)) return false;
+        const firstStartZ = roofPlaneSurfaceElevation(document, polyline, start);
+        const firstEndZ = roofPlaneSurfaceElevation(document, polyline, end);
+        const secondStartZ = roofPlaneSurfaceElevation(document, candidate, start);
+        const secondEndZ = roofPlaneSurfaceElevation(document, candidate, end);
+        return firstStartZ !== null && firstEndZ !== null && secondStartZ !== null && secondEndZ !== null &&
+          Math.abs(firstStartZ - secondStartZ) <= 1 / 16 && Math.abs(firstEndZ - secondEndZ) <= 1 / 16;
+      });
+      if (candidateIndex < 0) continue;
+      role = classifyJoinedRoofEdge(document, polyline, index, candidate, candidateIndex) ?? "transition";
+      joinedRoofPlaneId = candidate.id;
+      break;
+    }
+    const planLength = Math.hypot(end.x - start.x, end.y - start.y);
+    const startZ = equation.gradient.x * start.x + equation.gradient.y * start.y + equation.c;
+    const endZ = equation.gradient.x * end.x + equation.gradient.y * end.y + equation.c;
+    return { end: { ...end }, joinedRoofPlaneId, planLength, role, slopedLength: Math.hypot(planLength, endZ - startZ), start: { ...start } };
+  });
+  const slopeFactor = Math.sqrt(1 + (polyline.roofSettings.pitchRise / 12) ** 2);
+  const planArea = polylineArea(polyline);
+  return { edges, planArea, slopeFactor, surfaceArea: planArea * slopeFactor };
+}
+
+function clipRoofPlaneToSurfaceSide(polyline: PolylineObject, a: number, b: number, c: number, keepSign: 1 | -1): PolylineObject | null {
+  const signed = (point: PlanPoint) => (a * point.x + b * point.y + c) * keepSign;
+  if (signed(polyline.vertices[0]) < -1e-7 || signed(polyline.vertices[1]) < -1e-7) return null;
+  const vertices: PlanPoint[] = [];
+  for (let index = 0; index < polyline.vertices.length; index += 1) {
+    const start = polyline.vertices[index];
+    const end = polyline.vertices[(index + 1) % polyline.vertices.length];
+    const startValue = signed(start);
+    const endValue = signed(end);
+    const startInside = startValue >= -1e-7;
+    const endInside = endValue >= -1e-7;
+    if (startInside) vertices.push({ ...start });
+    if (startInside === endInside) continue;
+    const fraction = startValue / (startValue - endValue);
+    vertices.push({
+      x: snapToSixteenth(start.x + (end.x - start.x) * fraction),
+      y: snapToSixteenth(start.y + (end.y - start.y) * fraction),
+    });
+  }
+  const deduplicated = vertices.filter((point, index) => index === 0 || !planPointsClose(point, vertices[index - 1], 1e-8));
+  if (deduplicated.length > 1 && planPointsClose(deduplicated[0], deduplicated.at(-1)!, 1e-8)) deduplicated.pop();
+  if (deduplicated.length < 3 || !planPointsClose(deduplicated[0], polyline.vertices[0], 1e-8) || !planPointsClose(deduplicated[1], polyline.vertices[1], 1e-8)) return null;
+  const candidate: PolylineObject = { ...clonePolylineObject(polyline), bulges: deduplicated.map(() => 0), vertices: deduplicated };
+  return polylineGeometryIsValid(candidate) && roofPlaneGeometry(candidate) ? candidate : null;
+}
+
+/**
+ * Trims two overlapping Roof Planes to their calculated surface intersection.
+ * Each plane retains the half containing its protected eave, producing one
+ * shared material-measurable ridge, hip, valley, or transition edge.
+ */
+export function joinRoofPlanes(document: ModelDocument, firstId: string, secondId: string): RoofPlaneJoinResult | null {
+  if (firstId === secondId) return null;
+  const first = findPolylineObject(document, firstId);
+  const second = findPolylineObject(document, secondId);
+  if (!first || !second || first.storyId !== second.storyId || !polylineIsEditable(document, first) || !polylineIsEditable(document, second)) return null;
+  const firstEquation = roofSurfaceEquation(document, first);
+  const secondEquation = roofSurfaceEquation(document, second);
+  if (!firstEquation || !secondEquation) return null;
+  const a = firstEquation.gradient.x - secondEquation.gradient.x;
+  const b = firstEquation.gradient.y - secondEquation.gradient.y;
+  const c = firstEquation.c - secondEquation.c;
+  if (Math.hypot(a, b) < 1e-8) return null;
+  const firstEaveMidpoint = { x: (first.vertices[0].x + first.vertices[1].x) / 2, y: (first.vertices[0].y + first.vertices[1].y) / 2 };
+  const secondEaveMidpoint = { x: (second.vertices[0].x + second.vertices[1].x) / 2, y: (second.vertices[0].y + second.vertices[1].y) / 2 };
+  const firstEaveSide = a * firstEaveMidpoint.x + b * firstEaveMidpoint.y + c;
+  const secondEaveSide = a * secondEaveMidpoint.x + b * secondEaveMidpoint.y + c;
+  if (Math.abs(firstEaveSide) < 1e-7 || Math.abs(secondEaveSide) < 1e-7 || firstEaveSide * secondEaveSide >= 0) return null;
+  const firstCandidate = clipRoofPlaneToSurfaceSide(first, a, b, c, firstEaveSide > 0 ? 1 : -1);
+  const secondCandidate = clipRoofPlaneToSurfaceSide(second, a, b, c, secondEaveSide > 0 ? 1 : -1);
+  if (!firstCandidate || !secondCandidate) return null;
+  const nextPolylines = document.polylines.map((polyline) => polyline.id === firstId ? firstCandidate : polyline.id === secondId ? secondCandidate : polyline);
+  const next = withPolylines(document, nextPolylines);
+  const edge = roofPlaneTakeoffGeometry(next, firstCandidate)?.edges
+    .filter((candidate) => candidate.joinedRoofPlaneId === secondId)
+    .sort((left, right) => right.slopedLength - left.slopedLength)[0];
+  return edge ? { document: next, edge } : null;
 }
 
 export function createRoofPlaneFromWall(document: ModelDocument, wallId: string, horizontalRun = 144): { document: ModelDocument; roofPlane: PolylineObject } | null {

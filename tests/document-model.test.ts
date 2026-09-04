@@ -54,6 +54,7 @@ import {
   lengthenModelEntity,
   modelEntityLengthenEndpoints,
   joinModelEntities,
+  joinRoofPlanes,
   chamferLineObjects,
   chamferPolylineObject,
   filletLineObjects,
@@ -83,6 +84,7 @@ import {
   roomHorizontalPlatformSolution,
   roofPlaneGeometry,
   roofPlaneReferenceDimensions,
+  roofPlaneTakeoffGeometry,
   rotateBoxObjects,
   rotateModelEntities,
   scaleModelEntities,
@@ -232,6 +234,62 @@ test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () 
   assert.equal(scaledPlane.roofBearingWallId, null);
   assert.equal(scaledPlane.roofSettings?.overhang, 48);
   assert.equal(roofPlaneGeometry(scaledPlane)?.horizontalRun, 360);
+});
+
+test("joins opposing Roof Planes at a material-measurable ridge", () => {
+  const line = addLineObject(NEW_PROJECT_DOCUMENT, { x: 0, y: 0, z: 0 }, { x: 240, y: 0, z: 0 });
+  assert.ok(line);
+  const wallDocument = createWallFromLine(line.document, line.line.id);
+  assert.ok(wallDocument);
+  const created = createRoofPlaneFromWall(wallDocument, line.line.id, 144);
+  assert.ok(created);
+  const first = created.roofPlane;
+  const firstGeometry = roofPlaneGeometry(first);
+  assert.ok(firstGeometry);
+  const nx = firstGeometry.inwardNormal.x;
+  const ny = firstGeometry.inwardNormal.y;
+  const eaveSeparation = 156;
+  const opposingDepth = firstGeometry.totalDepth;
+  const translate = (point: { x: number; y: number }, distance: number) => ({
+    x: point.x + nx * distance,
+    y: point.y + ny * distance,
+  });
+  const secondEaveStart = translate(firstGeometry.eaveStart, eaveSeparation);
+  const secondEaveEnd = translate(firstGeometry.eaveEnd, eaveSeparation);
+  const second = {
+    ...structuredClone(first),
+    id: "polyline-opposing-roof",
+    name: "Opposing Roof Plane",
+    roofBearingWallId: null,
+    vertices: [
+      secondEaveStart,
+      secondEaveEnd,
+      translate(secondEaveEnd, -opposingDepth),
+      translate(secondEaveStart, -opposingDepth),
+    ],
+  };
+  const twoPlaneDocument = { ...created.document, polylines: [...created.document.polylines, second] };
+  assert.ok(roofPlaneGeometry(second));
+
+  const joined = joinRoofPlanes(twoPlaneDocument, first.id, second.id);
+  assert.ok(joined);
+  assert.equal(joined.edge.role, "ridge");
+  assert.equal(joined.edge.planLength, 240);
+  assert.equal(joined.edge.slopedLength, 240);
+  const joinedFirst = joined.document.polylines.find((polyline) => polyline.id === first.id)!;
+  const joinedSecond = joined.document.polylines.find((polyline) => polyline.id === second.id)!;
+  const expectedHorizontalRun = eaveSeparation / 2 - first.roofSettings!.overhang;
+  assert.equal(roofPlaneGeometry(joinedFirst)?.horizontalRun, expectedHorizontalRun);
+  assert.equal(roofPlaneGeometry(joinedSecond)?.horizontalRun, expectedHorizontalRun);
+  const firstTakeoff = roofPlaneTakeoffGeometry(joined.document, joinedFirst);
+  const secondTakeoff = roofPlaneTakeoffGeometry(joined.document, joinedSecond);
+  assert.ok(firstTakeoff);
+  assert.ok(secondTakeoff);
+  assert.equal(firstTakeoff.edges.find((edge) => edge.role === "ridge")?.joinedRoofPlaneId, second.id);
+  assert.equal(secondTakeoff.edges.find((edge) => edge.role === "ridge")?.joinedRoofPlaneId, first.id);
+  assert.equal(firstTakeoff.planArea, 240 * 78);
+  assert.equal(firstTakeoff.surfaceArea, firstTakeoff.planArea * firstTakeoff.slopeFactor);
+  assert.equal(joinRoofPlanes(joined.document, first.id, first.id), null);
 });
 
 test("adds a uniquely named box beyond the current document bounds", () => {

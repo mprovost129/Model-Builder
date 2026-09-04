@@ -40,12 +40,23 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [x] Add Edge Point and Simplify Boundary actions provide controlled polygon topology changes; invalid crossings, curved roof edges, and boundaries that cross the eave are rejected.
 - [x] Polygon Roof Planes retain per-vertex slope elevations in 3D and round-trip through version-49 project files.
 - [x] Roof Plane vertical placement by Height Above Plate, direct Fascia Top elevation, or another Roof Plane's matched absolute fascia elevation.
+- [x] Two-plane manual Join trims intersecting planes to their calculated 3D surface intersection while preserving both protected eaves.
+- [x] Shared-edge roles are derived as ridge, hip, valley, or transition; exact plan length, sloped length, net plan area, slope factor, and net roof surface area remain available from model geometry for future material takeoff.
 - [ ] Complete per-plane overrides for rafter/truss size, fascia, subfascia, and birdsmouth inputs; pitch, heel, run, and overhang are complete.
 - [ ] Live editable dimensions in plan and section/elevation views.
 - [ ] Complete exact ridge/eave/fascia/subfascia component solids; the current structural surface and reference elevations are calculated.
 - [ ] Birdsmouth solid generated from the hosted Wall plate, member geometry, seat length, and maximum-notch validation rule.
 - [ ] Layered Roof Types for sheathing, underlayment, roofing, insulation, and finish components above/below the structural plane.
-- [ ] Hip, valley, ridge, rake, and roof-opening joins with explicit cleanup rules.
+- [ ] Multi-plane junction cleanup, roof-opening joins, and explicit priority rules for complex intersections. The two-plane manual Join is complete.
+
+## Material takeoff readiness
+
+- [x] Preserve exact Roof Plane polygon boundaries rather than display-only meshes.
+- [x] Derive net sloped surface area from each plane's exact plan area and pitch.
+- [x] Derive named eave, rake, ridge, hip, valley, and transition edge lengths directly from joined geometry.
+- [ ] Add layered Roof Types so sheathing, underlayment, roofing, insulation, and finish quantities use the correct offset surface rather than the structural reference plane.
+- [ ] Add framing layouts for common rafters, jack rafters, hips, valleys, ridges, trusses, outlookers, fascia, and subfascia.
+- [ ] Add openings, laps, stock-length optimization, waste factors, bundle/square rounding, and a reviewable material schedule. Net geometry must remain separate from purchasing allowances.
 
 ## Later: automatic roof generation
 
