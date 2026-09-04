@@ -42,8 +42,8 @@ test("generates plates and regularly spaced full-height studs in the Wall Main l
 test("frames Door and Window rough openings with structural member roles", () => {
   const building = createDefaultBuildingStructure();
   const line = framedWall([
-    { componentOverrides: [], centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "door-01", kind: "door", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
-    { componentOverrides: [], centerOffset: 156, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
+    { componentOverrides: [], centerOffset: 60, headerBottomHeight: 82.5, headerTypeIdOverride: null, id: "door-01", kind: "door", layerId: "layer-01", name: "Door 01", roughHeight: 82.5, roughWidth: 38, unitHeight: 80, unitWidth: 36, wallOpeningTypeId: "door-type-01" },
+    { componentOverrides: [], centerOffset: 156, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", layerId: "layer-01", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: "window-type-01" },
   ]);
   const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
   const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, undefined, [line], openingTypes);
@@ -67,7 +67,7 @@ test("uses each reusable opening type's header and side-support package", () => 
   windowType.kingStudCountPerSide = 2;
   windowType.windowSillPlateCount = 2;
   const line = framedWall([
-    { componentOverrides: [], centerOffset: 120, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
+    { componentOverrides: [], centerOffset: 120, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", layerId: "layer-01", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
   ]);
   const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
   const solids = wallFramingSolids(line, building.wallTypes[0], building.wallFraming, 109.125, undefined, [line], openingTypes);
@@ -85,7 +85,7 @@ test("models on-edge plies, interior insulation, between-ply spacers, and flat c
   wallType.layers.find((layer) => layer.wallGroup === "main")!.thickness = 5.5;
   const windowType = building.openingTypes.find((type) => type.kind === "window")!;
   const line = framedWall([
-    { componentOverrides: [], centerOffset: 120, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
+    { componentOverrides: [], centerOffset: 120, headerBottomHeight: 84, headerTypeIdOverride: null, id: "window-01", kind: "window", layerId: "layer-01", name: "Window 01", roughHeight: 48.5, roughWidth: 36.5, unitHeight: 48, unitWidth: 36, wallOpeningTypeId: windowType.id },
   ]);
   const openingTypes = new Map(building.openingTypes.map((type) => [type.id, type]));
   const headerTypes = new Map(building.headerTypes.map((type) => [type.id, type]));

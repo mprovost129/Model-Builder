@@ -3,9 +3,9 @@ import {
   roofPlaneSurfaceElevation,
   roofPlaneTakeoffGeometry,
   type ModelDocument,
-  type PlanPoint,
   type PolylineObject,
 } from "./document-model.ts";
+import type { PlanPoint } from "./cad-line.ts";
 
 export type RoofFramingMemberKind =
   | "common-rafter"

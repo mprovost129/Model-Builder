@@ -6,7 +6,16 @@ import {
 
 export const RECENT_PROJECTS_STORAGE_KEY = "slater-woods-omni-design:recent-projects:v1";
 export const MAXIMUM_RECENT_PROJECT_COUNT = 6;
-export const MAXIMUM_RECENT_PROJECT_BYTES = 1_000_000;
+/**
+ * Recent Projects is a convenience copy kept in browser localStorage, which
+ * holds roughly 5 MB per origin for the whole application, shared with the
+ * recovery draft. A large residential project serializes past this on its own:
+ * a 120' x 100' four-level plan is over 1 MB with walls alone. Projects beyond
+ * the limit are reported rather than dropped in silence, and the portable
+ * .mbproj file remains the durable copy. Moving this store to IndexedDB would
+ * remove the ceiling entirely.
+ */
+export const MAXIMUM_RECENT_PROJECT_BYTES = 2_000_000;
 export const MAXIMUM_RECENT_PROJECT_STORAGE_BYTES = 3_500_000;
 
 export type RecentProjectRecord = {
@@ -15,6 +24,19 @@ export type RecentProjectRecord = {
   openedAt: string;
   project: string;
   updatedAt: string;
+};
+
+/** Why a project could not be kept as a Recent Projects convenience copy. */
+export type RecentProjectSkip = {
+  bytes: number;
+  limit: number;
+  reason: "project-too-large" | "storage-full";
+};
+
+export type RecentProjectsUpdate = {
+  records: RecentProjectRecord[];
+  /** Null when the project was stored. Set when it was left out, so the caller can say so. */
+  skipped: RecentProjectSkip | null;
 };
 
 function isIsoDate(value: unknown): value is string {
@@ -69,23 +91,52 @@ export function rememberRecentProject(
   current: RecentProjectRecord[],
   project: ModelBuilderProject,
   openedAt = new Date().toISOString(),
-): RecentProjectRecord[] {
+): RecentProjectsUpdate {
+  const serialized = serializeProjectDocument(project);
   const record: RecentProjectRecord = {
     id: project.createdAt,
     name: project.name,
     openedAt,
-    project: serializeProjectDocument(project),
+    project: serialized,
     updatedAt: project.updatedAt,
   };
-  const next = [record, ...current.filter((candidate) => candidate.id !== record.id)]
-    .slice(0, MAXIMUM_RECENT_PROJECT_COUNT);
+  const others = current.filter((candidate) => candidate.id !== record.id);
+
+  // A project past the per-record limit would be rejected on the way back in by
+  // validatedRecord, so refuse it here where the caller can still report it.
+  if (serialized.length > MAXIMUM_RECENT_PROJECT_BYTES) {
+    return {
+      records: others.slice(0, MAXIMUM_RECENT_PROJECT_COUNT),
+      skipped: { bytes: serialized.length, limit: MAXIMUM_RECENT_PROJECT_BYTES, reason: "project-too-large" },
+    };
+  }
+
+  const next = [record, ...others].slice(0, MAXIMUM_RECENT_PROJECT_COUNT);
+  const records: RecentProjectRecord[] = [];
   let storedBytes = 2;
-  return next.filter((candidate) => {
+  let currentProjectKept = false;
+  next.forEach((candidate) => {
     const candidateBytes = JSON.stringify(candidate).length + 1;
-    if (storedBytes + candidateBytes > MAXIMUM_RECENT_PROJECT_STORAGE_BYTES) return false;
+    if (storedBytes + candidateBytes > MAXIMUM_RECENT_PROJECT_STORAGE_BYTES) return;
     storedBytes += candidateBytes;
-    return true;
+    if (candidate.id === record.id) currentProjectKept = true;
+    records.push(candidate);
   });
+
+  return {
+    records,
+    skipped: currentProjectKept
+      ? null
+      : { bytes: serialized.length, limit: MAXIMUM_RECENT_PROJECT_STORAGE_BYTES, reason: "storage-full" },
+  };
+}
+
+/** A short, user-facing explanation of why a project is not in Recent Projects. */
+export function describeRecentProjectSkip(skip: RecentProjectSkip): string {
+  const megabytes = (skip.bytes / 1_000_000).toFixed(1);
+  return skip.reason === "project-too-large"
+    ? `This project is ${megabytes} MB, past the ${(skip.limit / 1_000_000).toFixed(0)} MB limit for a quick-open copy. Your saved .mbproj file is unaffected; reopen it with Open Project.`
+    : `Recent Projects is full, so this ${megabytes} MB project was not kept as a quick-open copy. Your saved .mbproj file is unaffected; reopen it with Open Project.`;
 }
 
 export function removeRecentProject(

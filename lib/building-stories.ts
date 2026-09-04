@@ -1,4 +1,5 @@
 import { snapToSixteenth } from "./architectural-units.ts";
+import { deepEqual } from "./deep-equal.ts";
 
 export type AssemblyKind = "ceiling-finish" | "ceiling-structure" | "floor-finish" | "floor-structure" | "roof-assembly" | "wall-structure";
 export const ASSEMBLY_LAYER_ROLES = ["air-gap", "finish", "framing", "insulation", "membrane", "sheathing", "structure", "substrate"] as const;
@@ -1462,7 +1463,10 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
 }
 
 export function buildingStructuresEqual(first: BuildingStructure, second: BuildingStructure): boolean {
-  return JSON.stringify(first) === JSON.stringify(second);
+  // Must be order-insensitive: the project-file readers rebuild these objects
+  // with their own key order, so a stringify comparison reported a saved and
+  // reopened building as different from the identical in-memory one.
+  return deepEqual(first, second);
 }
 
 export function calculateStoryElevations(building: BuildingStructure): CalculatedStoryElevations[] {

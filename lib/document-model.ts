@@ -7,6 +7,7 @@ import {
   type ArcGeometry,
   type ArcGrip,
 } from "./cad-arc.ts";
+import { deepEqual } from "./deep-equal.ts";
 import {
   boxWorldBounds,
   boxWorldPoint,
@@ -147,7 +148,6 @@ import {
 import {
   DEFAULT_LAYER_ID,
   DEFAULT_LAYER_SET_ID,
-  DEFAULT_REFERENCE_LAYER_SET_ID,
   DEFAULT_SAVED_PLAN_VIEW_ID,
   REFERENCE_DISPLAY_MODES,
   ROOM_ANNOTATION_KINDS,
@@ -1642,13 +1642,13 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.activeLayerId === b.activeLayerId &&
     a.activeSavedPlanViewId === b.activeSavedPlanViewId &&
     buildingStructuresEqual(a.building, b.building) &&
-    JSON.stringify(a.projectInformation ?? DEFAULT_PROJECT_INFORMATION) === JSON.stringify(b.projectInformation ?? DEFAULT_PROJECT_INFORMATION) &&
+    deepEqual(a.projectInformation ?? DEFAULT_PROJECT_INFORMATION, b.projectInformation ?? DEFAULT_PROJECT_INFORMATION) &&
     a.arcs.length === b.arcs.length &&
     a.arcs.every((arc, index) => {
       const other = b.arcs[index];
       return other !== undefined && arc.id === other.id && arc.layerId === other.layerId &&
         arc.locked === other.locked && arc.name === other.name && arc.storyId === other.storyId && arc.type === other.type &&
-        JSON.stringify(arc.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) &&
+        deepEqual(arc.fillOverride ?? null, other.fillOverride ?? null) &&
         arcGeometriesEqual(arc, other);
     }) &&
     a.circles.length === b.circles.length &&
@@ -1656,7 +1656,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
       const other = b.circles[index];
       return other !== undefined && circle.id === other.id && circle.layerId === other.layerId &&
         circle.locked === other.locked && circle.name === other.name && circle.storyId === other.storyId && circle.type === other.type &&
-        JSON.stringify(circle.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) &&
+        deepEqual(circle.fillOverride ?? null, other.fillOverride ?? null) &&
         circleGeometriesEqual(circle, other);
     }) &&
     a.groups.length === b.groups.length &&
@@ -1679,15 +1679,15 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         layer.visible === other.visible &&
         layer.locked === other.locked;
     }) &&
-    JSON.stringify(a.layerSets) === JSON.stringify(b.layerSets) &&
+    deepEqual(a.layerSets, b.layerSets) &&
     a.lines.length === b.lines.length &&
     a.lines.every((line, index) => {
       const other = b.lines[index];
       return other !== undefined && line.id === other.id && line.layerId === other.layerId &&
-        JSON.stringify(line.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
+        deepEqual(line.fillOverride ?? null, other.fillOverride ?? null) && line.architecturalRole === other.architecturalRole && line.foundationSupportWallId === other.foundationSupportWallId && line.foundationWallTypeId === other.foundationWallTypeId && line.locked === other.locked && line.name === other.name && line.storyId === other.storyId && line.type === other.type && line.wallExteriorSide === other.wallExteriorSide && line.wallJoinPriority === other.wallJoinPriority && line.wallStartJoinMode === other.wallStartJoinMode && line.wallEndJoinMode === other.wallEndJoinMode && line.wallReferenceLine === other.wallReferenceLine && line.wallTypeId === other.wallTypeId &&
         line.wallOpenings.length === other.wallOpenings.length && line.wallOpenings.every((opening, openingIndex) => {
           const otherOpening = other.wallOpenings[openingIndex];
-          return otherOpening !== undefined && JSON.stringify(opening.fillOverride ?? null) === JSON.stringify(otherOpening.fillOverride ?? null) && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.layerId === otherOpening.layerId && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId && JSON.stringify(opening.componentOverrides) === JSON.stringify(otherOpening.componentOverrides);
+          return otherOpening !== undefined && deepEqual(opening.fillOverride ?? null, otherOpening.fillOverride ?? null) && opening.centerOffset === otherOpening.centerOffset && opening.headerBottomHeight === otherOpening.headerBottomHeight && opening.headerTypeIdOverride === otherOpening.headerTypeIdOverride && opening.id === otherOpening.id && opening.kind === otherOpening.kind && opening.layerId === otherOpening.layerId && opening.name === otherOpening.name && opening.roughHeight === otherOpening.roughHeight && opening.roughWidth === otherOpening.roughWidth && opening.unitHeight === otherOpening.unitHeight && opening.unitWidth === otherOpening.unitWidth && opening.wallOpeningTypeId === otherOpening.wallOpeningTypeId && deepEqual(opening.componentOverrides, otherOpening.componentOverrides);
         }) &&
         lineGeometriesEqual(line, other);
     }) &&
@@ -1695,13 +1695,13 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.polylines.every((polyline, index) => {
       const other = b.polylines[index];
       return other !== undefined && polyline.id === other.id && polyline.layerId === other.layerId &&
-        JSON.stringify(polyline.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && JSON.stringify(polyline.roofSettings) === JSON.stringify(other.roofSettings) && polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.roofBearingWallId === other.roofBearingWallId && polyline.roofTypeId === other.roofTypeId && polyline.shape === other.shape && polyline.storyId === other.storyId &&
+        deepEqual(polyline.fillOverride ?? null, other.fillOverride ?? null) && deepEqual(polyline.roofSettings, other.roofSettings) && polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.roofBearingWallId === other.roofBearingWallId && polyline.roofTypeId === other.roofTypeId && polyline.shape === other.shape && polyline.storyId === other.storyId &&
         polylineGeometriesEqual(polyline, other);
     }) &&
     (a.rooms ?? []).length === (b.rooms ?? []).length &&
     (a.rooms ?? []).every((room, index) => {
       const other = (b.rooms ?? [])[index];
-      return other !== undefined && JSON.stringify(room.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && room.id === other.id && room.layerId === other.layerId && room.name === other.name && room.roomType === other.roomType && room.storyId === other.storyId &&
+      return other !== undefined && deepEqual(room.fillOverride ?? null, other.fillOverride ?? null) && room.id === other.id && room.layerId === other.layerId && room.name === other.name && room.roomType === other.roomType && room.storyId === other.storyId &&
         room.roughFloorOffset === other.roughFloorOffset && room.roughCeilingHeightOverride === other.roughCeilingHeightOverride &&
         room.boundaryWallIds.length === other.boundaryWallIds.length && room.boundaryWallIds.every((wallId, wallIndex) => wallId === other.boundaryWallIds[wallIndex]) &&
         polylineGeometriesEqual(room.boundary, other.boundary) &&
@@ -1709,13 +1709,13 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
           const otherOpening = other.platformOpenings[openingIndex];
           return otherOpening !== undefined && opening.id === otherOpening.id && opening.name === otherOpening.name && opening.kind === otherOpening.kind && opening.cuts === otherOpening.cuts && opening.verticalOpeningId === otherOpening.verticalOpeningId && polylineGeometriesEqual(opening.boundary, otherOpening.boundary);
         }) &&
-        JSON.stringify(room.floorStructureOverride) === JSON.stringify(other.floorStructureOverride) &&
-        JSON.stringify(room.floorFinishOverride) === JSON.stringify(other.floorFinishOverride) &&
-        JSON.stringify(room.ceilingStructureOverride) === JSON.stringify(other.ceilingStructureOverride) &&
-        JSON.stringify(room.ceilingFinishOverride) === JSON.stringify(other.ceilingFinishOverride);
+        deepEqual(room.floorStructureOverride, other.floorStructureOverride) &&
+        deepEqual(room.floorFinishOverride, other.floorFinishOverride) &&
+        deepEqual(room.ceilingStructureOverride, other.ceilingStructureOverride) &&
+        deepEqual(room.ceilingFinishOverride, other.ceilingFinishOverride);
     }) &&
-    JSON.stringify(a.roomAnnotations) === JSON.stringify(b.roomAnnotations) &&
-    JSON.stringify(a.savedPlanViews) === JSON.stringify(b.savedPlanViews) &&
+    deepEqual(a.roomAnnotations, b.roomAnnotations) &&
+    deepEqual(a.savedPlanViews, b.savedPlanViews) &&
     a.objects.length === b.objects.length &&
     a.objects.every((object, index) => {
       const other = b.objects[index];
@@ -1723,7 +1723,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
         other !== undefined &&
         object.id === other.id &&
         object.groupId === other.groupId &&
-        JSON.stringify(object.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) &&
+        deepEqual(object.fillOverride ?? null, other.fillOverride ?? null) &&
         object.layerId === other.layerId &&
         object.locked === other.locked &&
         object.name === other.name &&
@@ -5121,23 +5121,14 @@ export function addLayer(document: ModelDocument): {
     visible: true,
   };
   const layers = [...document.layers.map(cloneLayer), layer];
+  // Clone the whole document and override only what this operation changes, so a
+  // future field added to ModelDocument cannot be silently dropped here.
   return {
     document: {
-      activeLayerSetId: document.activeLayerSetId,
+      ...cloneDocument(document),
       activeLayerId: layer.id,
-      activeSavedPlanViewId: document.activeSavedPlanViewId,
-      arcs: document.arcs.map(cloneArcObject),
-      building: cloneBuildingStructure(document.building),
-      circles: document.circles.map(cloneCircleObject),
-      groups: document.groups.map(cloneGroup),
       layers,
       layerSets: document.layerSets.map((set) => ({ ...cloneLayerSet(set), layers: [...set.layers.map((state) => ({ ...state })), layerSetStateFromLayer(layer)] })),
-      lines: document.lines.map(cloneLineObject),
-      objects: document.objects.map(cloneBoxObject),
-      polylines: document.polylines.map(clonePolylineObject),
-      rooms: (document.rooms ?? []).map(cloneRoomObject),
-      roomAnnotations: document.roomAnnotations.map(cloneRoomAnnotation),
-      savedPlanViews: document.savedPlanViews.map(cloneSavedPlanView),
     },
     layer: cloneLayer(layer),
   };

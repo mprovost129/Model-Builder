@@ -25,6 +25,16 @@ const eslintConfig = defineConfig([
   jsxA11y.flatConfigs.recommended,
   next.configs["core-web-vitals"],
   {
+    // Cloudflare bindings are declared by merging into the global `Cloudflare`
+    // namespace, which is the pattern `wrangler types` itself generates. The
+    // exception lives in config rather than as an inline disable so application
+    // source stays free of rule suppressions.
+    files: ["db/**/*.ts", "worker/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-namespace": "off",
+    },
+  },
+  {
     languageOptions: {
       globals: {
         ...globals.browser,

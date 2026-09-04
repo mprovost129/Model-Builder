@@ -1057,10 +1057,12 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
   const roofSettings = supportsRoofPlanes && architecturalRole === "roof-plane" ? readRoofSettings(value.roofSettings, supportsRoofFramingLayout) : null;
   if (supportsRoofPlanes && architecturalRole === "roof-plane" && !(value.roofBearingWallId === null || typeof value.roofBearingWallId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.roofBearingWallId))) return null;
   const roofBearingWallId = supportsRoofPlanes && architecturalRole === "roof-plane" ? value.roofBearingWallId as string | null : null;
-  const roofTypeId = supportsRoofPlanes && architecturalRole === "roof-plane"
+  const candidateRoofTypeId: unknown = supportsRoofPlanes && architecturalRole === "roof-plane"
     ? supportsRoofTypes ? value.roofTypeId : fallbackRoofTypeId
     : null;
-  if (architecturalRole === "roof-plane" && (typeof roofTypeId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(roofTypeId))) return null;
+  if (architecturalRole === "roof-plane" && (typeof candidateRoofTypeId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(candidateRoofTypeId))) return null;
+  // Past the guard a roof plane always holds a validated string; anything else is null.
+  const roofTypeId: string | null = typeof candidateRoofTypeId === "string" ? candidateRoofTypeId : null;
   if (architecturalRole === undefined || ((architecturalRole === "floor-platform" || architecturalRole === "roof-plane") && !geometry.closed) || (architecturalRole === "roof-plane" && (!roofSettings || geometry.vertices.length < 3 || (geometry.bulges ?? []).some((bulge) => Math.abs(bulge) > 1e-10)))) return null;
   const fillOverride = readFillOverride(value.fillOverride);
   if (fillOverride === undefined) return null;

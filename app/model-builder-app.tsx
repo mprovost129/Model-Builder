@@ -449,7 +449,10 @@ import {
 import {
   parseRecentProjects,
   RECENT_PROJECTS_STORAGE_KEY,
+  describeRecentProjectSkip,
+  MAXIMUM_RECENT_PROJECT_BYTES,
   rememberRecentProject,
+  type RecentProjectSkip,
   removeRecentProject,
   serializeRecentProjects,
   type RecentProjectRecord,
@@ -1653,13 +1656,22 @@ type ViewportObject = {
   mesh: THREE.Mesh;
 };
 
-type ViewportLine = {
+/**
+ * The geometry half of a viewport line view. The update* helpers below only
+ * rewrite buffers, so they accept this narrower shape. That lets transient
+ * preview views be passed without inventing a material to satisfy the type.
+ */
+type ViewportLineGeometry = {
   fill?: THREE.Mesh;
   fillGeometry?: THREE.BufferGeometry;
-  fillMaterial?: THREE.MeshBasicMaterial;
   geometry: THREE.BufferGeometry;
-  material: THREE.LineDashedMaterial;
   line: THREE.Line;
+};
+
+/** A fully owned line view, including the materials this module disposes. */
+type ViewportLine = ViewportLineGeometry & {
+  fillMaterial?: THREE.MeshBasicMaterial;
+  material: THREE.LineDashedMaterial;
 };
 
 type FloorPlatformView = {
@@ -1668,7 +1680,7 @@ type FloorPlatformView = {
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
   meshes: THREE.Mesh[];
-  outlineMaterials: THREE.LineDashedMaterial[];
+  outlineMaterials: THREE.LineBasicMaterial[];
   outlines: THREE.Line[];
 };
 
@@ -2333,7 +2345,7 @@ function createViewportLine(scene: THREE.Scene, lineId: string): ViewportLine {
   return { geometry, material, line };
 }
 
-function updateViewportLine(view: ViewportLine, geometry: LineGeometry, zOffset = 0.35) {
+function updateViewportLine(view: ViewportLineGeometry, geometry: LineGeometry, zOffset = 0.35) {
   view.geometry.setFromPoints([
     new THREE.Vector3(geometry.start.x, geometry.start.y, geometry.start.z + zOffset),
     new THREE.Vector3(geometry.end.x, geometry.end.y, geometry.end.z + zOffset),
@@ -2375,7 +2387,7 @@ function createViewportPolyline(scene: THREE.Scene, polylineId: string): Viewpor
   return view;
 }
 
-function updateViewportPolyline(view: ViewportLine, polyline: PolylineGeometry, zOffset = 0.45) {
+function updateViewportPolyline(view: ViewportLineGeometry, polyline: PolylineGeometry, zOffset = 0.45) {
   const points = polylinePathPoints(polyline).map((point) => new THREE.Vector3(point.x, point.y, polyline.elevation + zOffset));
   view.geometry.setFromPoints(points);
   view.geometry.computeBoundingSphere();
@@ -2415,7 +2427,7 @@ function createViewportCircle(scene: THREE.Scene, circleId: string): ViewportLin
   return view;
 }
 
-function updateViewportCircle(view: ViewportLine, circle: CircleGeometry, zOffset = 0.5) {
+function updateViewportCircle(view: ViewportLineGeometry, circle: CircleGeometry, zOffset = 0.5) {
   const points = Array.from({ length: 97 }, (_, index) => {
     const angle = index / 96 * Math.PI * 2;
     return new THREE.Vector3(
@@ -2436,7 +2448,7 @@ function createViewportArc(scene: THREE.Scene, arcId: string): ViewportLine {
   return view;
 }
 
-function updateViewportArc(view: ViewportLine, arc: ArcGeometry, zOffset = 0.55) {
+function updateViewportArc(view: ViewportLineGeometry, arc: ArcGeometry, zOffset = 0.55) {
   const segmentCount = Math.max(16, Math.ceil(arcSweepAngle(arc) / 4));
   const points = Array.from({ length: segmentCount + 1 }, (_, index) => {
     const point = arcPointAtFraction(arc, index / segmentCount);
@@ -3577,7 +3589,9 @@ function Viewport({
     renderer.shadowMap.type = THREE.PCFShadowMap;
     mount.appendChild(renderer.domElement);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
+    // The viewport swaps between perspective and orthographic cameras, so the
+    // controls must be parameterized over both rather than inferring the first one.
+    const controls = new OrbitControls<THREE.PerspectiveCamera | THREE.OrthographicCamera>(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
@@ -5420,7 +5434,7 @@ function Viewport({
           trackingGuide.visible = false;
           if (boundary) {
             updateViewportPolyline(
-              { geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview },
+              { geometry: linePreviewGeometry, line: linePreview },
               boundary.geometry,
               0.8,
             );
@@ -5605,7 +5619,7 @@ function Viewport({
               ? mirrorModelEntities(before, selectedModifyRefs(), axisStart, snapped.point, mirrorKeepSourceRef.current)
               : null;
             updateViewportLine(
-              { geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview },
+              { geometry: linePreviewGeometry, line: linePreview },
               { start: axisStart, end: snapped.point },
               0.8,
             );
@@ -5649,7 +5663,6 @@ function Viewport({
             updateViewportLine(
               {
                 geometry: linePreviewGeometry,
-                material: linePreview.material as THREE.LineBasicMaterial,
                 line: linePreview,
               },
               { start: base, end: snapped.point },
@@ -5711,7 +5724,7 @@ function Viewport({
             previewArc = arcGeometryFromMethodPointer(method, points, snapped.point, continueSeed);
             valid = Boolean(previewArc);
           } else if (points.length === 1) {
-            updateViewportLine({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, { start: points[0], end: snapped.point }, 0.8);
+            updateViewportLine({ geometry: linePreviewGeometry, line: linePreview }, { start: points[0], end: snapped.point }, 0.8);
             linePreview.computeLineDistances();
             linePreview.visible = true;
             updateTrackingGuide(points[0], snapped.point, snapped.snapKind, snapped.guideOrigin);
@@ -5723,7 +5736,7 @@ function Viewport({
             trackingGuide.visible = false;
           }
           if (previewArc) {
-            updateViewportArc({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, previewArc, 0.8);
+            updateViewportArc({ geometry: linePreviewGeometry, line: linePreview }, previewArc, 0.8);
             linePreview.computeLineDistances();
             linePreview.visible = true;
             if (anchor) updateTrackingGuide(anchor, snapped.point, snapped.snapKind, snapped.guideOrigin);
@@ -5758,7 +5771,7 @@ function Viewport({
               radius = circle?.radius ?? 0;
             }
             if (circle) {
-              updateViewportCircle({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, circle, 0.8);
+              updateViewportCircle({ geometry: linePreviewGeometry, line: linePreview }, circle, 0.8);
               linePreview.computeLineDistances();
               linePreview.visible = true;
             } else {
@@ -5777,7 +5790,7 @@ function Viewport({
           if (circlePointCompletes(method, points.length)) {
             const circle = circleGeometryFromPointer(method, points, snapped.point);
             if (circle) {
-              updateViewportCircle({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, circle, 0.8);
+              updateViewportCircle({ geometry: linePreviewGeometry, line: linePreview }, circle, 0.8);
               linePreview.computeLineDistances();
               linePreview.visible = true;
               if (anchor) updateTrackingGuide(anchor, snapped.point, snapped.snapKind, snapped.guideOrigin);
@@ -5789,7 +5802,7 @@ function Viewport({
               callbacksRef.current.onDragStatus({ distance: 0, kind: "circle", snapped: snapped.snapped, valid: false });
             }
           } else if (anchor) {
-            updateViewportLine({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, { start: anchor, end: snapped.point }, 0.8);
+            updateViewportLine({ geometry: linePreviewGeometry, line: linePreview }, { start: anchor, end: snapped.point }, 0.8);
             linePreview.computeLineDistances();
             linePreview.visible = true;
             updateTrackingGuide(anchor, snapped.point, snapped.snapKind, snapped.guideOrigin);
@@ -5817,7 +5830,7 @@ function Viewport({
             const dimensions = rectangleDraftDimensions(rectangleStartRef.current, snapped.point, rectangleDraftSettingsRef.current);
             const rectangle = rectangleFromDraftSettings(rectangleStartRef.current, snapped.point, rectangleDraftSettingsRef.current);
             if (rectangle) {
-              updateViewportPolyline({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, rectangle, 0.8);
+              updateViewportPolyline({ geometry: linePreviewGeometry, line: linePreview }, rectangle, 0.8);
               linePreview.computeLineDistances();
               linePreview.visible = true;
               updateTrackingGuide(rectangleStartRef.current, snapped.point, snapped.snapKind, snapped.guideOrigin);
@@ -5852,7 +5865,7 @@ function Viewport({
               ? [...polylinePointsRef.current, through]
               : [...polylinePointsRef.current, snapped.point];
             const bulges = [...polylineBulgesRef.current, previewBulge ?? 0];
-            updateViewportPolyline({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, { bulges, closed: false, elevation: polylineElevationRef.current, vertices, width: polylineWidthRef.current }, 0.8);
+            updateViewportPolyline({ geometry: linePreviewGeometry, line: linePreview }, { bulges, closed: false, elevation: polylineElevationRef.current, vertices, width: polylineWidthRef.current }, 0.8);
             linePreview.computeLineDistances();
             linePreview.visible = true;
             const geometry = { start: anchor!, end: snapped.point };
@@ -5881,7 +5894,7 @@ function Viewport({
             const currentGeometry = { start: lineStartRef.current, end: snapped.point };
             const currentAngle = lineAngle(currentGeometry);
             const currentDistance = lineLength(currentGeometry);
-            updateViewportLine({ geometry: linePreviewGeometry, material: linePreview.material as THREE.LineBasicMaterial, line: linePreview }, { start: lineStartRef.current, end: snapped.point }, 0.8);
+            updateViewportLine({ geometry: linePreviewGeometry, line: linePreview }, { start: lineStartRef.current, end: snapped.point }, 0.8);
             linePreview.computeLineDistances();
             linePreview.visible = true;
             updateTrackingGuide(lineStartRef.current, snapped.point, snapped.snapKind, snapped.guideOrigin);
@@ -6114,31 +6127,34 @@ function Viewport({
         return;
       }
       if (drag.kind === "grip" && drag.grip) {
+        // Capture the narrowed grip: `drag` is a mutable closure variable, so the
+        // narrowing above does not survive into these callbacks.
+        const grip = drag.grip;
         const sourceBox = findBoxObject(drag.before, drag.objectId);
         const coordinateDeltas = Object.fromEntries(
-          drag.grip.axes.map((axis) => {
+          grip.axes.map((axis) => {
             const localAxis = sourceBox ? boxLocalAxis(sourceBox, axis) : { x: 0, y: 0, z: 0 };
             const projected = worldMovement.x * localAxis.x + worldMovement.y * localAxis.y + worldMovement.z * localAxis.z;
             return [axis, snapToSixteenth(projected)];
           }),
         ) as Partial<Record<AxisKey, number>>;
         const outwardDistances = Object.fromEntries(
-          drag.grip.axes.map((axis) => [
+          grip.axes.map((axis) => [
             axis,
-            snapToSixteenth((coordinateDeltas[axis] ?? 0) * drag.grip!.signs[axis]),
+            snapToSixteenth((coordinateDeltas[axis] ?? 0) * grip.signs[axis]),
           ]),
         ) as Partial<Record<AxisKey, number>>;
         const nextBox = sourceBox
-          ? resizeBoxFromGrip(sourceBox, drag.grip, coordinateDeltas)
+          ? resizeBoxFromGrip(sourceBox, grip, coordinateDeltas)
           : null;
-        const dominantDistance = drag.grip.axes.reduce((largest, axis) => {
+        const dominantDistance = grip.axes.reduce((largest, axis) => {
           const distance = outwardDistances[axis] ?? 0;
           return Math.abs(distance) > Math.abs(largest) ? distance : largest;
         }, 0);
         callbacksRef.current.onDragStatus({
           axisDistances: outwardDistances,
           distance: dominantDistance,
-          gripKind: drag.grip.kind,
+          gripKind: grip.kind,
           kind: "grip",
           valid: Boolean(nextBox),
         });
@@ -7679,7 +7695,7 @@ function Viewport({
       view.material.opacity = role === "reference" ? 0.62 : 1;
       view.line.renderOrder = role === "reference" ? 7 : 12;
       view.fillMaterial?.color.setHex(selected ? 0xd9a53f : hovered ? 0x4fb7d6 : Number.parseInt(fill.color.slice(1), 16));
-      if (view.fillMaterial) {
+      if (view.fill && view.fillMaterial) {
         view.fill.visible = Boolean(role !== "hidden" && (layer?.visible ?? true) && fill.visible);
         view.fillMaterial.opacity = selected || hovered ? 0.58 : 0.38;
       }
@@ -7763,7 +7779,7 @@ function Viewport({
       view.line.renderOrder = role === "reference" ? 7 : 12;
       if (view.fillMaterial) view.fillMaterial.color.setHex(Number.parseInt(fill.color.slice(1), 16));
       if (view.fill) {
-        view.fill.visible = Boolean(role !== "hidden" && (layer?.visible ?? true) && fill.visible && polyline.width >= 1 / 16);
+        view.fill.visible = Boolean(role !== "hidden" && (layer?.visible ?? true) && fill.visible && (polyline.width ?? 0) >= 1 / 16);
         view.fill.renderOrder = role === "reference" ? 6 : 11;
       }
     });
@@ -11846,7 +11862,7 @@ export function ModelBuilderApp() {
   const [explorerTab, setExplorerTab] = useState<"building" | "objects" | "layers">("objects");
   const [showStartGuide, setShowStartGuide] = useState(true);
   const [topMenu, setTopMenu] = useState<"edit" | "file" | "help" | "program" | "tools" | "view" | "window" | null>(null);
-  const interfaceTheme = useSyncExternalStore(subscribeInterfaceTheme, storedInterfaceTheme, () => "light");
+  const interfaceTheme = useSyncExternalStore(subscribeInterfaceTheme, storedInterfaceTheme, (): InterfaceTheme => "light");
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
   const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.top);
@@ -11958,18 +11974,24 @@ export function ModelBuilderApp() {
   const recoveryErrorReportedRef = useRef(false);
 
   const storeRecentProject = useCallback((project: ModelBuilderProject) => {
+    let skipped: RecentProjectSkip | null = null;
     setRecentProjects((current) => {
-      const next = rememberRecentProject(current, project);
+      const update = rememberRecentProject(current, project);
       try {
         window.localStorage.setItem(
           RECENT_PROJECTS_STORAGE_KEY,
-          serializeRecentProjects(next),
+          serializeRecentProjects(update.records),
         );
-        return next;
+        skipped = update.skipped;
+        return update.records;
       } catch {
+        skipped = { bytes: 0, limit: MAXIMUM_RECENT_PROJECT_BYTES, reason: "storage-full" };
         return current;
       }
     });
+    // Report rather than drop in silence: a project missing from the dashboard
+    // reads as lost work even though the .mbproj file is intact.
+    if (skipped) setFileNotice({ text: describeRecentProjectSkip(skipped), tone: "error" });
   }, []);
 
   const forgetRecentProject = useCallback((projectId: string) => {

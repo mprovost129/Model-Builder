@@ -354,6 +354,7 @@ test("updates only the selected box geometry", () => {
   const moved = moveBoxFace(selected, 0, 6);
   assert.ok(moved);
   const updated = updateBoxObject(added.document, selected.id, moved);
+  assert.ok(updated);
   assert.equal(updated.objects[0].dimensions.length, 144);
   assert.equal(updated.objects[1].dimensions.length, 150);
 });
@@ -506,6 +507,7 @@ test("stores complete layer appearance in reusable Layer Sets and Saved Plan Vie
 test("moves between Stories through coherent working Plan Views", () => {
   const firstStoryId = DEFAULT_DOCUMENT.building.activeStoryId;
   const building = addBuildingStory(DEFAULT_DOCUMENT.building, firstStoryId, "above");
+  assert.ok(building);
   const secondStoryId = building.activeStoryId;
   building.activeStoryId = firstStoryId;
   const configured = updateDocumentBuilding(DEFAULT_DOCUMENT, building);
@@ -532,6 +534,7 @@ test("moves between Stories through coherent working Plan Views", () => {
 test("resolves and preserves non-editable floor references in Saved Plan Views", () => {
   const firstStoryId = DEFAULT_DOCUMENT.building.activeStoryId;
   const building = addBuildingStory(DEFAULT_DOCUMENT.building, firstStoryId, "above");
+  assert.ok(building);
   const secondStoryId = building.activeStoryId;
   building.activeStoryId = firstStoryId;
   const configured = updateDocumentBuilding(DEFAULT_DOCUMENT, building);
@@ -1139,7 +1142,7 @@ test("Join rejects gaps, closed Polylines, and locked selections", () => {
 });
 
 test("Explode replaces a Rectangle with native Lines while preserving source properties", () => {
-  const layer = addLayer(DEFAULT_DOCUMENT, "Walls");
+  const layer = addLayer(DEFAULT_DOCUMENT);
   assert.ok(layer);
   const active = setActiveLayer(layer.document, layer.layer.id);
   assert.ok(active);
