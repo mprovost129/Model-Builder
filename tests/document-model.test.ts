@@ -12,6 +12,7 @@ import {
   addWallOpening,
   activateLayerSet,
   activateSavedPlanView,
+  assignRoofPlaneType,
   assignWallOpeningType,
   addLayer,
   addBoxObject,
@@ -83,6 +84,7 @@ import {
   platformOpeningContinuityIsValid,
   roomHorizontalPlatformSolution,
   roofPlaneGeometry,
+  roofPlaneLayerTakeoffGeometry,
   roofPlaneReferenceDimensions,
   roofPlaneTakeoffGeometry,
   rotateBoxObjects,
@@ -138,6 +140,7 @@ test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () 
   assert.ok(created);
   assert.equal(created.roofPlane.architecturalRole, "roof-plane");
   assert.equal(created.roofPlane.layerId, STANDARD_LAYER_IDS["roof-plane"]);
+  assert.equal(created.roofPlane.roofTypeId, created.document.building.activeRoofTypeId);
   const geometry = roofPlaneGeometry(created.roofPlane);
   const reference = roofPlaneReferenceDimensions(created.document, created.roofPlane);
   assert.ok(geometry);
@@ -147,6 +150,25 @@ test("creates and edits a heel-driven manual Roof Plane from a framed Wall", () 
   assert.equal(reference.topOfPlateElevation, 109.125);
   assert.equal(reference.heelElevation, 118.375);
   assert.equal(reference.peakElevation, 190.375);
+  const roofTakeoff = roofPlaneTakeoffGeometry(created.document, created.roofPlane);
+  const layerTakeoffs = roofPlaneLayerTakeoffGeometry(created.document, created.roofPlane);
+  assert.ok(roofTakeoff);
+  assert.ok(layerTakeoffs);
+  assert.equal(layerTakeoffs.length, created.document.building.roofTypes[0].layers.length);
+  assert.equal(layerTakeoffs.every((layer) => layer.surfaceArea === roofTakeoff.surfaceArea), true);
+  assert.equal(layerTakeoffs.find((layer) => layer.role === "membrane")?.volume, 0);
+
+  const withSecondRoofType = cloneDocument(created.document);
+  const sourceRoofType = withSecondRoofType.building.roofTypes[0];
+  withSecondRoofType.building.roofTypes.push({
+    ...sourceRoofType,
+    id: "roof-type-02",
+    name: "Metal Roof · Rafter",
+    layers: sourceRoofType.layers.map((layer, index) => ({ ...layer, id: `roof-type-02-${index + 1}` })),
+  });
+  const assigned = assignRoofPlaneType(withSecondRoofType, created.roofPlane.id, "roof-type-02");
+  assert.ok(assigned);
+  assert.equal(assigned.polylines.find((polyline) => polyline.id === created.roofPlane.id)?.roofTypeId, "roof-type-02");
 
   const updated = updateRoofPlane(created.document, created.roofPlane.id, { horizontalRun: 180, overhang: 24, pitchRise: 8 });
   assert.ok(updated);

@@ -129,12 +129,14 @@ import {
   WALL_REFERENCE_LINES,
   type BuildingStructure,
   type BuildingStory,
+  type AssemblyLayerRole,
   type FoundationWallType,
   type LayeredAssembly,
   type OpeningAssemblyComponent,
   type OpeningComponentDepthAnchor,
   type ProductObjectType,
   type RoofSettings,
+  type RoofLayerSide,
   type CalculatedRoofReferenceDimensions,
   type WallOpeningKind,
   type WallOpeningType,
@@ -255,6 +257,8 @@ export type PolylineObject = PolylineGeometry & {
   roofBearingWallId: string | null;
   /** Per-plane copy of the project Roof defaults. Null for ordinary boundaries and floor platforms. */
   roofSettings: RoofSettings | null;
+  /** Reusable layered Roof Type assigned to this plane. */
+  roofTypeId: string | null;
   shape: "polyline" | "rectangle";
   storyId: string;
   type: "polyline";
@@ -289,6 +293,18 @@ export type RoofPlaneTakeoffGeometry = {
   planArea: number;
   slopeFactor: number;
   surfaceArea: number;
+};
+
+export type RoofLayerTakeoffMeasurement = {
+  layerId: string;
+  material: string;
+  name: string;
+  outerOffset: number;
+  role: AssemblyLayerRole;
+  roofSide: RoofLayerSide;
+  surfaceArea: number;
+  thickness: number;
+  volume: number;
 };
 
 export type RoofPlaneJoinResult = {
@@ -671,6 +687,7 @@ export function clonePolylineObject(polyline: PolylineObject): PolylineObject {
     name: polyline.name,
     roofBearingWallId: polyline.roofBearingWallId,
     roofSettings: polyline.roofSettings ? { ...polyline.roofSettings } : null,
+    roofTypeId: polyline.roofTypeId,
     shape: polyline.shape,
     storyId: polyline.storyId,
     type: "polyline",
@@ -1672,7 +1689,7 @@ export function documentsEqual(a: ModelDocument, b: ModelDocument): boolean {
     a.polylines.every((polyline, index) => {
       const other = b.polylines[index];
       return other !== undefined && polyline.id === other.id && polyline.layerId === other.layerId &&
-        JSON.stringify(polyline.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && JSON.stringify(polyline.roofSettings) === JSON.stringify(other.roofSettings) && polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.roofBearingWallId === other.roofBearingWallId && polyline.shape === other.shape && polyline.storyId === other.storyId &&
+        JSON.stringify(polyline.fillOverride ?? null) === JSON.stringify(other.fillOverride ?? null) && JSON.stringify(polyline.roofSettings) === JSON.stringify(other.roofSettings) && polyline.architecturalRole === other.architecturalRole && polyline.locked === other.locked && polyline.name === other.name && polyline.roofBearingWallId === other.roofBearingWallId && polyline.roofTypeId === other.roofTypeId && polyline.shape === other.shape && polyline.storyId === other.storyId &&
         polylineGeometriesEqual(polyline, other);
     }) &&
     (a.rooms ?? []).length === (b.rooms ?? []).length &&
@@ -1762,7 +1779,10 @@ export function updateDocumentBuilding(
   });
   next.polylines = next.polylines.map((polyline) => {
     const change = storyChange(polyline.storyId);
-    return { ...polyline, elevation: snapToSixteenth(polyline.elevation + change.delta), storyId: change.storyId };
+    const roofTypeId = polyline.architecturalRole === "roof-plane" && !building.roofTypes.some((roofType) => roofType.id === polyline.roofTypeId)
+      ? building.activeRoofTypeId
+      : polyline.roofTypeId;
+    return { ...polyline, elevation: snapToSixteenth(polyline.elevation + change.delta), roofTypeId, storyId: change.storyId };
   });
   next.circles = next.circles.map((circle) => {
     const change = storyChange(circle.storyId);
@@ -2617,6 +2637,7 @@ export function addPolylineObject(
     name: uniqueObjectName(document, baseName),
     roofBearingWallId: null,
     roofSettings: null,
+    roofTypeId: null,
     shape,
     storyId: document.building.activeStoryId,
     type: "polyline",
@@ -2669,6 +2690,7 @@ export function updatePolylineObject(document: ModelDocument, polylineId: string
       elevation: candidate.architecturalRole === "floor-platform" || candidate.architecturalRole === "roof-plane" ? candidate.elevation : geometry.elevation,
       roofBearingWallId: geometry.closed && candidate.architecturalRole !== "roof-plane" ? candidate.roofBearingWallId : null,
       roofSettings: geometry.closed ? candidate.roofSettings : null,
+      roofTypeId: geometry.closed ? candidate.roofTypeId : null,
     } : candidate,
   );
   const updatedPolyline = updated.find((candidate) => candidate.id === polylineId);
@@ -2684,7 +2706,7 @@ export function createFloorPlatformFromPolyline(document: ModelDocument, polylin
   const roughFloorElevation = calculateStoryElevations(document.building).find((candidate) => candidate.storyId === polyline.storyId)?.roughFloorElevation;
   if (roughFloorElevation === undefined) return null;
   return withPolylines(document, document.polylines.map((candidate) => candidate.id === polylineId
-    ? { ...clonePolylineObject(candidate), architecturalRole: "floor-platform", elevation: roughFloorElevation, layerId: STANDARD_LAYER_IDS["floor-platform"], name: candidate.name.startsWith("Floor Platform") ? candidate.name : uniqueObjectName(document, `Floor Platform ${candidate.name}`), roofBearingWallId: null, roofSettings: null }
+    ? { ...clonePolylineObject(candidate), architecturalRole: "floor-platform", elevation: roughFloorElevation, layerId: STANDARD_LAYER_IDS["floor-platform"], name: candidate.name.startsWith("Floor Platform") ? candidate.name : uniqueObjectName(document, `Floor Platform ${candidate.name}`), roofBearingWallId: null, roofSettings: null, roofTypeId: null }
     : candidate));
 }
 
@@ -2692,7 +2714,7 @@ export function removeFloorPlatformRole(document: ModelDocument, polylineId: str
   const polyline = findPolylineObject(document, polylineId);
   if (!polyline || polyline.architecturalRole !== "floor-platform" || !polylineIsEditable(document, polyline)) return null;
   return withPolylines(document, document.polylines.map((candidate) => candidate.id === polylineId
-    ? { ...clonePolylineObject(candidate), architecturalRole: null, roofBearingWallId: null, roofSettings: null }
+    ? { ...clonePolylineObject(candidate), architecturalRole: null, roofBearingWallId: null, roofSettings: null, roofTypeId: null }
     : candidate));
 }
 
@@ -2881,6 +2903,31 @@ export function roofPlaneTakeoffGeometry(document: ModelDocument, polyline: Poly
   return { edges, planArea, slopeFactor, surfaceArea: planArea * slopeFactor };
 }
 
+export function roofPlaneLayerTakeoffGeometry(document: ModelDocument, polyline: PolylineObject): RoofLayerTakeoffMeasurement[] | null {
+  const takeoff = roofPlaneTakeoffGeometry(document, polyline);
+  const roofType = document.building.roofTypes.find((candidate) => candidate.id === polyline.roofTypeId);
+  if (!takeoff || !roofType || roofType.kind !== "roof-assembly") return null;
+  let exteriorOffset = 0;
+  const exterior = [...roofType.layers].reverse().flatMap((layer) => {
+    if (layer.roofSide !== "exterior") return [];
+    exteriorOffset += layer.thickness;
+    return [{ layerId: layer.id, material: layer.material, name: layer.name, outerOffset: exteriorOffset, role: layer.role, roofSide: layer.roofSide, surfaceArea: takeoff.surfaceArea, thickness: layer.thickness, volume: takeoff.surfaceArea * layer.thickness }];
+  }).reverse();
+  let interiorOffset = 0;
+  const interior = roofType.layers.flatMap((layer) => {
+    if (layer.roofSide !== "interior") return [];
+    interiorOffset += layer.thickness;
+    return [{ layerId: layer.id, material: layer.material, name: layer.name, outerOffset: -interiorOffset, role: layer.role, roofSide: layer.roofSide, surfaceArea: takeoff.surfaceArea, thickness: layer.thickness, volume: takeoff.surfaceArea * layer.thickness }];
+  });
+  return [...exterior, ...interior];
+}
+
+export function assignRoofPlaneType(document: ModelDocument, polylineId: string, roofTypeId: string): ModelDocument | null {
+  const source = findPolylineObject(document, polylineId);
+  if (!source || source.architecturalRole !== "roof-plane" || !polylineIsEditable(document, source) || !document.building.roofTypes.some((roofType) => roofType.id === roofTypeId)) return null;
+  return withPolylines(document, document.polylines.map((polyline) => polyline.id === polylineId ? { ...clonePolylineObject(polyline), roofTypeId } : polyline));
+}
+
 function clipRoofPlaneToSurfaceSide(polyline: PolylineObject, a: number, b: number, c: number, keepSign: 1 | -1): PolylineObject | null {
   const signed = (point: PlanPoint) => (a * point.x + b * point.y + c) * keepSign;
   if (signed(polyline.vertices[0]) < -1e-7 || signed(polyline.vertices[1]) < -1e-7) return null;
@@ -2976,6 +3023,7 @@ export function createRoofPlaneFromWall(document: ModelDocument, wallId: string,
     name: uniqueObjectName(document, `Roof Plane ${number}`),
     roofBearingWallId: wall.id,
     roofSettings,
+    roofTypeId: document.building.activeRoofTypeId,
     shape: "polyline",
     storyId: wall.storyId,
     type: "polyline",
@@ -3125,7 +3173,7 @@ export function removeRoofPlaneRole(document: ModelDocument, polylineId: string)
   const polyline = findPolylineObject(document, polylineId);
   if (!polyline || polyline.architecturalRole !== "roof-plane" || !polylineIsEditable(document, polyline)) return null;
   return withPolylines(document, document.polylines.map((candidate) => candidate.id === polylineId
-    ? { ...clonePolylineObject(candidate), architecturalRole: null, layerId: DEFAULT_LAYER_ID, roofBearingWallId: null, roofSettings: null }
+    ? { ...clonePolylineObject(candidate), architecturalRole: null, layerId: DEFAULT_LAYER_ID, roofBearingWallId: null, roofSettings: null, roofTypeId: null }
     : candidate));
 }
 
@@ -4159,7 +4207,7 @@ export function trimModelEntity(
     working.polylines = working.polylines.filter((polyline) => polyline.id !== source.id);
     pieces.forEach((geometry, index) => {
       if (index === 0) {
-        working.polylines.push({ ...source, ...geometry, architecturalRole: geometry.closed ? source.architecturalRole : null, roofBearingWallId: geometry.closed ? source.roofBearingWallId : null, roofSettings: geometry.closed ? source.roofSettings : null, shape: "polyline" });
+        working.polylines.push({ ...source, ...geometry, architecturalRole: geometry.closed ? source.architecturalRole : null, roofBearingWallId: geometry.closed ? source.roofBearingWallId : null, roofSettings: geometry.closed ? source.roofSettings : null, roofTypeId: geometry.closed ? source.roofTypeId : null, shape: "polyline" });
         resultRefs.push(ref);
       } else {
         const number = nextPolylineNumber(working);
@@ -4172,6 +4220,7 @@ export function trimModelEntity(
           name: uniqueObjectName(working, `${source.name.slice(0, 115).trimEnd()} Trim`),
           roofBearingWallId: geometry.closed ? source.roofBearingWallId : null,
           roofSettings: geometry.closed ? source.roofSettings : null,
+          roofTypeId: geometry.closed ? source.roofTypeId : null,
           shape: "polyline",
         };
         working.polylines.push(polyline);
@@ -4273,7 +4322,7 @@ export function breakModelEntity(
     working.polylines = working.polylines.filter((polyline) => polyline.id !== source.id);
     pieces.forEach((geometry, index) => {
       if (index === 0) {
-        working.polylines.push({ ...source, ...geometry, architecturalRole: geometry.closed ? source.architecturalRole : null, roofBearingWallId: geometry.closed ? source.roofBearingWallId : null, roofSettings: geometry.closed ? source.roofSettings : null, shape: "polyline" });
+        working.polylines.push({ ...source, ...geometry, architecturalRole: geometry.closed ? source.architecturalRole : null, roofBearingWallId: geometry.closed ? source.roofBearingWallId : null, roofSettings: geometry.closed ? source.roofSettings : null, roofTypeId: geometry.closed ? source.roofTypeId : null, shape: "polyline" });
         resultRefs.push(ref);
       } else {
         const number = nextPolylineNumber(working);
@@ -4285,6 +4334,7 @@ export function breakModelEntity(
           name: uniqueObjectName(working, `${source.name.slice(0, 114).trimEnd()} Break`),
           roofBearingWallId: geometry.closed ? source.roofBearingWallId : null,
           roofSettings: geometry.closed ? source.roofSettings : null,
+          roofTypeId: geometry.closed ? source.roofTypeId : null,
           shape: "polyline",
         };
         working.polylines.push(polyline);
@@ -4411,6 +4461,7 @@ export function joinModelEntities(
       name: preserve ? sourceName : uniqueObjectName(working, `${sourceName.slice(0, 115).trimEnd()} Join`),
       roofBearingWallId: preserve && primary.kind === "polyline" ? (primaryEntity as PolylineObject).roofBearingWallId : null,
       roofSettings: preserve && primary.kind === "polyline" ? (primaryEntity as PolylineObject).roofSettings : null,
+      roofTypeId: preserve && primary.kind === "polyline" ? (primaryEntity as PolylineObject).roofTypeId : null,
       shape: "polyline",
       storyId,
       type: "polyline",

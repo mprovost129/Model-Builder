@@ -1,6 +1,6 @@
 import { snapToSixteenth } from "./architectural-units.ts";
 
-export type AssemblyKind = "ceiling-finish" | "ceiling-structure" | "floor-finish" | "floor-structure" | "wall-structure";
+export type AssemblyKind = "ceiling-finish" | "ceiling-structure" | "floor-finish" | "floor-structure" | "roof-assembly" | "wall-structure";
 export const ASSEMBLY_LAYER_ROLES = ["air-gap", "finish", "framing", "insulation", "membrane", "sheathing", "structure", "substrate"] as const;
 export type AssemblyLayerRole = (typeof ASSEMBLY_LAYER_ROLES)[number];
 export const STORY_PURPOSES = ["standard", "basement", "crawlspace", "slab-on-grade"] as const;
@@ -48,6 +48,8 @@ export const WALL_USES = ["exterior", "interior-bearing", "interior-partition"] 
 export type WallUse = (typeof WALL_USES)[number];
 export const ROOF_FRAMING_METHODS = ["rafters", "trusses"] as const;
 export type RoofFramingMethod = (typeof ROOF_FRAMING_METHODS)[number];
+export const ROOF_LAYER_SIDES = ["exterior", "interior"] as const;
+export type RoofLayerSide = (typeof ROOF_LAYER_SIDES)[number];
 export const OPENING_COMPONENT_ROLES = ["frame", "jamb", "sash", "panel", "glazing", "mullion", "trim", "threshold", "hardware"] as const;
 export type OpeningComponentRole = (typeof OPENING_COMPONENT_ROLES)[number];
 export const OPENING_COMPONENT_GEOMETRIES = ["perimeter", "panel", "panel-grid", "fixed-sash", "single-hung-sashes", "double-hung-sashes", "casement-sashes", "awning-sash", "sliding-sashes", "vertical-divider", "horizontal-divider", "vertical-prairie-divider", "horizontal-prairie-divider"] as const;
@@ -84,6 +86,8 @@ export type AssemblyLayer = {
   material: string;
   name: string;
   role: AssemblyLayerRole;
+  /** Roof-only placement relative to the structural reference plane. */
+  roofSide?: RoofLayerSide;
   thickness: number;
   /** Required for wall assemblies; omitted for horizontal assemblies. */
   wallGroup?: WallLayerGroup;
@@ -346,6 +350,7 @@ export type CalculatedRoofReferenceDimensions = {
 export type BuildingStructure = {
   activeDoorTypeId: string;
   activeFoundationWallTypeId: string;
+  activeRoofTypeId: string;
   activeWindowTypeId: string;
   activeWallUse: WallUse;
   activeWallTypeId: string;
@@ -360,6 +365,7 @@ export type BuildingStructure = {
   openingTypes: WallOpeningType[];
   productObjectTypes: ProductObjectType[];
   roofSettings: RoofSettings;
+  roofTypes: LayeredAssembly[];
   stories: BuildingStory[];
   wallFraming: WallFramingSettings;
   wallTypes: LayeredAssembly[];
@@ -385,6 +391,7 @@ export const MAXIMUM_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_FOUNDATION_WALL_TYPE_COUNT = 32;
 export const MAXIMUM_WALL_OPENING_TYPE_COUNT = 64;
 export const MAXIMUM_WALL_HEADER_TYPE_COUNT = 32;
+export const MAXIMUM_ROOF_TYPE_COUNT = 32;
 export const MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT = 128;
 export const MAXIMUM_OPENING_COMPONENT_COUNT = 48;
 export const MAXIMUM_ASSEMBLY_LAYER_COUNT = 32;
@@ -846,6 +853,21 @@ export function createDefaultRoofSettings(): RoofSettings {
   };
 }
 
+export function createDefaultRoofType(): LayeredAssembly {
+  return {
+    id: "roof-type-01",
+    kind: "roof-assembly",
+    name: "Asphalt Shingle Roof · Rafter",
+    layers: [
+      { id: "roof-type-01-01", material: "Asphalt Shingles", name: "Asphalt Shingles", role: "finish", roofSide: "exterior", thickness: 0.25 },
+      { id: "roof-type-01-02", material: "Roofing Underlayment", name: "Roofing Underlayment", role: "membrane", roofSide: "exterior", thickness: 0 },
+      { id: "roof-type-01-03", material: "OSB", name: "Roof Sheathing", role: "sheathing", roofSide: "exterior", thickness: 0.5 },
+      { id: "roof-type-01-04", material: "Lumber", name: "Rafter / Insulation Zone", role: "framing", roofSide: "interior", thickness: 9.25 },
+      { id: "roof-type-01-05", material: "Gypsum Board", name: "Interior Ceiling Finish", role: "finish", roofSide: "interior", thickness: 0.5 },
+    ],
+  };
+}
+
 export function createBuildingStory(id: string, name: string): BuildingStory {
   return {
     ceilingFinish: defaultCeilingFinish(id),
@@ -868,9 +890,11 @@ export function applyFloorStructurePreset(story: BuildingStory, preset: FloorStr
 
 export function createDefaultBuildingStructure(): BuildingStructure {
   const openingTypes = createDefaultWallOpeningTypes();
+  const roofType = createDefaultRoofType();
   return {
     activeDoorTypeId: openingTypes.find((type) => type.kind === "door")!.id,
     activeFoundationWallTypeId: "foundation-wall-type-01",
+    activeRoofTypeId: roofType.id,
     activeWindowTypeId: openingTypes.find((type) => type.kind === "window")!.id,
     activeWallUse: "exterior",
     activeWallTypeId: "wall-type-02",
@@ -885,6 +909,7 @@ export function createDefaultBuildingStructure(): BuildingStructure {
     openingTypes,
     productObjectTypes: [],
     roofSettings: createDefaultRoofSettings(),
+    roofTypes: [roofType],
     stories: [createBuildingStory("story-01", "First Floor")],
     wallFraming: createDefaultWallFramingSettings(),
     wallTypes: createDefaultWallTypes(),
@@ -928,7 +953,7 @@ export function cloneBuildingStory(story: BuildingStory): BuildingStory {
 }
 
 export function cloneBuildingStructure(building: BuildingStructure): BuildingStructure {
-  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), productObjectTypes: building.productObjectTypes.map(cloneProductObjectType), roofSettings: { ...building.roofSettings }, stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
+  return { ...building, foundationWallTypes: building.foundationWallTypes.map(cloneFoundationWallType), headerTypes: building.headerTypes.map(cloneWallHeaderType), openingTypes: building.openingTypes.map(cloneWallOpeningType), productObjectTypes: building.productObjectTypes.map(cloneProductObjectType), roofSettings: { ...building.roofSettings }, roofTypes: building.roofTypes.map(cloneLayeredAssembly), stories: building.stories.map(cloneBuildingStory), wallFraming: { ...building.wallFraming }, wallTypes: building.wallTypes.map(cloneLayeredAssembly) };
 }
 
 export function roofSettingsAreValid(settings: RoofSettings): boolean {
@@ -1258,6 +1283,7 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
       ]) ||
       !ASSEMBLY_LAYER_ROLES.includes(layer.role) ||
       (layer.wallGroup !== undefined && !WALL_LAYER_GROUPS.includes(layer.wallGroup)) ||
+      (layer.roofSide !== undefined && !ROOF_LAYER_SIDES.includes(layer.roofSide)) ||
       !Number.isFinite(layer.thickness) ||
       layer.thickness < 0 ||
       layer.thickness > MAXIMUM_ASSEMBLY_THICKNESS ||
@@ -1286,6 +1312,15 @@ export function layeredAssemblyIsValid(assembly: LayeredAssembly, expectedKind?:
   } else if (assembly.defaultHeaderTypeId !== undefined || assembly.wallLocation !== undefined || assembly.wallStructuralRole !== undefined || assembly.wallEndCapLayerIds !== undefined || assembly.layers.some((layer) => layer.wallGroup !== undefined || layer.participatesInJoin !== undefined)) {
     return false;
   }
+  if (assembly.kind === "roof-assembly") {
+    if (!assembly.layers.length || assembly.layers.some((layer) => layer.roofSide === undefined)) return false;
+    let previousSideIndex = 0;
+    for (const layer of assembly.layers) {
+      const sideIndex = ROOF_LAYER_SIDES.indexOf(layer.roofSide!);
+      if (sideIndex < previousSideIndex) return false;
+      previousSideIndex = sideIndex;
+    }
+  } else if (assembly.layers.some((layer) => layer.roofSide !== undefined)) return false;
   return assemblyTotalThickness(assembly) <= MAXIMUM_ASSEMBLY_THICKNESS;
 }
 
@@ -1305,6 +1340,9 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     building.openingTypes.length > MAXIMUM_WALL_OPENING_TYPE_COUNT ||
     building.headerTypes.length < 1 ||
     building.headerTypes.length > MAXIMUM_WALL_HEADER_TYPE_COUNT ||
+    !Array.isArray(building.roofTypes) ||
+    building.roofTypes.length < 1 ||
+    building.roofTypes.length > MAXIMUM_ROOF_TYPE_COUNT ||
     !Array.isArray(building.productObjectTypes) ||
     building.productObjectTypes.length > MAXIMUM_PRODUCT_OBJECT_TYPE_COUNT ||
     !wallFramingSettingsAreValid(building.wallFraming) ||
@@ -1324,6 +1362,14 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
     ) return false;
     wallTypeIds.add(wallType.id);
     wallTypeNames.add(normalizedName);
+  }
+  const roofTypeIds = new Set<string>();
+  const roofTypeNames = new Set<string>();
+  for (const roofType of building.roofTypes) {
+    const normalizedName = roofType.name.trim().toLowerCase();
+    if (roofTypeIds.has(roofType.id) || roofTypeNames.has(normalizedName) || !layeredAssemblyIsValid(roofType, "roof-assembly")) return false;
+    roofTypeIds.add(roofType.id);
+    roofTypeNames.add(normalizedName);
   }
   const foundationTypeIds = new Set<string>();
   const foundationTypeNames = new Set<string>();
@@ -1395,7 +1441,7 @@ export function buildingStructureIsValid(building: BuildingStructure): boolean {
   const defaultInteriorBearingWallType = building.wallTypes.find((wallType) => wallType.id === building.defaultInteriorBearingWallTypeId);
   const defaultInteriorPartitionWallType = building.wallTypes.find((wallType) => wallType.id === building.defaultInteriorPartitionWallTypeId);
   return storyIds.has(building.anchorStoryId) && storyIds.has(building.activeStoryId) &&
-    wallTypeIds.has(building.activeWallTypeId) && foundationTypeIds.has(building.activeFoundationWallTypeId) &&
+    wallTypeIds.has(building.activeWallTypeId) && foundationTypeIds.has(building.activeFoundationWallTypeId) && roofTypeIds.has(building.activeRoofTypeId) &&
     Boolean(defaultExteriorWallType && wallTypeMatchesUse(defaultExteriorWallType, "exterior")) &&
     Boolean(defaultInteriorBearingWallType && wallTypeMatchesUse(defaultInteriorBearingWallType, "interior-bearing")) &&
     Boolean(defaultInteriorPartitionWallType && wallTypeMatchesUse(defaultInteriorPartitionWallType, "interior-partition")) &&

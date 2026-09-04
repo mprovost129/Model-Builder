@@ -64,6 +64,8 @@ test("round-trips a blank new plan with its project settings", () => {
   assert.deepEqual([document.building.activeWallUse, document.building.defaultExteriorWallTypeId, document.building.defaultInteriorBearingWallTypeId, document.building.defaultInteriorPartitionWallTypeId], ["exterior", "wall-type-02", "wall-type-05", "wall-type-03"]);
   assert.equal(document.building.foundationWallTypes.length, 1);
   assert.equal(document.building.activeFoundationWallTypeId, document.building.foundationWallTypes[0].id);
+  assert.equal(document.building.roofTypes.length, 1);
+  assert.equal(document.building.activeRoofTypeId, document.building.roofTypes[0].id);
   assert.equal(document.layerSets.length, 1);
   assert.equal(document.savedPlanViews[0].viewMode, "top");
   assert.deepEqual(document.projectInformation, documentWithProjectInformation.projectInformation);
@@ -1143,6 +1145,20 @@ test("round-trips a manual Roof Plane with its per-plane heel and pitch settings
   assert.equal(restored.polylines[0].vertices.length, 5);
   assert.equal(restored.polylines[0].architecturalRole, "roof-plane");
   assert.equal(restored.polylines[0].roofSettings?.heightAbovePlate, 9.25);
+  assert.equal(restored.polylines[0].roofTypeId, restored.building.activeRoofTypeId);
+  assert.deepEqual(restored.building.roofTypes, polygonDocument.building.roofTypes);
+
+  const legacy = structuredClone(project) as unknown as { building: Record<string, unknown>; polylines: Array<Record<string, unknown>>; version: number };
+  legacy.version = 49;
+  delete legacy.building.activeRoofTypeId;
+  delete legacy.building.roofTypes;
+  delete legacy.polylines[0].roofTypeId;
+  const upgraded = parseProjectDocument(JSON.stringify(legacy));
+  assert.equal(upgraded.ok, true);
+  if (!upgraded.ok) return;
+  const upgradedDocument = projectToDocument(upgraded.project);
+  assert.equal(upgradedDocument.building.roofTypes.length, 1);
+  assert.equal(upgradedDocument.polylines[0].roofTypeId, upgradedDocument.building.activeRoofTypeId);
 });
 
 test("round-trips Polyline Arc segments and constant width", () => {

@@ -111,6 +111,7 @@ import {
   WALL_STRUCTURAL_ROLES,
   WALL_USES,
   ROOF_FRAMING_METHODS,
+  ROOF_LAYER_SIDES,
   wallTypeMatchesUse,
   createDefaultOpeningComponents,
   type AssemblyKind,
@@ -156,7 +157,7 @@ import {
 } from "./building-stories.ts";
 
 export const PROJECT_FILE_FORMAT = "model-builder-project";
-export const PROJECT_FILE_VERSION = 49;
+export const PROJECT_FILE_VERSION = 50;
 export const PROJECT_FILE_EXTENSION = ".mbproj";
 
 export type ModelBuilderProject = {
@@ -234,13 +235,13 @@ function readProjectInformation(value: unknown): ProjectInformation | null {
   };
 }
 
-const ASSEMBLY_KINDS: AssemblyKind[] = ["ceiling-finish", "ceiling-structure", "floor-finish", "floor-structure", "wall-structure"];
+const ASSEMBLY_KINDS: AssemblyKind[] = ["ceiling-finish", "ceiling-structure", "floor-finish", "floor-structure", "roof-assembly", "wall-structure"];
 function readStoryId(value: Record<string, unknown>, supportsStories: boolean, fallbackStoryId: string): string | null {
   const storyId = supportsStories ? value.storyId : fallbackStoryId;
   return typeof storyId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(storyId) ? storyId : null;
 }
 
-function readAssemblyLayer(value: unknown, requireWallGroup: boolean, supportsWallJoinMetadata: boolean): AssemblyLayer | null {
+function readAssemblyLayer(value: unknown, requireWallGroup: boolean, requireRoofSide: boolean, supportsWallJoinMetadata: boolean): AssemblyLayer | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
@@ -249,6 +250,7 @@ function readAssemblyLayer(value: unknown, requireWallGroup: boolean, supportsWa
     typeof value.role !== "string" ||
     !ASSEMBLY_LAYER_ROLES.includes(value.role as AssemblyLayerRole) ||
     (requireWallGroup && (typeof value.wallGroup !== "string" || !WALL_LAYER_GROUPS.includes(value.wallGroup as WallLayerGroup))) ||
+    (requireRoofSide && (typeof value.roofSide !== "string" || !ROOF_LAYER_SIDES.includes(value.roofSide as (typeof ROOF_LAYER_SIDES)[number]))) ||
     (requireWallGroup && supportsWallJoinMetadata && typeof value.participatesInJoin !== "boolean") ||
     !isFiniteNumber(value.thickness)
   ) return null;
@@ -265,6 +267,7 @@ function readAssemblyLayer(value: unknown, requireWallGroup: boolean, supportsWa
       ? value.participatesInJoin as boolean
       : layer.role !== "membrane";
   }
+  if (requireRoofSide) layer.roofSide = value.roofSide as (typeof ROOF_LAYER_SIDES)[number];
   return layer;
 }
 
@@ -293,7 +296,7 @@ function readLayeredAssembly(value: unknown, kind: AssemblyKind, supportsWallGro
     value.kind !== kind ||
     !Array.isArray(value.layers)
   ) return null;
-  const layers = value.layers.map((layer) => readAssemblyLayer(layer, kind === "wall-structure" && supportsWallGroups, supportsWallJoinMetadata));
+  const layers = value.layers.map((layer) => readAssemblyLayer(layer, kind === "wall-structure" && supportsWallGroups, kind === "roof-assembly", supportsWallJoinMetadata));
   if (layers.some((layer) => layer === null)) return null;
   const validLayers = layers as AssemblyLayer[];
   const assembly: LayeredAssembly = {
@@ -639,7 +642,7 @@ function addMissingWallUseTypes(wallTypes: LayeredAssembly[]): LayeredAssembly[]
   return result;
 }
 
-function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean, supportsRoofSettings: boolean): BuildingStructure | null {
+function readBuildingStructure(value: unknown, supportsWallTypes: boolean, supportsCeilingStructure: boolean, supportsWallGroups: boolean, supportsWallJoinMetadata: boolean, wallEndCapVersion: 0 | 1 | 2, supportsFoundationWallTypes: boolean, supportsFoundationWallHeight: boolean, supportsOpeningTypes: boolean, supportsWallFraming: boolean, supportsWallJunctionFraming: boolean, supportsOpeningFraming: boolean, supportsHeaderTypes: boolean, supportsHostAwareHeaders: boolean, supportsAssemblyComponents: boolean, supportsProductSources: boolean, supportsProductAssets: boolean, supportsProductAssetAlignment: boolean, supportsProductObjectTypes: boolean, supportsStoryPurpose: boolean, supportsWallUseDefaults: boolean, supportsRoofSettings: boolean, supportsRoofTypes: boolean): BuildingStructure | null {
   if (
     !isRecord(value) ||
     typeof value.activeStoryId !== "string" ||
@@ -683,6 +686,13 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   if (productObjectTypes.some((productObjectType) => productObjectType === null)) return null;
   const roofSettings = supportsRoofSettings ? readRoofSettings(value.roofSettings) : createDefaultRoofSettings();
   if (!roofSettings) return null;
+  if (supportsRoofTypes && !Array.isArray(value.roofTypes)) return null;
+  const roofTypes = supportsRoofTypes
+    ? (value.roofTypes as unknown[]).map((roofType) => readLayeredAssembly(roofType, "roof-assembly"))
+    : defaults.roofTypes;
+  if (roofTypes.some((roofType) => roofType === null)) return null;
+  const activeRoofTypeId = supportsRoofTypes ? value.activeRoofTypeId : defaults.activeRoofTypeId;
+  if (typeof activeRoofTypeId !== "string") return null;
   const activeWallTypeId = supportsWallTypes ? value.activeWallTypeId : legacyWallType.id;
   if (typeof activeWallTypeId !== "string") return null;
   const activeWallUse = supportsWallUseDefaults ? value.activeWallUse : "exterior";
@@ -709,6 +719,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
   const building: BuildingStructure = {
     activeDoorTypeId,
     activeFoundationWallTypeId,
+    activeRoofTypeId,
     activeWindowTypeId,
     activeWallUse: activeWallUse as WallUse,
     activeWallTypeId,
@@ -723,6 +734,7 @@ function readBuildingStructure(value: unknown, supportsWallTypes: boolean, suppo
     openingTypes: openingTypes as WallOpeningType[],
     productObjectTypes: productObjectTypes as ProductObjectType[],
     roofSettings,
+    roofTypes: roofTypes as LayeredAssembly[],
     stories: stories as BuildingStory[],
     wallFraming,
     wallTypes,
@@ -1003,7 +1015,7 @@ function readLineObject(value: unknown, supportsZ: boolean, supportsStories: boo
   };
 }
 
-function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegmentsAndWidth: boolean, supportsStories: boolean, supportsRoofPlanes: boolean, fallbackStoryId: string): PolylineObject | null {
+function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegmentsAndWidth: boolean, supportsStories: boolean, supportsRoofPlanes: boolean, supportsRoofTypes: boolean, fallbackStoryId: string, fallbackRoofTypeId: string): PolylineObject | null {
   if (!isRecord(value) || value.type !== "polyline" || !Array.isArray(value.vertices) || typeof value.closed !== "boolean") return null;
   if (
     typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.id) ||
@@ -1036,10 +1048,14 @@ function readPolylineObject(value: unknown, hasElevation: boolean, hasArcSegment
   const roofSettings = supportsRoofPlanes && architecturalRole === "roof-plane" ? readRoofSettings(value.roofSettings) : null;
   if (supportsRoofPlanes && architecturalRole === "roof-plane" && !(value.roofBearingWallId === null || typeof value.roofBearingWallId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.roofBearingWallId))) return null;
   const roofBearingWallId = supportsRoofPlanes && architecturalRole === "roof-plane" ? value.roofBearingWallId as string | null : null;
+  const roofTypeId = supportsRoofPlanes && architecturalRole === "roof-plane"
+    ? supportsRoofTypes ? value.roofTypeId : fallbackRoofTypeId
+    : null;
+  if (architecturalRole === "roof-plane" && (typeof roofTypeId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(roofTypeId))) return null;
   if (architecturalRole === undefined || ((architecturalRole === "floor-platform" || architecturalRole === "roof-plane") && !geometry.closed) || (architecturalRole === "roof-plane" && (!roofSettings || geometry.vertices.length < 3 || (geometry.bulges ?? []).some((bulge) => Math.abs(bulge) > 1e-10)))) return null;
   const fillOverride = readFillOverride(value.fillOverride);
   if (fillOverride === undefined) return null;
-  return { ...geometry, architecturalRole, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), roofBearingWallId, roofSettings, shape: value.shape, storyId, type: "polyline" };
+  return { ...geometry, architecturalRole, ...(value.fillOverride === undefined ? {} : { fillOverride }), id: value.id, layerId: value.layerId, locked: value.locked, name: value.name.trim(), roofBearingWallId, roofSettings, roofTypeId, shape: value.shape, storyId, type: "polyline" };
 }
 
 function readPlatformOpening(value: unknown, supportsVerticalOpeningContinuity: boolean): PlatformOpening | null {
@@ -1266,7 +1282,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
 
   let building = createDefaultBuildingStructure();
   if (version >= 13) {
-    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47, version >= 48);
+    const parsedBuilding = readBuildingStructure(value.building, version >= 15, version >= 16, version >= 17, version >= 19, version >= 22 ? 2 : version >= 21 ? 1 : 0, version >= 26, version >= 27, version >= 30, version >= 31, version >= 32, version >= 33, version >= 34, version >= 35, version >= 36, version >= 39, version >= 40, version >= 41, version >= 42, version >= 45, version >= 47, version >= 48, version >= 50);
     if (!parsedBuilding) return { ok: false, error: "The project Story and assembly configuration is missing or invalid." };
     building = parsedBuilding;
   }
@@ -1440,7 +1456,7 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     if (!Array.isArray(value.polylines) || value.polylines.length > MAXIMUM_POLYLINE_COUNT) {
       return { ok: false, error: "The project polyline collection is missing or invalid." };
     }
-    const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, version >= 49, fallbackStoryId));
+    const parsedPolylines = value.polylines.map((polyline) => readPolylineObject(polyline, version >= 9, version >= 12, version >= 14, version >= 49, version >= 50, fallbackStoryId, building.activeRoofTypeId));
     if (parsedPolylines.some((polyline) => polyline === null)) return { ok: false, error: "One or more drawing polylines are invalid." };
     polylines = (parsedPolylines as PolylineObject[]).map((polyline) => version >= 43 || polyline.architecturalRole !== "floor-platform" ? polyline : { ...polyline, layerId: STANDARD_LAYER_IDS["floor-platform"] });
     if (new Set(polylines.map((polyline) => polyline.id)).size !== polylines.length ||
@@ -1450,6 +1466,8 @@ export function parseProjectDocument(content: string): ProjectParseResult {
     }
     if (polylines.some((polyline) => !storyIds.has(polyline.storyId))) return { ok: false, error: "One or more drawing polylines reference a missing Story." };
     if (polylines.some((polyline) => polyline.architecturalRole === "roof-plane" && !roofPlaneGeometry(polyline))) return { ok: false, error: "One or more Roof Plane boundaries are invalid." };
+    const roofTypeIds = new Set(building.roofTypes.map((roofType) => roofType.id));
+    if (polylines.some((polyline) => polyline.architecturalRole === "roof-plane" && !roofTypeIds.has(polyline.roofTypeId ?? ""))) return { ok: false, error: "One or more Roof Planes reference a missing Roof Type." };
     const wallsById = new Map(lines.filter((line) => line.architecturalRole === "wall").map((line) => [line.id, line]));
     if (polylines.some((polyline) => polyline.architecturalRole === "roof-plane" && polyline.roofBearingWallId !== null && wallsById.get(polyline.roofBearingWallId)?.storyId !== polyline.storyId)) return { ok: false, error: "One or more Roof Planes reference a missing bearing Wall." };
     const allIds = [...validObjects.map((object) => object.id), ...lines.map((line) => line.id), ...polylines.map((polyline) => polyline.id)];

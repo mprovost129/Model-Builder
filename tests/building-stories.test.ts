@@ -16,6 +16,7 @@ import {
   doorPanelLayoutForType,
   foundationConditionPlateDefaults,
   foundationSillStackHeight,
+  layeredAssemblyIsValid,
   productAssetReferencesAreValid,
   productAssetSourceUnitScale,
   productObjectTypeIsValid,
@@ -53,6 +54,24 @@ test("calculates heel-driven Roof Plane, peak, fascia, and birdsmouth references
   const invalid = cloneBuildingStructure(building);
   invalid.roofSettings.pitchRise = 0;
   assert.equal(buildingStructureIsValid(invalid), false);
+});
+
+test("defines reusable Roof Types above and below the structural Roof Plane", () => {
+  const building = createDefaultBuildingStructure();
+  const roofType = building.roofTypes.find((candidate) => candidate.id === building.activeRoofTypeId);
+  assert.ok(roofType);
+  assert.equal(roofType.kind, "roof-assembly");
+  assert.equal(layeredAssemblyIsValid(roofType, "roof-assembly"), true);
+  assert.deepEqual(roofType.layers.map((layer) => layer.roofSide), ["exterior", "exterior", "exterior", "interior", "interior"]);
+  assert.equal(roofType.layers.find((layer) => layer.role === "membrane")?.thickness, 0);
+
+  const missingSide = { ...roofType, layers: roofType.layers.map((layer) => ({ ...layer })) };
+  delete missingSide.layers[0].roofSide;
+  assert.equal(layeredAssemblyIsValid(missingSide, "roof-assembly"), false);
+
+  const interleaved = { ...roofType, layers: roofType.layers.map((layer) => ({ ...layer })) };
+  interleaved.layers[1].roofSide = "interior";
+  assert.equal(layeredAssemblyIsValid(interleaved, "roof-assembly"), false);
 });
 
 test("defines deterministic product representation units, alignment, and preferred fallback rules", () => {

@@ -1199,6 +1199,7 @@ button { color: inherit; }
 .story-section-label span { color: #83919c; font-size: 8px; }
 .story-layer-grid { display: grid; grid-template-columns: 26px minmax(180px, 1.5fr) minmax(120px, .8fr) minmax(145px, .8fr) 86px; align-items: center; min-height: 36px; border-bottom: 1px solid #333e48; }
 .story-layer-grid.is-wall-assembly { grid-template-columns: 26px minmax(180px, 1.5fr) minmax(110px, .75fr) minmax(130px, .8fr) 54px 54px 86px; }
+.story-layer-grid.is-roof-assembly { grid-template-columns: 26px minmax(180px, 1.5fr) 74px minmax(105px, .75fr) minmax(125px, .8fr) 86px; }
 .story-layer-grid > * { min-width: 0; }
 .story-layer-grid.is-selected { background: #202e38; box-shadow: inset 3px 0 #6aa9c7; }
 .story-layer-grid > span { color: #85929d; font: 8px var(--font-geist-mono), monospace; text-align: center; }

@@ -27,7 +27,7 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] Story table shows type, calculated rough-floor elevation, and ceiling / plate height.
 - [x] Quick editing for Story name, type, ceiling / plate height, and floor-structure preset.
 - [x] Active Foundation Wall, Wall, Door, and Window types can be selected before drawing.
-- [x] Roof framing method, pitch, Height Above Plate / heel, and overhang can be established before drawing.
+- [x] Active layered Roof Type, framing method, pitch, Height Above Plate / heel, and overhang can be established before drawing.
 - [x] Project Setup derives Top of Plate from the highest Story and previews the calculated exterior heel.
 - [x] Separate project defaults for Exterior Wall, Interior Bearing Wall, and Interior Partition types.
 - [x] Wall drawing Properties includes a Wall Use selector that recalls the assigned default Type for each use.

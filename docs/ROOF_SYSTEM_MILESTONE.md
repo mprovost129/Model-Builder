@@ -12,7 +12,7 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - Roof pitch is stored as rise per 12 inches of horizontal run.
 - Peak elevation is calculated from the exterior heel, pitch, and the Roof Plane's horizontal run. It is a result, not an independent project default.
 - Fascia and subfascia elevations are calculated from the heel, pitch, overhang, and their separate board depths.
-- Roof sheathing and roofing will be modeled above the structural Roof Plane when layered Roof Types are implemented.
+- Roof sheathing, roofing, and other exterior layers are modeled above the structural Roof Plane; framing/insulation zones and interior finishes build below it.
 - Trussed roofs use the same plate, heel, pitch, peak, and fascia reference system.
 
 ## Completed foundation
@@ -35,7 +35,7 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [x] Per-plane pitch, Height Above Plate, horizontal run, and overhang are editable in Properties.
 - [x] Eave/bearing span is editable numerically or with constrained gold eave grips; the remaining blue grips freely shape the roof boundary without changing its bearing reference.
 - [x] Live Top of Plate, heel, high-edge/peak, and fascia-top elevations use the actual plane run.
-- [x] Version-49 project files preserve manual Roof Planes and their per-plane defaults.
+- [x] Version-50 project files preserve manual Roof Planes, their per-plane defaults, reusable Roof Types, and each plane's assigned Type. Version-49 and earlier files receive the default Roof Type safely.
 - [x] Arbitrary straight-edged polygon-boundary editing for hips, valleys, rakes, and clipped Roof Planes while preserving a valid eave and bearing reference.
 - [x] Add Edge Point and Simplify Boundary actions provide controlled polygon topology changes; invalid crossings, curved roof edges, and boundaries that cross the eave are rejected.
 - [x] Polygon Roof Planes retain per-vertex slope elevations in 3D and round-trip through version-49 project files.
@@ -46,7 +46,7 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [ ] Live editable dimensions in plan and section/elevation views.
 - [ ] Complete exact ridge/eave/fascia/subfascia component solids; the current structural surface and reference elevations are calculated.
 - [ ] Birdsmouth solid generated from the hosted Wall plate, member geometry, seat length, and maximum-notch validation rule.
-- [ ] Layered Roof Types for sheathing, underlayment, roofing, insulation, and finish components above/below the structural plane.
+- [x] Reusable layered Roof Types for sheathing, zero-thickness underlayment, roofing, framing/insulation zones, and finish components above/below the structural plane. Types can be named, duplicated, deleted, selected as the project default, and assigned per Roof Plane.
 - [ ] Multi-plane junction cleanup, roof-opening joins, and explicit priority rules for complex intersections. The two-plane manual Join is complete.
 
 ## Material takeoff readiness
@@ -54,7 +54,7 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - [x] Preserve exact Roof Plane polygon boundaries rather than display-only meshes.
 - [x] Derive net sloped surface area from each plane's exact plan area and pitch.
 - [x] Derive named eave, rake, ridge, hip, valley, and transition edge lengths directly from joined geometry.
-- [ ] Add layered Roof Types so sheathing, underlayment, roofing, insulation, and finish quantities use the correct offset surface rather than the structural reference plane.
+- [x] Derive material-ready net coverage and geometric volume for every Roof Type layer; zero-thickness membranes retain coverage without false solid volume.
 - [ ] Add framing layouts for common rafters, jack rafters, hips, valleys, ridges, trusses, outlookers, fascia, and subfascia.
 - [ ] Add openings, laps, stock-length optimization, waste factors, bundle/square rounding, and a reviewable material schedule. Net geometry must remain separate from purchasing allowances.
 
@@ -73,3 +73,5 @@ This file is the implementation record for Roof design in Slater Woods Omni Desi
 - Automatic generation must never silently alter manually detached Roof Planes.
 - Calculated elevations remain derived values; editing one must change an identified driver such as pitch, heel, overhang, or run.
 - A Wall-created Roof Plane starts with a 12-foot inward run as an explicit editable starting value; it is not an automatic roof proposal.
+- Layer coverage is net geometric area. Purchasing quantities must add explicit user-controlled waste and packaging rules later.
+- The current layered 3D solids follow each plane correctly. Exact offset-layer cleanup where multiple Roof Planes join remains part of the multi-plane junction milestone.

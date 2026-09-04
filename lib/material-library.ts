@@ -64,6 +64,7 @@ export const ARCHITECTURAL_MATERIALS: readonly ArchitecturalMaterialDefinition[]
   { category: "finishes", compatibleRoles: ["finish"], model: { color: "#b5b8b4", metalness: 0, roughness: 0.82, textureAssetId: null }, name: "Fiber Cement Siding", plan: { color: "#cdd0cc", pattern: "diagonal" } },
   { category: "finishes", compatibleRoles: ["finish"], model: { color: "#ddd9cc", metalness: 0, roughness: 0.7, textureAssetId: null }, name: "Vinyl Siding", plan: { color: "#e5e2d9", pattern: "diagonal" } },
   { category: "finishes", compatibleRoles: ["finish"], model: { color: "#d3cbbb", metalness: 0, roughness: 0.92, textureAssetId: null }, name: "Stucco", plan: { color: "#ddd6c8", pattern: "dots" } },
+  { category: "finishes", compatibleRoles: ["finish"], model: { color: "#4d5357", metalness: 0, roughness: 0.94, textureAssetId: null }, name: "Asphalt Shingles", plan: { color: "#70777b", pattern: "diagonal" } },
   { category: "finishes", compatibleRoles: ["finish"], model: { color: "#a7774f", metalness: 0, roughness: 0.72, textureAssetId: null }, name: "Hardwood", plan: { color: "#c49b73", pattern: "wood" } },
   { category: "finishes", compatibleRoles: ["finish"], model: { color: "#c9c5b8", metalness: 0, roughness: 0.68, textureAssetId: null }, name: "Ceramic Tile", plan: { color: "#d8d4c9", pattern: "crosshatch" } },
   { category: "finishes", compatibleRoles: ["finish"], model: { color: "#aaa9a2", metalness: 0, roughness: 0.96, textureAssetId: null }, name: "Carpet", plan: { color: "#c6c5bf", pattern: "dots" } },

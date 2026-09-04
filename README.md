@@ -165,11 +165,15 @@ polylines, rectangles, Circles, and Arcs.
   add/simplify controls create hips, valleys, rakes, and clipped polygon edges;
   two selected overlapping planes can be trimmed to their exact calculated 3D
   intersection with a derived ridge, hip, valley, or transition role. Each plane
-  reports net plan and sloped surface area plus exact sloped eave, rake, and joined
-  edge lengths, preserving the geometry needed for later lumber, sheathing, roofing,
-  waste, and accessory takeoff. The resulting polygons are preserved in project
-  files and triangulated as calculated sloped surfaces in 3D. Automatic roof
-  generation remains a later phase
+  carries an assignable reusable Roof Type with ordered layers above and below the
+  structural plane. The default includes shingles, zero-thickness underlayment,
+  roof sheathing, a rafter/insulation zone, and interior ceiling finish. Properties
+  report exact net layer coverage while 3D views show positive-thickness layers as
+  separate solids. Net plan and sloped surface area plus exact sloped eave, rake,
+  and joined edge lengths preserve the geometry needed for later lumber, sheathing,
+  roofing, waste, and accessory takeoff. Version-50 project files retain Roof Types
+  and per-plane assignments. Automatic roof generation, framing-member layouts,
+  waste factors, and exact offset-layer join cleanup remain later phases
 - Enclosed Room detection from Story-owned Wall loops, with stable Room identities,
   calculated areas, and a dedicated Room Manager
 - Story-default inheritance for Room floor/ceiling assemblies and rough ceiling
