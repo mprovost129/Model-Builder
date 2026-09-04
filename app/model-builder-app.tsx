@@ -474,6 +474,10 @@ import {
   type ViewTarget,
 } from "@/lib/view-navigation";
 
+function isStoryVisibleInView(viewTarget: ViewTarget, activeStoryId: string, storyId: string) {
+  return viewTarget.id !== "top" || storyId === activeStoryId;
+}
+
 type DragStatus = {
   angle?: number;
   axis?: AxisKey;
@@ -7269,7 +7273,6 @@ function Viewport({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    const storyIsVisible = (storyId: string) => viewTarget.id !== "top" || storyId === document.building.activeStoryId;
     const currentIds = new Set(document.objects.map((object) => object.id));
     objectViewsRef.current.forEach((view, objectId) => {
       if (!currentIds.has(objectId)) {
@@ -7285,7 +7288,7 @@ function Viewport({
       }
       const { dimensions } = object;
       const layer = findLayer(document, object.layerId);
-      const visible = (layer?.visible ?? true) && storyIsVisible(object.storyId);
+      const visible = (layer?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, object.storyId);
       view.mesh.visible = visible;
       view.edges.visible = visible;
       view.mesh.scale.set(dimensions.length, dimensions.width, dimensions.height);
@@ -7312,7 +7315,7 @@ function Viewport({
       updateViewportLine(view, line);
       const layer = findLayer(document, line.layerId);
       applyLayerAppearanceToViewportLine(view, layer);
-      view.line.visible = (layer?.visible ?? true) && storyIsVisible(line.storyId);
+      view.line.visible = (layer?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, line.storyId);
     });
     const currentWallIds = new Set(document.lines.filter((line) => line.architecturalRole !== null).map((line) => line.id));
     wallViewsRef.current.forEach((view, lineId) => {
@@ -7341,7 +7344,7 @@ function Viewport({
         const opening = openingById.get(String(mesh.userData.wallOpeningId ?? ""));
         if (opening) mesh.visible = findLayer(document, opening.layerId)?.visible ?? true;
       });
-      view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true) && storyIsVisible(line.storyId));
+      view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, line.storyId));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
     const foundationWallJoinPlan = buildAutomaticFoundationWallJoinPlan(foundationWallLines, document.building.foundationWallTypes);
@@ -7356,7 +7359,7 @@ function Viewport({
       const vertical = foundationWallVerticalExtent(document, line);
       const foundationType = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
       if (vertical && foundationType) updateFoundationWallView(view, line, vertical, foundationType, foundationWallJoinPlan, foundationWallLinesById, foundationWallTypesById);
-      view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true) && storyIsVisible(line.storyId));
+      view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, line.storyId));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
     polylineViewsRef.current.forEach((view, polylineId) => {
@@ -7373,7 +7376,7 @@ function Viewport({
       }
       updateViewportPolyline(view, polyline);
       applyLayerAppearanceToViewportLine(view, findLayer(document, polyline.layerId));
-      const visible = (findLayer(document, polyline.layerId)?.visible ?? true) && storyIsVisible(polyline.storyId);
+      const visible = (findLayer(document, polyline.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, polyline.storyId);
       view.line.visible = visible && (polyline.architecturalRole !== "roof-plane" || viewTarget.id === "top");
       if (view.fill) view.fill.visible = visible && resolvedObjectFill(document, polyline.layerId, polyline).visible && (polyline.width ?? 0) >= 1 / 16;
     });
@@ -7392,7 +7395,7 @@ function Viewport({
       }
       const story = document.building.stories.find((candidate) => candidate.id === polyline.storyId);
       if (story) updateFloorPlatformView(view, polyline, story);
-      view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true) && storyIsVisible(polyline.storyId));
+      view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, polyline.storyId));
     });
     const currentRoofPlaneIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").map((polyline) => polyline.id));
     roofPlaneViewsRef.current.forEach((view, polylineId) => {
@@ -7408,7 +7411,7 @@ function Viewport({
         roofPlaneViewsRef.current.set(polyline.id, view);
       }
       updateRoofPlaneView(view, document, polyline, viewTarget);
-      view.group.visible = Boolean((findLayer(document, polyline.layerId)?.visible ?? true) && storyIsVisible(polyline.storyId));
+      view.group.visible = Boolean((findLayer(document, polyline.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, polyline.storyId));
     });
     const currentRoomIds = new Set(document.rooms.map((room) => room.id));
     roomPlatformViewsRef.current.forEach((view, roomId) => {
@@ -7429,7 +7432,7 @@ function Viewport({
         const wall = document.lines.find((line) => line.id === wallId);
         return Boolean(wall && (findLayer(document, wall.layerId)?.visible ?? true));
       });
-      view.group.visible = Boolean(solution && boundaryWallsVisible && storyIsVisible(room.storyId));
+      view.group.visible = Boolean(solution && boundaryWallsVisible && isStoryVisibleInView(viewTarget, document.building.activeStoryId, room.storyId));
     });
     const currentCircleIds = new Set(document.circles.map((circle) => circle.id));
     circleViewsRef.current.forEach((view, circleId) => {
@@ -7446,7 +7449,7 @@ function Viewport({
       }
       updateViewportCircle(view, circle);
       applyLayerAppearanceToViewportLine(view, findLayer(document, circle.layerId));
-      view.line.visible = (findLayer(document, circle.layerId)?.visible ?? true) && storyIsVisible(circle.storyId);
+      view.line.visible = (findLayer(document, circle.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, circle.storyId);
     });
     const currentArcIds = new Set(document.arcs.map((arc) => arc.id));
     arcViewsRef.current.forEach((view, arcId) => {
@@ -7463,7 +7466,7 @@ function Viewport({
       }
       updateViewportArc(view, arc);
       applyLayerAppearanceToViewportLine(view, findLayer(document, arc.layerId));
-      view.line.visible = (findLayer(document, arc.layerId)?.visible ?? true) && storyIsVisible(arc.storyId);
+      view.line.visible = (findLayer(document, arc.layerId)?.visible ?? true) && isStoryVisibleInView(viewTarget, document.building.activeStoryId, arc.storyId);
     });
     const selectedObject = findBoxObject(document, selectedObjectId);
     const selectedRefs = selectedEntityKeys
