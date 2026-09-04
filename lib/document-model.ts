@@ -5265,6 +5265,41 @@ export function activateSavedPlanView(document: ModelDocument, viewId: string): 
   return next;
 }
 
+/**
+ * Moves plan navigation to a Story while keeping Saved Plan View state coherent.
+ * A compatible view is reused when possible. The first visit to a Story creates
+ * a working view that inherits the current Layer Set, scale, and camera mode.
+ */
+export function activateStoryPlanView(document: ModelDocument, storyId: string): ModelDocument | null {
+  const story = document.building.stories.find((candidate) => candidate.id === storyId);
+  const current = document.savedPlanViews.find((candidate) => candidate.id === document.activeSavedPlanViewId) ?? document.savedPlanViews[0];
+  if (!story || !current) return null;
+  const compatible = document.savedPlanViews.find((candidate) =>
+    candidate.storyId === storyId &&
+    candidate.layerSetId === document.activeLayerSetId &&
+    candidate.viewMode === current.viewMode
+  );
+  if (compatible) return activateSavedPlanView(document, compatible.id);
+
+  const baseName = `${story.name} ${current.viewMode === "top" ? "Plan" : current.viewMode === "perspective" ? "Perspective" : `${current.viewMode[0].toUpperCase()}${current.viewMode.slice(1)} View`}`;
+  let name = baseName;
+  let suffix = 2;
+  while (document.savedPlanViews.some((candidate) => candidate.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    name = `${baseName} ${suffix}`;
+    suffix += 1;
+  }
+  const saved = savePlanView(document, {
+    activeLayerId: document.activeLayerId,
+    annotationScale: current.annotationScale,
+    layerSetId: document.activeLayerSetId,
+    name,
+    referenceStoryId: null,
+    storyId,
+    viewMode: current.viewMode,
+  });
+  return saved ? activateSavedPlanView(saved, saved.activeSavedPlanViewId) : null;
+}
+
 export function setActiveLayer(
   document: ModelDocument,
   layerId: string,

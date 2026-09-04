@@ -175,6 +175,7 @@ import {
   assignWallType,
   activateLayerSet,
   activateSavedPlanView,
+  activateStoryPlanView,
   cloneDocument,
   arcIsEditable,
   circleIsEditable,
@@ -3651,22 +3652,24 @@ function Viewport({
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     const fitView = (requestedTarget = viewTargetRef.current, animate = false) => {
+      const activeStoryId = documentRef.current.building.activeStoryId;
+      const storyIsIncluded = (storyId: string) => requestedTarget.id !== "top" || storyId === activeStoryId;
       const objects = documentRef.current.objects.filter((object) =>
-        findLayer(documentRef.current, object.layerId)?.visible,
+        findLayer(documentRef.current, object.layerId)?.visible && storyIsIncluded(object.storyId),
       );
       const lines = documentRef.current.lines.filter((line) =>
-        findLayer(documentRef.current, line.layerId)?.visible,
+        findLayer(documentRef.current, line.layerId)?.visible && storyIsIncluded(line.storyId),
       );
       const polylines = documentRef.current.polylines.filter((polyline) =>
-        findLayer(documentRef.current, polyline.layerId)?.visible,
+        findLayer(documentRef.current, polyline.layerId)?.visible && storyIsIncluded(polyline.storyId),
       );
       const circles = documentRef.current.circles.filter((circle) =>
-        findLayer(documentRef.current, circle.layerId)?.visible,
+        findLayer(documentRef.current, circle.layerId)?.visible && storyIsIncluded(circle.storyId),
       );
-      const arcs = documentRef.current.arcs.filter((arc) => findLayer(documentRef.current, arc.layerId)?.visible);
+      const arcs = documentRef.current.arcs.filter((arc) => findLayer(documentRef.current, arc.layerId)?.visible && storyIsIncluded(arc.storyId));
       const roomPlatforms = documentRef.current.rooms
         .map((room) => roomHorizontalPlatformSolution(documentRef.current, room))
-        .filter((solution): solution is RoomHorizontalPlatformSolution => solution !== null);
+        .filter((solution): solution is RoomHorizontalPlatformSolution => solution !== null && storyIsIncluded(solution.storyId));
       const bounds = objects.map(boxWorldBounds);
       const lineXs = lines.flatMap((line) => [line.start.x, line.end.x]);
       const lineYs = lines.flatMap((line) => [line.start.y, line.end.y]);
@@ -3918,19 +3921,19 @@ function Viewport({
 
     const screenSelectionGeometries = (): ScreenSelectionGeometry[] => {
       const current = documentRef.current;
-      const visible = (layerId: string) => Boolean(findLayer(current, layerId)?.visible);
+      const visible = (layerId: string, storyId: string) => Boolean(findLayer(current, layerId)?.visible) && (viewTargetRef.current.id !== "top" || storyId === current.building.activeStoryId);
       const geometries: ScreenSelectionGeometry[] = [];
-      current.lines.filter((line) => visible(line.layerId)).forEach((line) => {
+      current.lines.filter((line) => visible(line.layerId, line.storyId)).forEach((line) => {
         geometries.push(pathSelectionGeometry({ id: line.id, kind: "line" }, [line.start, line.end]));
       });
-      current.polylines.filter((polyline) => visible(polyline.layerId)).forEach((polyline) => {
+      current.polylines.filter((polyline) => visible(polyline.layerId, polyline.storyId)).forEach((polyline) => {
         geometries.push(pathSelectionGeometry(
           { id: polyline.id, kind: "polyline" },
           polylinePathPoints(polyline).map((point) => ({ ...point, z: polyline.elevation })),
           false,
         ));
       });
-      current.circles.filter((circle) => visible(circle.layerId)).forEach((circle) => {
+      current.circles.filter((circle) => visible(circle.layerId, circle.storyId)).forEach((circle) => {
         const points = Array.from({ length: 49 }, (_, index) => {
           const angle = index / 48 * Math.PI * 2;
           return {
@@ -3941,11 +3944,11 @@ function Viewport({
         });
         geometries.push(pathSelectionGeometry({ id: circle.id, kind: "circle" }, points));
       });
-      current.arcs.filter((arc) => visible(arc.layerId)).forEach((arc) => {
+      current.arcs.filter((arc) => visible(arc.layerId, arc.storyId)).forEach((arc) => {
         const points = Array.from({ length: 49 }, (_, index) => arcPointAtFraction(arc, index / 48));
         geometries.push(pathSelectionGeometry({ id: arc.id, kind: "arc" }, points));
       });
-      current.objects.filter((object) => visible(object.layerId)).forEach((object) => {
+      current.objects.filter((object) => visible(object.layerId, object.storyId)).forEach((object) => {
         const corners = [
           boxWorldPoint(object, 0, 0, 0), boxWorldPoint(object, 1, 0, 0),
           boxWorldPoint(object, 1, 1, 0), boxWorldPoint(object, 0, 1, 0),
@@ -4014,12 +4017,12 @@ function Viewport({
       const current = documentRef.current;
       const candidates = new Map<string, EntityHitCandidate>();
       const visible = (ref: CadEntityRef) => {
-        const layerId = ref.kind === "box" ? findBoxObject(current, ref.id)?.layerId
-          : ref.kind === "line" ? findLineObject(current, ref.id)?.layerId
-          : ref.kind === "polyline" ? findPolylineObject(current, ref.id)?.layerId
-          : ref.kind === "circle" ? findCircleObject(current, ref.id)?.layerId
-          : findArcObject(current, ref.id)?.layerId;
-        return Boolean(layerId && findLayer(current, layerId)?.visible);
+        const entity = ref.kind === "box" ? findBoxObject(current, ref.id)
+          : ref.kind === "line" ? findLineObject(current, ref.id)
+          : ref.kind === "polyline" ? findPolylineObject(current, ref.id)
+          : ref.kind === "circle" ? findCircleObject(current, ref.id)
+          : findArcObject(current, ref.id);
+        return Boolean(entity && findLayer(current, entity.layerId)?.visible && (viewTargetRef.current.id !== "top" || entity.storyId === current.building.activeStoryId));
       };
       const register = (candidate: EntityHitCandidate) => {
         if (!visible(candidate.ref)) return;
@@ -7266,6 +7269,7 @@ function Viewport({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
+    const storyIsVisible = (storyId: string) => viewTarget.id !== "top" || storyId === document.building.activeStoryId;
     const currentIds = new Set(document.objects.map((object) => object.id));
     objectViewsRef.current.forEach((view, objectId) => {
       if (!currentIds.has(objectId)) {
@@ -7281,7 +7285,7 @@ function Viewport({
       }
       const { dimensions } = object;
       const layer = findLayer(document, object.layerId);
-      const visible = layer?.visible ?? true;
+      const visible = (layer?.visible ?? true) && storyIsVisible(object.storyId);
       view.mesh.visible = visible;
       view.edges.visible = visible;
       view.mesh.scale.set(dimensions.length, dimensions.width, dimensions.height);
@@ -7308,7 +7312,7 @@ function Viewport({
       updateViewportLine(view, line);
       const layer = findLayer(document, line.layerId);
       applyLayerAppearanceToViewportLine(view, layer);
-      view.line.visible = layer?.visible ?? true;
+      view.line.visible = (layer?.visible ?? true) && storyIsVisible(line.storyId);
     });
     const currentWallIds = new Set(document.lines.filter((line) => line.architecturalRole !== null).map((line) => line.id));
     wallViewsRef.current.forEach((view, lineId) => {
@@ -7337,7 +7341,7 @@ function Viewport({
         const opening = openingById.get(String(mesh.userData.wallOpeningId ?? ""));
         if (opening) mesh.visible = findLayer(document, opening.layerId)?.visible ?? true;
       });
-      view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true));
+      view.group.visible = Boolean(vertical && wallType && (findLayer(document, line.layerId)?.visible ?? true) && storyIsVisible(line.storyId));
     });
     const foundationWallLines = document.lines.filter((line) => line.architecturalRole === "foundation-wall");
     const foundationWallJoinPlan = buildAutomaticFoundationWallJoinPlan(foundationWallLines, document.building.foundationWallTypes);
@@ -7352,7 +7356,7 @@ function Viewport({
       const vertical = foundationWallVerticalExtent(document, line);
       const foundationType = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
       if (vertical && foundationType) updateFoundationWallView(view, line, vertical, foundationType, foundationWallJoinPlan, foundationWallLinesById, foundationWallTypesById);
-      view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true));
+      view.group.visible = Boolean(vertical && foundationType && (findLayer(document, line.layerId)?.visible ?? true) && storyIsVisible(line.storyId));
     });
     const currentPolylineIds = new Set(document.polylines.map((polyline) => polyline.id));
     polylineViewsRef.current.forEach((view, polylineId) => {
@@ -7369,7 +7373,7 @@ function Viewport({
       }
       updateViewportPolyline(view, polyline);
       applyLayerAppearanceToViewportLine(view, findLayer(document, polyline.layerId));
-      const visible = findLayer(document, polyline.layerId)?.visible ?? true;
+      const visible = (findLayer(document, polyline.layerId)?.visible ?? true) && storyIsVisible(polyline.storyId);
       view.line.visible = visible && (polyline.architecturalRole !== "roof-plane" || viewTarget.id === "top");
       if (view.fill) view.fill.visible = visible && resolvedObjectFill(document, polyline.layerId, polyline).visible && (polyline.width ?? 0) >= 1 / 16;
     });
@@ -7388,7 +7392,7 @@ function Viewport({
       }
       const story = document.building.stories.find((candidate) => candidate.id === polyline.storyId);
       if (story) updateFloorPlatformView(view, polyline, story);
-      view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true));
+      view.group.visible = Boolean(story && (findLayer(document, polyline.layerId)?.visible ?? true) && storyIsVisible(polyline.storyId));
     });
     const currentRoofPlaneIds = new Set(document.polylines.filter((polyline) => polyline.architecturalRole === "roof-plane").map((polyline) => polyline.id));
     roofPlaneViewsRef.current.forEach((view, polylineId) => {
@@ -7404,7 +7408,7 @@ function Viewport({
         roofPlaneViewsRef.current.set(polyline.id, view);
       }
       updateRoofPlaneView(view, document, polyline, viewTarget);
-      view.group.visible = Boolean(findLayer(document, polyline.layerId)?.visible ?? true);
+      view.group.visible = Boolean((findLayer(document, polyline.layerId)?.visible ?? true) && storyIsVisible(polyline.storyId));
     });
     const currentRoomIds = new Set(document.rooms.map((room) => room.id));
     roomPlatformViewsRef.current.forEach((view, roomId) => {
@@ -7425,7 +7429,7 @@ function Viewport({
         const wall = document.lines.find((line) => line.id === wallId);
         return Boolean(wall && (findLayer(document, wall.layerId)?.visible ?? true));
       });
-      view.group.visible = Boolean(solution && boundaryWallsVisible);
+      view.group.visible = Boolean(solution && boundaryWallsVisible && storyIsVisible(room.storyId));
     });
     const currentCircleIds = new Set(document.circles.map((circle) => circle.id));
     circleViewsRef.current.forEach((view, circleId) => {
@@ -7442,7 +7446,7 @@ function Viewport({
       }
       updateViewportCircle(view, circle);
       applyLayerAppearanceToViewportLine(view, findLayer(document, circle.layerId));
-      view.line.visible = findLayer(document, circle.layerId)?.visible ?? true;
+      view.line.visible = (findLayer(document, circle.layerId)?.visible ?? true) && storyIsVisible(circle.storyId);
     });
     const currentArcIds = new Set(document.arcs.map((arc) => arc.id));
     arcViewsRef.current.forEach((view, arcId) => {
@@ -7459,7 +7463,7 @@ function Viewport({
       }
       updateViewportArc(view, arc);
       applyLayerAppearanceToViewportLine(view, findLayer(document, arc.layerId));
-      view.line.visible = findLayer(document, arc.layerId)?.visible ?? true;
+      view.line.visible = (findLayer(document, arc.layerId)?.visible ?? true) && storyIsVisible(arc.storyId);
     });
     const selectedObject = findBoxObject(document, selectedObjectId);
     const selectedRefs = selectedEntityKeys
@@ -7680,7 +7684,7 @@ function Viewport({
       const fill = resolvedObjectFill(document, polyline?.layerId, polyline);
       view.material.color.setHex(selected ? 0xf2bd5b : hovered ? 0x6fd8f5 : layer ? Number.parseInt(layer.color.slice(1), 16) : 0x88bff0);
       if (view.fillMaterial) view.fillMaterial.color.setHex(Number.parseInt(fill.color.slice(1), 16));
-      if (view.fill) view.fill.visible = Boolean((layer?.visible ?? true) && fill.visible && (polyline?.width ?? 0) >= 1 / 16);
+      if (view.fill) view.fill.visible = Boolean((layer?.visible ?? true) && fill.visible && (polyline?.width ?? 0) >= 1 / 16 && (viewTarget.id !== "top" || polyline?.storyId === document.building.activeStoryId));
     });
     floorPlatformViewsRef.current.forEach((view, polylineId) => {
       const selected = selectedEntityKeys.includes(cadEntityKey({ id: polylineId, kind: "polyline" }));
@@ -11031,7 +11035,7 @@ function RoofDefaultsDialog({
                 <StoryDimensionInput key={`rafter-depth:${draft.rafterDepth}`} label="Rafter / top-chord depth" value={draft.rafterDepth} onChange={(rafterDepth) => replace({ rafterDepth })} />
                 <StoryDimensionInput key={`seat:${draft.birdsmouthSeatLength}`} label="Birdsmouth seat" value={draft.birdsmouthSeatLength} onChange={(birdsmouthSeatLength) => replace({ birdsmouthSeatLength })} />
                 <label className="story-field"><span>Maximum notch</span><select value={draft.birdsmouthMaxNotchRatio} onChange={(event) => replace({ birdsmouthMaxNotchRatio: Number(event.target.value) })}><option value={0.2}>20% of member depth</option><option value={0.25}>25% of member depth</option><option value={0.333333}>33⅓% of member depth</option></select></label>
-                <label className="foundation-check"><input type="checkbox" checked={draft.showFramingInModel} onChange={(event) => replace({ showFramingInModel: event.target.checked })} /><span><strong>Show discrete framing in 3D</strong><small>Fade continuous layers and reveal generated members.</small></span></label>
+                <label className="foundation-check" aria-label="Show discrete roof framing in 3D"><input type="checkbox" checked={draft.showFramingInModel} onChange={(event) => replace({ showFramingInModel: event.target.checked })} /><span><strong>Show discrete framing in 3D</strong><small>Fade continuous layers and reveal generated members.</small></span></label>
               </div>
               <p className="opening-type-note">Rectangular and ridge-bounded planes generate common rafters or truss top-chord stations. Full truss webs, birdsmouth cuts, and stations ending at hips, valleys, openings, or clipped edges remain explicitly unresolved rather than estimated.</p>
             </section>
@@ -11864,6 +11868,7 @@ export function ModelBuilderApp() {
   const selectedArc = findArcObject(editor.present, selectedArcId);
   const selectedArcIsEditable = Boolean(selectedArc && arcIsEditable(editor.present, selectedArc));
   const activeStory = editor.present.building.stories.find((story) => story.id === editor.present.building.activeStoryId) ?? editor.present.building.stories[0];
+  const activeStoryIndex = editor.present.building.stories.findIndex((story) => story.id === activeStory.id);
   const activeWallType = editor.present.building.wallTypes.find((wallType) => wallType.id === editor.present.building.activeWallTypeId) ?? editor.present.building.wallTypes[0];
   const activeFoundationWallType = editor.present.building.foundationWallTypes.find((type) => type.id === editor.present.building.activeFoundationWallTypeId) ?? editor.present.building.foundationWallTypes[0];
   const modelEntityCount = editor.present.objects.length + editor.present.lines.length + editor.present.polylines.length + editor.present.circles.length + editor.present.arcs.length;
@@ -15244,8 +15249,27 @@ export function ModelBuilderApp() {
     setViewTarget(VIEW_PRESETS[view.viewMode]);
     setDrawingPlaneFromBuilding(next.building);
     setSelectionForDocument(next, null);
+    setFitViewSignal((value) => value + 1);
     setFileNotice({ text: `${view.name} restored.`, tone: "success" });
   }, [editor.present, setDrawingPlaneFromBuilding, setSelectionForDocument]);
+
+  const activateStoryView = useCallback((storyId: string) => {
+    const next = activateStoryPlanView(editor.present, storyId);
+    if (!next) return;
+    const story = next.building.stories.find((candidate) => candidate.id === storyId);
+    const view = next.savedPlanViews.find((candidate) => candidate.id === next.activeSavedPlanViewId);
+    dispatch({ type: "commit", next });
+    if (view) setViewTarget(VIEW_PRESETS[view.viewMode]);
+    setDrawingPlaneFromBuilding(next.building);
+    setSelectionForDocument(next, null);
+    setFitViewSignal((value) => value + 1);
+    setFileNotice({ text: `${story?.name ?? "Story"} is now the active floor.`, tone: "success" });
+  }, [editor.present, setDrawingPlaneFromBuilding, setSelectionForDocument]);
+
+  const stepActiveStory = useCallback((direction: -1 | 1) => {
+    const nextStory = editor.present.building.stories[activeStoryIndex + direction];
+    if (nextStory) activateStoryView(nextStory.id);
+  }, [activateStoryView, activeStoryIndex, editor.present.building.stories]);
 
   const changeAnnotationScale = useCallback((annotationScale: number) => {
     if (!activeSavedPlanView) return;
@@ -15898,6 +15922,7 @@ export function ModelBuilderApp() {
         : "Ready — select an object; Shift-click builds a selection set, or start Line from Home.";
   const activeDrawingAnchor = arcMode ? arcPoints.at(-1) ?? null : circleMode ? circlePoints.at(-1) ?? null : lineMode ? lineAnchor : polylineMode ? polylineAnchor : rectangleAnchor;
   const activeDrawingTitle = arcMode ? `Arc · ${arcMethodDefinition(arcMethod).label}` : circleMode ? `Circle · ${circleMethodDefinition(circleMethod).label}` : lineMode ? foundationWallMode ? "Foundation Wall" : wallMode ? "Wall" : "Line" : polylineMode ? `Polyline · ${polylineSegmentMode === "arc" ? "Arc" : "Line"}` : "Rectangle";
+  const storyNavigationDisabled = Boolean(arcMode || boundaryMode || breakMode || chamferMode || circleMode || copyMode || dragStatus || extendMode || filletMode || lengthenMode || lineMode || mirrorMode || moveMode || offsetMode || polylineMode || rectangleMode || rotateMode || scaleMode || stretchMode || trimMode);
   const activeDrawingMeta = activeDrawingAnchor
     ? arcMode ? arcPointStage(arcMethod, arcPoints.length) : circleMode ? circlePointStage(circleMethod, circlePoints.length) : lineMode ? "Next point" : polylineMode ? polylineSegmentMode === "arc" ? "Through-point, then endpoint" : "Next vertex" : "Opposite corner"
     : arcMode ? arcPointStage(arcMethod, arcPoints.length) : circleMode ? circlePointStage(circleMethod, circlePoints.length) : lineMode ? "First point" : polylineMode ? "First vertex" : "First corner";
@@ -16237,8 +16262,13 @@ export function ModelBuilderApp() {
         <button type="button" onClick={copyActiveLayerSet}>Copy Set</button>
         <button type="button" onClick={renameActiveLayerSet}>Rename Set</button>
         <span className="plan-view-toolbar-divider" />
-        <label><span>Saved Plan View</span><select value={editor.present.activeSavedPlanViewId} onChange={(event) => selectSavedPlanView(event.target.value)}>{editor.present.savedPlanViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select></label>
-        <button type="button" onClick={createSavedPlanView}>Save Current View</button>
+        <label className="plan-view-selector"><span>Plan View</span><select value={editor.present.activeSavedPlanViewId} onChange={(event) => selectSavedPlanView(event.target.value)}>{editor.present.savedPlanViews.map((view) => <option value={view.id} key={view.id}>{view.name} · {editor.present.building.stories.find((story) => story.id === view.storyId)?.name ?? "Story"}</option>)}</select></label>
+        <div className="story-stepper" role="group" aria-label="Change active floor">
+          <button type="button" className="story-step-button" onClick={() => stepActiveStory(-1)} disabled={storyNavigationDisabled || activeStoryIndex <= 0} aria-label="Move down one floor" title={activeStoryIndex > 0 ? `Move down to ${editor.present.building.stories[activeStoryIndex - 1]?.name}` : "No lower floor"}>↓</button>
+          <span title="Active floor"><small>Floor</small><strong>{activeStory.name}</strong></span>
+          <button type="button" className="story-step-button" onClick={() => stepActiveStory(1)} disabled={storyNavigationDisabled || activeStoryIndex >= editor.present.building.stories.length - 1} aria-label="Move up one floor" title={activeStoryIndex < editor.present.building.stories.length - 1 ? `Move up to ${editor.present.building.stories[activeStoryIndex + 1]?.name}` : "No higher floor"}>↑</button>
+        </div>
+        <button type="button" onClick={createSavedPlanView}>Save View As…</button>
         <output>{activeStory.name} · {viewTarget.id === "top" ? "Plan" : viewTarget.label}</output>
       </section>
       </> : null}
@@ -16821,11 +16851,11 @@ export function ModelBuilderApp() {
           {explorerTab === "objects" ? (
             <section className="object-browser" aria-label="Project objects">
               <div className="object-browser-heading">
-                <div><strong>Entities</strong><span>{editor.present.objects.length + editor.present.lines.length + editor.present.polylines.length + editor.present.circles.length + editor.present.arcs.length}</span></div>
+                <div><strong>{activeStory.name} Entities</strong><span>{editor.present.objects.filter((item) => item.storyId === activeStory.id).length + editor.present.lines.filter((item) => item.storyId === activeStory.id).length + editor.present.polylines.filter((item) => item.storyId === activeStory.id).length + editor.present.circles.filter((item) => item.storyId === activeStory.id).length + editor.present.arcs.filter((item) => item.storyId === activeStory.id).length}</span></div>
                 <div className="entity-add-actions"><button type="button" onClick={arcMode ? finishArcMode : circleMode ? finishCircleMode : lineMode ? finishLineMode : polylineMode ? finishPolylineMode : rectangleMode ? finishRectangleMode : activateLineMode}>{arcMode || circleMode || lineMode || polylineMode || rectangleMode ? "Finish" : "+ Line"}</button><button type="button" onClick={activateWallMode}>+ Wall</button><button type="button" onClick={addBox}>+ Box</button></div>
               </div>
               <div className="object-list">
-                {editor.present.objects.map((object) => {
+                {editor.present.objects.filter((object) => object.storyId === activeStory.id).map((object) => {
                   const layer = findLayer(editor.present, object.layerId);
                   const group = findGroup(editor.present, object.groupId);
                   const selectable = objectIsSelectable(editor.present, object);
@@ -16847,7 +16877,7 @@ export function ModelBuilderApp() {
                     </button>
                   );
                 })}
-                {editor.present.lines.map((line) => {
+                {editor.present.lines.filter((line) => line.storyId === activeStory.id).map((line) => {
                   const layer = findLayer(editor.present, line.layerId);
                   const selectable = Boolean(layer?.visible);
                   const selected = selectedEntityKeys.includes(cadEntityKey({ id: line.id, kind: "line" }));
@@ -16858,19 +16888,19 @@ export function ModelBuilderApp() {
                     </button>
                   );
                 })}
-                {editor.present.polylines.map((polyline) => {
+                {editor.present.polylines.filter((polyline) => polyline.storyId === activeStory.id).map((polyline) => {
                   const layer = findLayer(editor.present, polyline.layerId);
                   const selectable = Boolean(layer?.visible);
                   const selected = selectedEntityKeys.includes(cadEntityKey({ id: polyline.id, kind: "polyline" }));
                   return <button key={polyline.id} type="button" className={`${selected ? "is-selected" : ""}${polyline.locked ? " is-object-locked" : ""}${selectable ? "" : " is-unavailable"}`} onClick={(event) => { if (selectable) selectPolyline(polyline.id, event.shiftKey); }} aria-pressed={selected} aria-disabled={!selectable}><span className="object-state-markers"><span className="object-layer-swatch" style={{ backgroundColor: layer?.color }} />{polyline.locked ? <i title="Locked">◆</i> : null}</span><span><strong>{polyline.name}</strong><small>{layer?.name ?? "Default"} · {polyline.architecturalRole === "roof-plane" ? "Roof Plane" : polyline.architecturalRole === "floor-platform" ? "Floor Platform" : polyline.shape === "rectangle" ? "Rectangle" : polyline.closed ? "Closed polyline" : "Polyline"} · {formatArchitectural(polylineLength(polyline))}</small></span></button>;
                 })}
-                {editor.present.circles.map((circle) => {
+                {editor.present.circles.filter((circle) => circle.storyId === activeStory.id).map((circle) => {
                   const layer = findLayer(editor.present, circle.layerId);
                   const selectable = Boolean(layer?.visible);
                   const selected = selectedEntityKeys.includes(cadEntityKey({ id: circle.id, kind: "circle" }));
                   return <button key={circle.id} type="button" className={`${selected ? "is-selected" : ""}${circle.locked ? " is-object-locked" : ""}${selectable ? "" : " is-unavailable"}`} onClick={(event) => { if (selectable) selectCircle(circle.id, event.shiftKey); }} aria-pressed={selected} aria-disabled={!selectable} title={!layer?.visible ? "Circle layer is hidden" : layer?.locked ? "Circle layer is locked — selection is available, editing is not" : circle.locked ? "Circle is locked — select it to unlock" : undefined}><span className="object-state-markers"><span className="object-layer-swatch" style={{ backgroundColor: layer?.color }} />{circle.locked ? <i title="Locked">◆</i> : null}</span><span><strong>{circle.name}</strong><small>{layer?.name ?? "Default"} · Circle · R {formatArchitectural(circle.radius)}</small></span></button>;
                 })}
-                {editor.present.arcs.map((arc) => {
+                {editor.present.arcs.filter((arc) => arc.storyId === activeStory.id).map((arc) => {
                   const layer = findLayer(editor.present, arc.layerId);
                   const selectable = Boolean(layer?.visible);
                   const selected = selectedEntityKeys.includes(cadEntityKey({ id: arc.id, kind: "arc" }));
@@ -16945,7 +16975,7 @@ export function ModelBuilderApp() {
                 {calculateStoryElevations(editor.present.building).map((calculation) => {
                   const story = editor.present.building.stories.find((candidate) => candidate.id === calculation.storyId);
                   if (!story) return null;
-                  return <button type="button" className={story.id === activeStory.id ? "building-browser-row is-active" : "building-browser-row"} key={story.id} onClick={() => setStoryManagerOpen(true)}><span className="building-browser-icon">≋</span><span><strong>{story.name}</strong><small>Floor {formatSignedArchitectural(calculation.roughFloorElevation)} · Ceiling {formatSignedArchitectural(calculation.roughCeilingElevation)}</small></span>{story.id === activeStory.id ? <b>ACTIVE</b> : null}</button>;
+                  return <button type="button" className={story.id === activeStory.id ? "building-browser-row is-active" : "building-browser-row"} key={story.id} onClick={() => activateStoryView(story.id)} disabled={storyNavigationDisabled} title={storyNavigationDisabled ? "Finish the current drawing or editing command before changing floors" : `Open ${story.name}`}><span className="building-browser-icon">≋</span><span><strong>{story.name}</strong><small>Floor {formatSignedArchitectural(calculation.roughFloorElevation)} · Ceiling {formatSignedArchitectural(calculation.roughCeilingElevation)}</small></span>{story.id === activeStory.id ? <b>ACTIVE</b> : null}</button>;
                 })}
               </section>
               <section className="building-browser-section">

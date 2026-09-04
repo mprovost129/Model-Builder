@@ -12,6 +12,7 @@ import {
   addWallOpening,
   activateLayerSet,
   activateSavedPlanView,
+  activateStoryPlanView,
   assignRoofPlaneType,
   assignWallOpeningType,
   addLayer,
@@ -498,6 +499,32 @@ test("stores complete layer appearance in reusable Layer Sets and Saved Plan Vie
   const restored = activateSavedPlanView(saved, saved.activeSavedPlanViewId);
   assert.ok(restored);
   assert.equal(restored.building.activeStoryId, permit.building.activeStoryId);
+});
+
+test("moves between Stories through coherent working Plan Views", () => {
+  const firstStoryId = DEFAULT_DOCUMENT.building.activeStoryId;
+  const building = addBuildingStory(DEFAULT_DOCUMENT.building, firstStoryId, "above");
+  const secondStoryId = building.activeStoryId;
+  building.activeStoryId = firstStoryId;
+  const configured = updateDocumentBuilding(DEFAULT_DOCUMENT, building);
+  assert.ok(configured);
+
+  const secondFloor = activateStoryPlanView(configured, secondStoryId);
+  assert.ok(secondFloor);
+  assert.equal(secondFloor.building.activeStoryId, secondStoryId);
+  const secondView = secondFloor.savedPlanViews.find((view) => view.id === secondFloor.activeSavedPlanViewId);
+  assert.equal(secondView?.storyId, secondStoryId);
+  assert.equal(secondView?.layerSetId, configured.activeLayerSetId);
+  assert.equal(secondView?.annotationScale, configured.savedPlanViews[0].annotationScale);
+  assert.equal(secondView?.viewMode, "top");
+
+  const savedViewCount = secondFloor.savedPlanViews.length;
+  const firstFloor = activateStoryPlanView(secondFloor, firstStoryId);
+  assert.ok(firstFloor);
+  assert.equal(firstFloor.activeSavedPlanViewId, configured.activeSavedPlanViewId);
+  const secondFloorAgain = activateStoryPlanView(firstFloor, secondStoryId);
+  assert.ok(secondFloorAgain);
+  assert.equal(secondFloorAgain.savedPlanViews.length, savedViewCount);
 });
 
 test("stores the fill master per Layer Set and lets one object leave By Layer", () => {

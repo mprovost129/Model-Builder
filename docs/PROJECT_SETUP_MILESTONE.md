@@ -1,6 +1,6 @@
 # Project Setup Milestone
 
-Status updated: September 3, 2026
+Status updated: September 4, 2026
 
 This file is the implementation record for project setup in Slater Woods Omni Design. It separates working features from planned work so the interface and roadmap do not imply capabilities that are not yet present.
 
@@ -37,6 +37,7 @@ Stories remain the source of project floor, ceiling, and height defaults. Rooms 
 - [x] Detailed Story assembly cards are collapsible and calculated values are visually separated from editable inputs.
 - [x] Dedicated advanced Story, Foundation, Wall, Roof, Door/Window, Framing, Room, and Layer tools remain available.
 - [x] Story floor/ceiling defaults and Room-level overrides use the same underlying model.
+- [x] Plan View selection restores its assigned Story and Layer Set; floor up/down controls navigate the ordered Story stack.
 
 ## Next setup work
 

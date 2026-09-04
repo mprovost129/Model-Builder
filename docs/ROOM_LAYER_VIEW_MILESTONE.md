@@ -25,6 +25,10 @@ The building model already supports Story defaults, Room overrides, layered wall
 - [x] Layer Properties can edit color, print color, line style, line weight, visibility, and lock state.
 - [x] Users can duplicate, rename, and activate Layer Sets.
 - [x] Users can save and activate Plan Views without losing project data.
+- [x] Activating a Plan View restores its Story, Layer Set, current layer, annotation scale, and camera mode.
+- [x] Compact floor arrows move through the ordered Stories, reusing a compatible Plan View or creating one working view on first visit.
+- [x] Top plan view displays and selects only the active Story; 3D views continue to show the complete building.
+- [x] Model Explorer lists the active Story's entities and its Building tab can activate any Story directly.
 - [x] Detecting Rooms creates linked Room Label, area, interior-dimension, and rough-ceiling annotations.
 - [x] A Room Label defaults to `Unassigned`, supports a quick Room-type change, and opens Room Manager on double-click.
 - [x] Area, interior dimensions, and rough ceiling height can be independently hidden with layers or per-annotation visibility.
@@ -35,7 +39,7 @@ The building model already supports Story defaults, Room overrides, layered wall
 ## Verification record
 
 - Project-file schema advanced to version 43 with migration coverage from version 42 and all earlier supported formats.
-- Automated verification: 324 unit tests, production build, two rendered-page checks, and lint all pass.
+- Current automated verification: 350 unit tests, production build, two rendered-page checks, and lint all pass.
 - Visible workflow verification: blank top-view plan, Layer Set copy/rename, Saved Plan View creation, four connected Walls, Room detection, Room Manager, Room-type quick change, and linked ceiling-height editing.
 - The environment does not support native browser prompts, so the new Layer Set and Saved Plan View naming actions use an accessible in-app dialog.
 
@@ -50,4 +54,4 @@ Do not add more ordinary product-object families until this checklist is complet
 3. Expand manufacturer object import and reusable component libraries.
 4. Add annotation/dimension style managers and construction-document views.
 
-Last reviewed: 2026-09-02
+Last reviewed: 2026-09-04

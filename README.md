@@ -195,6 +195,11 @@ polylines, rectangles, Circles, and Arcs.
 - Platform Openings can continue through adjacent Stories as one validated vertical
   path; matching cuts are created or linked, required floor/ceiling cuts are enforced,
   and editing the footprint or purpose updates every connected Story
+- Saved Plan Views bind a Story, Layer Set, current layer, annotation scale, and
+  camera mode. The Plan View toolbar restores those settings, while compact floor
+  arrows move up or down through the Story stack and create a compatible working
+  view only when that Story does not already have one. Top view displays and selects
+  only the active Story; perspective and elevation views retain the complete building
 - CAD-style Stretch with crossing-window endpoint and Polyline-vertex capture, whole-entity window movement, snapped base/target preview, exact signed X/Y displacement, and the `S`/`STRETCH` command alias
 - Exact Line-to-Line, Line-to-Arc, and Arc-to-Arc Fillet with picked-side
   trim/extend behavior and live preview, plus an
