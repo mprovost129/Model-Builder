@@ -465,6 +465,86 @@ import {
 import { ProductLibraryDialog } from "@/features/products/product-library-dialog";
 import { StartDashboard } from "@/features/start-dashboard";
 import {
+  ESCAPE_CANCEL_NOTICES,
+  SELECT_TOOL,
+  toolAfterSelection,
+  toolFlags,
+  type ActiveTool,
+  type BreakMode,
+} from "@/features/tools/tool-types";
+import { ProjectSetupDialog } from "@/features/dialogs/project-setup-dialog";
+import { NameEntryDialog } from "@/features/dialogs/name-entry-dialog";
+import { ReferenceDisplayDialog } from "@/features/dialogs/reference-display-dialog";
+import { RoomManagerDialog } from "@/features/dialogs/room-manager-dialog";
+import { RoofDefaultsDialog } from "@/features/dialogs/roof-defaults-dialog";
+import { WallFramingManagerDialog } from "@/features/dialogs/wall-framing-manager-dialog";
+import { OpeningTypeManagerDialog } from "@/features/dialogs/opening-type-manager-dialog";
+import { FoundationWallManagerDialog } from "@/features/dialogs/foundation-wall-manager-dialog";
+import { WallTypeManagerDialog } from "@/features/dialogs/wall-type-manager-dialog";
+import { StoryAssemblyEditor, StoryDimensionInput } from "@/features/dialogs/assembly-editor";
+import { StoryManagerDialog } from "@/features/dialogs/story-manager-dialog";
+import { titleCase } from "@/lib/text";
+import {
+  ASSEMBLY_ROLE_LABELS,
+  FLOOR_STRUCTURE_PRESET_LABELS,
+  FOUNDATION_CONDITION_LABELS,
+  OPENING_PREVIEW_ROLE_COLORS,
+  PROJECT_TYPE_LABELS,
+  ROOF_LAYER_SIDE_LABELS,
+  STORY_PURPOSE_HELP,
+  STORY_PURPOSE_LABELS,
+  WALL_LAYER_GROUP_LABELS,
+  WALL_PREVIEW_REFERENCE_CODES,
+  WALL_REFERENCE_LINE_LABELS,
+  WALL_USE_LABELS,
+} from "@/features/properties/building-labels";
+import {
+  ArcGeometryControl,
+  CircleGeometryControl,
+  FoundationWallGeometryControl,
+  LineGeometryControl,
+  PolylineGeometryControl,
+  RectangleGeometryControl,
+  WallGeometryControl,
+  WallOpeningComponentMaterialField,
+  WallOpeningNameField,
+  WallOpeningsControl,
+} from "@/features/properties/geometry-controls";
+import {
+  AlignmentControl,
+  BreakControl,
+  ChamferControl,
+  CopyObjectsControl,
+  ExactMoveControl,
+  ExplodeControl,
+  FilletControl,
+  JoinControl,
+  LengthenControl,
+  MirrorControl,
+  MoveObjectControl,
+  OffsetControl,
+  RotationControl,
+  ScaleControl,
+  StretchControl,
+  TrimExtendControl,
+} from "@/features/properties/modify-tool-controls";
+import {
+  EditableObjectName,
+  LayerColorField,
+  LayerNameField,
+} from "@/features/properties/naming-fields";
+import {
+  ArchitecturalPropertyField,
+  DIMENSION_LABELS,
+  DimensionField,
+  LineCoordinateField,
+  NumberPropertyField,
+  PositionField,
+  PropertyGridRow,
+  PropertyGridSection,
+  RoofPlaneFasciaMatchControl,
+} from "@/features/properties/property-fields";
+import {
   applyPreferredProductRepresentations,
   clearPreferredProductRepresentations,
 } from "@/features/products/product-representation-renderer";
@@ -585,7 +665,6 @@ type PolylineViewportCommand =
   | { distance: number; id: number; kind: "distance" }
   | { id: number; kind: "close" | "finish" | "undo" };
 type PolylineSegmentMode = "arc" | "line";
-type BreakMode = "break" | "break-at-point";
 type CircleViewportCommand =
   | { id: number; kind: "coordinate"; point: LinePoint }
   | { distance: number; id: number; kind: "distance" }
@@ -869,10 +948,6 @@ function formatDraftingSpacing(value: number): string {
   if (value < 1) return formatted.replace(/^0'-0 /, "");
   if (value < 12) return formatted.replace(/^0'-/, "");
   return formatted;
-}
-
-function titleCase(value: string): string {
-  return value.replaceAll("-", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 const DEFAULT_CAD_DRAFTING_SETTINGS: CadDraftingSettings = {
@@ -1218,11 +1293,6 @@ type EditorAction =
 
 const HISTORY_LIMIT = 100;
 const RECOVERY_DELAY_MS = 500;
-const DIMENSION_LABELS: Record<DimensionKey, string> = {
-  length: "Length (X)",
-  width: "Width (Y)",
-  height: "Height (Z)",
-};
 
 function historyReducer(state: EditorState, action: EditorAction): EditorState {
   if (action.type === "preview") {
@@ -8134,3698 +8204,6 @@ function Viewport({
   );
 }
 
-function PropertyGridSection({
-  ariaLabel,
-  children,
-  className = "",
-  meta,
-  title,
-}: {
-  ariaLabel?: string;
-  children: ReactNode;
-  className?: string;
-  meta?: string;
-  title: string;
-}) {
-  return (
-    <details className={`property-grid-section ${className}`.trim()} open aria-label={ariaLabel}>
-      <summary>
-        <span className="property-disclosure" aria-hidden="true">▾</span>
-        <strong>{title}</strong>
-        {meta ? <small>{meta}</small> : null}
-      </summary>
-      <div className="property-grid-body">{children}</div>
-    </details>
-  );
-}
-
-function PropertyGridRow({
-  children,
-  className = "",
-  label,
-}: {
-  children: ReactNode;
-  className?: string;
-  label: string;
-}) {
-  return (
-    <div className={`property-table-row ${className}`.trim()}>
-      <span className="property-table-label">{label}</span>
-      <div className="property-table-value">{children}</div>
-    </div>
-  );
-}
-
-function DimensionField({
-  dimensionKey,
-  value,
-  onCommit,
-}: {
-  dimensionKey: DimensionKey;
-  value: number;
-  onCommit: (key: DimensionKey, value: number) => void;
-}) {
-  const [draft, setDraft] = useState(formatArchitectural(value));
-  const [error, setError] = useState("");
-
-  const commit = () => {
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || parsed <= 0) {
-      setError("Enter a dimension greater than 0\".");
-      return;
-    }
-    setError("");
-    onCommit(dimensionKey, snapToSixteenth(parsed));
-  };
-
-  return (
-    <label className="property-table-row property-input-row">
-      <span className="property-table-label">{DIMENSION_LABELS[dimensionKey]}</span>
-      <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") { commit(); event.currentTarget.blur(); }
-            if (event.key === "Escape") {
-              setDraft(formatArchitectural(value));
-              setError("");
-              event.currentTarget.blur();
-            }
-          }}
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${dimensionKey}-error` : undefined}
-          spellCheck={false}
-        />
-        <span>ft-in</span>
-      </div>
-      {error ? <small className="property-row-error" id={`${dimensionKey}-error`} role="alert">{error}</small> : null}
-    </label>
-  );
-}
-
-function ArchitecturalPropertyField({
-  allowNegative = false,
-  allowZero = false,
-  label,
-  onCommit,
-  value,
-}: {
-  allowNegative?: boolean;
-  allowZero?: boolean;
-  label: string;
-  onCommit: (value: number) => void;
-  value: number;
-}) {
-  const formatValue = allowNegative ? formatSignedArchitectural : formatArchitectural;
-  const [draft, setDraft] = useState(formatValue(value));
-  const [error, setError] = useState(false);
-  const commit = () => {
-    const parsed = allowNegative ? parseSignedArchitectural(draft) : parseArchitectural(draft);
-    if (parsed === null || Math.abs(parsed) > MAXIMUM_COORDINATE || (!allowNegative && (allowZero ? parsed < 0 : parsed <= 0))) {
-      setError(true);
-      return;
-    }
-    setError(false);
-    onCommit(snapToSixteenth(parsed));
-  };
-  return (
-    <label className="property-table-row property-input-row">
-      <span className="property-table-label">{label}</span>
-      <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-        <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatValue(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} spellCheck={false} />
-        <span>ft-in</span>
-      </div>
-    </label>
-  );
-}
-
-function NumberPropertyField({ label, max, min, onCommit, step = 0.0625, value }: { label: string; max: number; min: number; onCommit: (value: number) => void; step?: number; value: number }) {
-  const [draft, setDraft] = useState(String(value));
-  const [error, setError] = useState(false);
-  const commit = () => {
-    const parsed = Number(draft);
-    if (!Number.isFinite(parsed) || parsed < min || parsed > max) { setError(true); return; }
-    setError(false);
-    onCommit(snapToSixteenth(parsed));
-  };
-  return <label className="property-table-row property-input-row"><span className="property-table-label">{label}</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input type="number" min={min} max={max} step={step} value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(String(value)); setError(false); event.currentTarget.blur(); } }} aria-label={label} /><span>:12</span></div></label>;
-}
-
-function RoofPlaneFasciaMatchControl({
-  onMatch,
-  options,
-}: {
-  onMatch: (roofPlaneId: string) => void;
-  options: { fasciaTopElevation: number; id: string; name: string }[];
-}) {
-  const [sourceId, setSourceId] = useState(options[0]?.id ?? "");
-  if (!options.length) return <PropertyGridRow label="Match fascia"><span className="property-readout">Create another Roof Plane first</span></PropertyGridRow>;
-  return (
-    <PropertyGridRow label="Match fascia">
-      <span className="roof-fascia-match-field">
-        <select className="property-cell-select" value={sourceId} onChange={(event) => setSourceId(event.target.value)} aria-label="Roof Plane to match">
-          {options.map((option) => <option key={option.id} value={option.id}>{option.name} · {formatSignedArchitectural(option.fasciaTopElevation)}</option>)}
-        </select>
-        <button type="button" onClick={() => onMatch(sourceId)}>Match</button>
-      </span>
-    </PropertyGridRow>
-  );
-}
-
-function PositionField({
-  axis,
-  onCommit,
-  value,
-}: {
-  axis: AxisKey;
-  onCommit: (axis: AxisKey, value: number) => void;
-  value: number;
-}) {
-  const [draft, setDraft] = useState(formatSignedArchitectural(value));
-  const [error, setError] = useState("");
-
-  const commit = () => {
-    const parsed = parseSignedArchitectural(draft);
-    if (parsed === null || Math.abs(parsed) > MAXIMUM_COORDINATE) {
-      setError("Enter a valid signed architectural coordinate.");
-      return;
-    }
-    setError("");
-    onCommit(axis, snapToSixteenth(parsed));
-  };
-
-  return (
-    <label className="property-table-row property-input-row">
-      <span className="property-table-label">{axis.toUpperCase()}</span>
-      <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") { commit(); event.currentTarget.blur(); }
-            if (event.key === "Escape") {
-              setDraft(formatSignedArchitectural(value));
-              setError("");
-              event.currentTarget.blur();
-            }
-          }}
-          aria-label={`${axis.toUpperCase()} position`}
-          aria-invalid={Boolean(error)}
-          spellCheck={false}
-        />
-        <span>ft-in</span>
-      </div>
-      {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-    </label>
-  );
-}
-
-function EditableObjectName({
-  entity = "object",
-  name,
-  onRename,
-}: {
-  entity?: "group" | "object";
-  name: string;
-  onRename: (name: string) => boolean;
-}) {
-  const [draft, setDraft] = useState(name);
-  const [error, setError] = useState("");
-  const [editing, setEditing] = useState(false);
-  const cancelingRef = useRef(false);
-  const focusNameEditor = useCallback((input: HTMLInputElement | null) => {
-    if (!input) return;
-    input.focus();
-    input.select();
-  }, []);
-
-  const commit = () => {
-    if (cancelingRef.current) {
-      cancelingRef.current = false;
-      return;
-    }
-    const normalized = draft.trim();
-    if (!normalized) {
-      setError(`Enter a ${entity} name.`);
-      return;
-    }
-    if (!onRename(normalized)) {
-      setError(`${entity === "group" ? "Group" : "Object"} names must be unique.`);
-      return;
-    }
-    setDraft(normalized);
-    setError("");
-    setEditing(false);
-  };
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        className="selection-name"
-        onClick={() => {
-          setDraft(name);
-          setError("");
-          setEditing(true);
-        }}
-        aria-label={`Rename ${entity} ${name}`}
-        title="Click to rename"
-      >
-        {name}
-      </button>
-    );
-  }
-
-  return (
-    <div className="selection-name-editor">
-      <input
-        ref={focusNameEditor}
-        value={draft}
-        maxLength={120}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") commit();
-          if (event.key === "Escape") {
-            cancelingRef.current = true;
-            setDraft(name);
-            setError("");
-            setEditing(false);
-          }
-        }}
-        aria-label={`Edit ${entity} name`}
-        aria-invalid={Boolean(error)}
-        spellCheck={false}
-      />
-      {error ? <small role="alert">{error}</small> : null}
-    </div>
-  );
-}
-
-function LayerNameField({
-  name,
-  onRename,
-}: {
-  name: string;
-  onRename: (name: string) => boolean;
-}) {
-  const [draft, setDraft] = useState(name);
-  const [error, setError] = useState(false);
-
-  const commit = () => {
-    const normalized = draft.trim();
-    if (!normalized || !onRename(normalized)) {
-      setDraft(name);
-      setError(true);
-      return;
-    }
-    setDraft(normalized);
-    setError(false);
-  };
-
-  return (
-    <input
-      className={error ? "layer-name-input is-invalid" : "layer-name-input"}
-      value={draft}
-      maxLength={80}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
-        if (event.key === "Escape") {
-          setDraft(name);
-          setError(false);
-          event.currentTarget.blur();
-        }
-      }}
-      aria-label={`Layer name: ${name}`}
-      title={error ? "Layer names must be unique" : "Edit layer name"}
-      spellCheck={false}
-    />
-  );
-}
-
-function LayerColorField({ color, label, onCommit }: { color: string; label: string; onCommit: (color: string) => void }) {
-  const [draft, setDraft] = useState(color);
-  return <input className="layer-color-input" type="color" value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => onCommit(draft)} aria-label={label} title={label} />;
-}
-
-function MoveObjectControl({
-  onMove,
-}: {
-  onMove: (axis: AxisKey, distance: number) => boolean;
-}) {
-  const [axis, setAxis] = useState<AxisKey>("x");
-  const [draft, setDraft] = useState('6"');
-  const [error, setError] = useState("");
-
-  const move = (sign: 1 | -1) => {
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || parsed <= 0) {
-      setError("Enter a positive movement distance.");
-      return;
-    }
-    if (!onMove(axis, snapToSixteenth(parsed) * sign)) {
-      setError("That move is outside the supported coordinate range.");
-      return;
-    }
-    setError("");
-  };
-
-  return (
-    <PropertyGridSection className="move-object-panel" title="Move" meta="Exact offset">
-      <PropertyGridRow label="Axis">
-        <div className="axis-switch" aria-label="Movement axis">
-          {(["x", "y", "z"] as AxisKey[]).map((axisOption) => (
-            <button
-              key={axisOption}
-              type="button"
-              className={axis === axisOption ? "is-active" : ""}
-              onClick={() => setAxis(axisOption)}
-            >
-              {axisOption.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </PropertyGridRow>
-      <label className="property-table-row property-input-row">
-        <span className="property-table-label">Distance</span>
-        <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") move(1);
-              if (event.key === "Escape") { setDraft('6"'); setError(""); }
-            }}
-            aria-invalid={Boolean(error)}
-            aria-label="Object movement distance"
-            spellCheck={false}
-          />
-          <span>ft-in</span>
-        </div>
-        {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      </label>
-      <div className="property-action-row move-object-actions">
-        <button type="button" onClick={() => move(-1)}>− {axis.toUpperCase()}</button>
-        <button type="button" onClick={() => move(1)}>+ {axis.toUpperCase()}</button>
-      </div>
-      <p className="property-grid-note">Click a base point and target point in the drawing, or apply an exact X, Y, or Z offset here.</p>
-    </PropertyGridSection>
-  );
-}
-
-function CopyObjectsControl({
-  onCopy,
-  onFinish,
-  selectionCount,
-}: {
-  onCopy: (axis: AxisKey, distance: number) => boolean;
-  onFinish: () => void;
-  selectionCount: number;
-}) {
-  const [axis, setAxis] = useState<AxisKey>("x");
-  const [draft, setDraft] = useState('2\'');
-  const [error, setError] = useState("");
-  const place = (sign: 1 | -1) => {
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || parsed <= 0) {
-      setError("Enter a positive copy distance.");
-      return;
-    }
-    if (!onCopy(axis, snapToSixteenth(parsed) * sign)) {
-      setError("That copy cannot be placed there.");
-      return;
-    }
-    setError("");
-  };
-  return (
-    <PropertyGridSection className="copy-object-panel" title="Copy Mode" meta={`${selectionCount} entit${selectionCount === 1 ? "y" : "ies"}`}>
-      <PropertyGridRow label="Axis"><div className="axis-switch" aria-label="Copy axis">{(["x", "y", "z"] as AxisKey[]).map((axisOption) => <button key={axisOption} type="button" className={axis === axisOption ? "is-active" : ""} onClick={() => setAxis(axisOption)}>{axisOption.toUpperCase()}</button>)}</div></PropertyGridRow>
-      <label className="property-table-row property-input-row"><span className="property-table-label">Offset</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") place(1); if (event.key === "Escape") onFinish(); }} aria-label="Copy offset distance" spellCheck={false} /><span>ft-in</span></div>{error ? <small className="property-row-error" role="alert">{error}</small> : null}</label>
-      <div className="property-action-row copy-offset-actions"><button type="button" onClick={() => place(-1)}>Copy −{axis.toUpperCase()}</button><button type="button" onClick={() => place(1)}>Copy +{axis.toUpperCase()}</button></div>
-      <div className="property-action-row single-action"><button type="button" onClick={onFinish}>Finish Copy</button></div>
-      <p className="property-grid-note">Click a base point and target point in the drawing, or apply an exact X, Y, or Z offset here.</p>
-    </PropertyGridSection>
-  );
-}
-
-function AlignmentControl({
-  anchorName,
-  onAlign,
-}: {
-  anchorName: string;
-  onAlign: (axis: AxisKey, mode: AlignmentMode) => void;
-}) {
-  const [axis, setAxis] = useState<AxisKey>("x");
-  const modes: Array<{ label: string; mode: AlignmentMode }> = [
-    { label: "Minimum", mode: "minimum" },
-    { label: "Center", mode: "center" },
-    { label: "Maximum", mode: "maximum" },
-  ];
-  return (
-    <PropertyGridSection className="alignment-panel" title="Align Objects" meta={`Anchor: ${anchorName}`}>
-      <PropertyGridRow label="Axis"><div className="axis-switch" aria-label="Alignment axis">{(["x", "y", "z"] as AxisKey[]).map((axisOption) => (
-        <button key={axisOption} type="button" className={axis === axisOption ? "is-active" : ""} onClick={() => setAxis(axisOption)}>{axisOption.toUpperCase()}</button>
-      ))}</div></PropertyGridRow>
-      <div className="property-action-row alignment-actions">
-        {modes.map(({ label, mode }) => <button key={mode} type="button" onClick={() => onAlign(axis, mode)}><b>{mode === "minimum" ? "⊣" : mode === "center" ? "↔" : "⊢"}</b><span>{label}</span></button>)}
-      </div>
-      <p className="property-grid-note">The last-selected object stays fixed and anchors the alignment.</p>
-    </PropertyGridSection>
-  );
-}
-
-function RotationControl({
-  baseKey,
-  currentRotation,
-  onBaseChange,
-  onFinish,
-  onRotate,
-  onStart,
-  rotateMode,
-  selectionCount,
-}: {
-  baseKey: RotationBaseKey;
-  currentRotation: string;
-  onBaseChange: (baseKey: RotationBaseKey) => void;
-  onFinish: () => void;
-  onRotate: (degrees: number) => boolean;
-  onStart: () => void;
-  rotateMode: boolean;
-  selectionCount: number;
-}) {
-  const [draft, setDraft] = useState("90");
-  const [error, setError] = useState("");
-  const apply = (sign: 1 | -1) => {
-    const normalized = draft.trim().replace(/°$/, "");
-    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) {
-      setError("Enter a positive angle in degrees.");
-      return;
-    }
-    const degrees = Number(normalized);
-    if (!Number.isFinite(degrees) || degrees <= 0 || degrees > 3600) {
-      setError("Enter an angle from 0° through 3600°.");
-      return;
-    }
-    if (!onRotate(degrees * sign)) {
-      setError("That rotation is outside the supported coordinate range.");
-      return;
-    }
-    setError("");
-  };
-  return (
-    <PropertyGridSection className="rotation-panel" title="Rotation" meta="Z axis">
-      <PropertyGridRow label="Current"><span className="property-readout">{currentRotation}</span></PropertyGridRow>
-      <PropertyGridRow label="Base point">
-        <select className="property-cell-select" value={baseKey} onChange={(event) => onBaseChange(event.target.value as RotationBaseKey)} aria-label="Rotation base point">
-          {ROTATION_BASE_DEFINITIONS.map((base) => <option key={base.key} value={base.key}>{base.label}</option>)}
-        </select>
-      </PropertyGridRow>
-      <label className="property-table-row property-input-row">
-        <span className="property-table-label">Angle</span>
-        <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-          <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") apply(1); if (event.key === "Escape") { setDraft("90"); setError(""); } }} aria-label="Rotation angle" aria-invalid={Boolean(error)} spellCheck={false} />
-          <span>deg</span>
-        </div>
-        {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      </label>
-      <div className="property-action-row rotation-actions"><button type="button" onClick={() => apply(-1)}>↻ Clockwise</button><button type="button" onClick={() => apply(1)}>↺ Counterclockwise</button></div>
-      <div className="property-action-row single-action"><button className={rotateMode ? "is-active" : ""} type="button" onClick={rotateMode ? onFinish : onStart}>{rotateMode ? "Finish Freehand Rotation" : "Start Freehand Rotation"}</button></div>
-      <p className="property-grid-note">Rotates {selectionCount === 1 ? "the selected entity" : `${selectionCount} selected entities`} around the selected base point. Freehand drag snaps to 15°; hold Shift for 1°.</p>
-    </PropertyGridSection>
-  );
-}
-
-function ScaleControl({
-  baseKey,
-  onBaseChange,
-  onFinish,
-  onScale,
-  onStart,
-  scaleMode,
-  selectionCount,
-}: {
-  baseKey: RotationBaseKey;
-  onBaseChange: (baseKey: RotationBaseKey) => void;
-  onFinish: () => void;
-  onScale: (factor: number) => boolean;
-  onStart: () => void;
-  scaleMode: boolean;
-  selectionCount: number;
-}) {
-  const [draft, setDraft] = useState("2");
-  const [error, setError] = useState("");
-  const apply = () => {
-    const factor = Number(draft.trim().replace(/[x×]$/i, ""));
-    if (!Number.isFinite(factor) || factor <= 0 || factor > 1000 || Math.abs(factor - 1) < 0.0001) {
-      setError("Enter a scale factor above 0 and other than 1.");
-      return;
-    }
-    if (!onScale(factor)) {
-      setError("That factor would make the selection too small or place it outside the drawing range.");
-      return;
-    }
-    setError("");
-  };
-  return (
-    <PropertyGridSection className="scale-panel" title="Scale" meta="Uniform plan">
-      <PropertyGridRow label="Base point">
-        <select className="property-cell-select" value={baseKey} onChange={(event) => onBaseChange(event.target.value as RotationBaseKey)} aria-label="Scale base point">
-          {ROTATION_BASE_DEFINITIONS.map((base) => <option key={base.key} value={base.key}>{base.label}</option>)}
-        </select>
-      </PropertyGridRow>
-      <label className="property-table-row property-input-row">
-        <span className="property-table-label">Factor</span>
-        <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-          <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") apply(); if (event.key === "Escape") { setDraft("2"); setError(""); } }} aria-label="Scale factor" aria-invalid={Boolean(error)} spellCheck={false} />
-          <span>×</span>
-        </div>
-        {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      </label>
-      <div className="property-action-row single-action"><button type="button" onClick={apply}>Apply Exact Scale</button></div>
-      <div className="property-action-row single-action"><button className={scaleMode ? "is-active" : ""} type="button" onClick={scaleMode ? onFinish : onStart}>{scaleMode ? "Finish Freehand Scale" : "Start Freehand Scale"}</button></div>
-      <p className="property-grid-note">Scales {selectionCount === 1 ? "the selected entity" : `${selectionCount} selected entities`} uniformly in plan around the selected base point. Box height and drawing elevation stay unchanged.</p>
-    </PropertyGridSection>
-  );
-}
-
-function MirrorControl({
-  keepSource,
-  mirrorMode,
-  onFinish,
-  onKeepSourceChange,
-  onQuickMirror,
-  onStart,
-  selectionCount,
-}: {
-  keepSource: boolean;
-  mirrorMode: boolean;
-  onFinish: () => void;
-  onKeepSourceChange: (keepSource: boolean) => void;
-  onQuickMirror: (orientation: "horizontal" | "vertical") => boolean;
-  onStart: () => void;
-  selectionCount: number;
-}) {
-  return (
-    <PropertyGridSection className="mirror-panel" title="Mirror" meta="Two-point axis">
-      <PropertyGridRow label="Keep source">
-        <label className="property-checkbox"><input type="checkbox" checked={keepSource} onChange={(event) => onKeepSourceChange(event.target.checked)} /><span>{keepSource ? "Yes — create mirrored copies" : "No — replace selection"}</span></label>
-      </PropertyGridRow>
-      <div className="property-action-row rotation-actions"><button type="button" onClick={() => onQuickMirror("vertical")}>↔ Vertical Axis</button><button type="button" onClick={() => onQuickMirror("horizontal")}>↕ Horizontal Axis</button></div>
-      <div className="property-action-row single-action"><button className={mirrorMode ? "is-active" : ""} type="button" onClick={mirrorMode ? onFinish : onStart}>{mirrorMode ? "Cancel Mirror" : "Pick Mirror Axis"}</button></div>
-      <p className="property-grid-note">Mirrors {selectionCount === 1 ? "the selected entity" : `${selectionCount} selected entities`}. Pick two snapped points for any axis, or use a centered horizontal or vertical axis.</p>
-    </PropertyGridSection>
-  );
-}
-
-function OffsetControl({
-  distance,
-  keepSource,
-  offsetMode,
-  onDistanceChange,
-  onFinish,
-  onKeepSourceChange,
-  onStart,
-}: {
-  distance: number;
-  keepSource: boolean;
-  offsetMode: boolean;
-  onDistanceChange: (distance: number) => void;
-  onFinish: () => void;
-  onKeepSourceChange: (keepSource: boolean) => void;
-  onStart: () => void;
-}) {
-  const [draft, setDraft] = useState(() => formatArchitectural(distance));
-  const [error, setError] = useState("");
-  const applyDistance = () => {
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || parsed < 1 / 16) {
-      setError("Enter a positive offset distance of at least 1/16 inch.");
-      return;
-    }
-    onDistanceChange(snapToSixteenth(parsed));
-    setDraft(formatArchitectural(snapToSixteenth(parsed)));
-    setError("");
-  };
-  return (
-    <PropertyGridSection className="offset-panel" title="Offset" meta="Selected 2D entity">
-      <label className="property-table-row property-input-row">
-        <span className="property-table-label">Distance</span>
-        <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-          <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(""); }} onBlur={applyDistance} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatArchitectural(distance)); setError(""); event.currentTarget.blur(); } }} aria-label="Offset distance" aria-invalid={Boolean(error)} spellCheck={false} />
-          <span>ft-in</span>
-        </div>
-        {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      </label>
-      <PropertyGridRow label="Keep source">
-        <label className="property-checkbox"><input type="checkbox" checked={keepSource} onChange={(event) => onKeepSourceChange(event.target.checked)} /><span>{keepSource ? "Yes — create offset copy" : "No — replace source"}</span></label>
-      </PropertyGridRow>
-      <div className="property-action-row single-action"><button className={offsetMode ? "is-active" : ""} type="button" onClick={offsetMode ? onFinish : onStart}>{offsetMode ? "Cancel Offset" : "Pick Offset Side"}</button></div>
-      <p className="property-grid-note">Click the side where the new Line, Polyline, Rectangle, Circle, or Arc should be created. Curves remain native editable curves.</p>
-    </PropertyGridSection>
-  );
-}
-
-function TrimExtendControl({
-  canExtend,
-  extendMode,
-  onExtend,
-  onFinish,
-  onTrim,
-  trimMode,
-}: {
-  canExtend: boolean;
-  extendMode: boolean;
-  onExtend: () => void;
-  onFinish: () => void;
-  onTrim: () => void;
-  trimMode: boolean;
-}) {
-  return (
-    <PropertyGridSection className="trim-extend-panel" title="Trim & Extend" meta="Quick boundaries">
-      <div className="property-action-row rotation-actions">
-        <button className={trimMode ? "is-active" : ""} type="button" onClick={trimMode ? onFinish : onTrim}>{trimMode ? "Cancel Trim" : "Start Trim"}</button>
-        <button className={extendMode ? "is-active" : ""} type="button" onClick={extendMode ? onFinish : onExtend} disabled={!canExtend}>{extendMode ? "Cancel Extend" : "Start Extend"}</button>
-      </div>
-      <p className="property-grid-note">Every other visible 2D entity acts as a boundary. Trim removes the portion you click; Extend moves the nearest open endpoint to the first boundary.</p>
-    </PropertyGridSection>
-  );
-}
-
-function BreakControl({ mode, onCancel, stage }: { mode: BreakMode; onCancel: () => void; stage: 0 | 1 | 2 }) {
-  const next = stage === 0 ? "Select curve" : stage === 1 ? "Select break point" : "Select second point";
-  return (
-    <PropertyGridSection className="break-panel" title={mode === "break" ? "Break" : "Break at Point"} meta="Native curve edit">
-      <PropertyGridRow label="Method"><span className="property-readout">{mode === "break" ? "Remove between two points" : "Split at one point"}</span></PropertyGridRow>
-      <PropertyGridRow label="Next"><span className="property-readout is-active">{next}</span></PropertyGridRow>
-      <div className="property-action-row single-action"><button className="is-active" type="button" onClick={onCancel}>Cancel {mode === "break" ? "Break" : "Break at Point"}</button></div>
-      <p className="property-grid-note">The resulting pieces remain editable Lines, Polylines, or Arcs. Escape cancels and restores the source.</p>
-    </PropertyGridSection>
-  );
-}
-
-function JoinControl({ onJoin, roofPlanes = false, selectionCount }: { onJoin: () => boolean; roofPlanes?: boolean; selectionCount: number }) {
-  return (
-    <PropertyGridSection className="join-panel" title="Join" meta={roofPlanes ? "Roof surfaces" : "Endpoint chain"}>
-      <PropertyGridRow label="Selected"><span className="property-readout">{selectionCount} {roofPlanes ? "Roof Planes" : "open curves"}</span></PropertyGridRow>
-      <div className="property-action-row single-action"><button type="button" onClick={onJoin}>Join Selected {roofPlanes ? "Roofs" : "Curves"}</button></div>
-      <p className="property-grid-note">{roofPlanes ? "Trims both planes to their exact 3D surface intersection and derives the shared ridge, hip, valley, or transition edge for future takeoff." : "Creates one native Line, Arc, Circle, or Polyline when the selected endpoints form one unbranched chain at a common elevation."}</p>
-    </PropertyGridSection>
-  );
-}
-
-function ExplodeControl({
-  hasWidth,
-  onExplode,
-  segmentCount,
-  selectionCount,
-}: {
-  hasWidth: boolean;
-  onExplode: () => boolean;
-  segmentCount: number;
-  selectionCount: number;
-}) {
-  return (
-    <PropertyGridSection className="explode-panel" title="Explode" meta="Native segments">
-      <PropertyGridRow label="Selected"><span className="property-readout">{selectionCount} {selectionCount === 1 ? "Polyline" : "Polylines"}</span></PropertyGridRow>
-      <PropertyGridRow label="Result"><span className="property-readout">{segmentCount} editable Lines / Arcs</span></PropertyGridRow>
-      <div className="property-action-row single-action"><button type="button" onClick={onExplode}>Explode Selected Geometry</button></div>
-      <p className="property-grid-note">Each straight or curved segment becomes an independent native entity on the source layer.{hasWidth ? " Constant Polyline width will be removed because Lines and Arcs do not store width." : ""}</p>
-    </PropertyGridSection>
-  );
-}
-
-function LengthenControl({
-  method,
-  mode,
-  onFinish,
-  onMethodChange,
-  onStart,
-  onValueChange,
-  value,
-}: {
-  method: LengthenMethod;
-  mode: boolean;
-  onFinish: () => void;
-  onMethodChange: (method: LengthenMethod) => void;
-  onStart: () => void;
-  onValueChange: (value: number) => void;
-  value: number;
-}) {
-  const formatValue = () => method === "percent" ? String(value) : formatSignedArchitectural(value);
-  const [draft, setDraft] = useState(formatValue);
-  const [error, setError] = useState("");
-  const applyValue = () => {
-    const parsed = method === "percent" ? Number(draft.trim()) : method === "delta" ? parseSignedArchitectural(draft) : parseArchitectural(draft);
-    if (parsed === null || !Number.isFinite(parsed) || (method === "delta" ? parsed === 0 : parsed <= 0)) {
-      setError(method === "percent" ? "Enter a positive percentage." : method === "delta" ? "Enter a nonzero signed distance." : "Enter a positive total length.");
-      return;
-    }
-    const normalized = method === "percent" ? Math.round(parsed * 1000) / 1000 : snapToSixteenth(parsed);
-    onValueChange(normalized);
-    setDraft(method === "percent" ? String(normalized) : formatSignedArchitectural(normalized));
-    setError("");
-  };
-  return (
-    <PropertyGridSection className="lengthen-panel" title="Lengthen" meta="Open curve endpoint">
-      <label className="property-table-row"><span className="property-table-label">Method</span><select className="property-table-value property-select" value={method} onChange={(event) => { const next = event.target.value as LengthenMethod; onMethodChange(next); setError(""); }} aria-label="Lengthen method"><option value="delta">Delta</option><option value="total">Total</option><option value="percent">Percent</option><option value="dynamic">Dynamic</option></select></label>
-      {method !== "dynamic" ? <label className="property-table-row property-input-row"><span className="property-table-label">{method === "percent" ? "Percent" : method === "delta" ? "Length change" : "Total length"}</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => { setDraft(event.target.value); setError(""); }} onBlur={applyValue} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} aria-label="Lengthen value" spellCheck={false} /><span>{method === "percent" ? "%" : "ft-in"}</span></div>{error ? <small className="property-row-error" role="alert">{error}</small> : null}</label> : null}
-      <div className="property-action-row single-action"><button className={mode ? "is-active" : ""} type="button" onClick={mode ? onFinish : onStart}>{mode ? "Cancel Lengthen" : "Start Lengthen"}</button></div>
-      <p className="property-grid-note">Pick the curve near the endpoint to change. Delta adds or removes length, Total sets the full curve length, Percent scales the full length, and Dynamic follows the cursor while preserving the terminal direction or arc radius.</p>
-    </PropertyGridSection>
-  );
-}
-
-function FilletControl({
-  canApplyPolyline,
-  mode,
-  onApplyPolyline,
-  onCancel,
-  onRadiusChange,
-  radius,
-  stage,
-}: {
-  canApplyPolyline: boolean;
-  mode: boolean;
-  onApplyPolyline: (radius: number) => void;
-  onCancel: () => void;
-  onRadiusChange: (radius: number) => void;
-  radius: number;
-  stage: 0 | 1;
-}) {
-  const [draft, setDraft] = useState(() => formatArchitectural(radius));
-  const [error, setError] = useState("");
-  const apply = (): number | null => {
-    const parsed = parseSignedArchitectural(draft);
-    if (parsed === null || parsed < 0 || parsed > MAXIMUM_COORDINATE) {
-      setError("Enter zero or a positive architectural radius.");
-      return null;
-    }
-    const snapped = snapToSixteenth(parsed);
-    onRadiusChange(snapped);
-    setDraft(formatArchitectural(snapped));
-    setError("");
-    return snapped;
-  };
-  return (
-    <PropertyGridSection className="fillet-panel" title="Fillet" meta="Curves or Polyline">
-      <label className="property-table-row property-input-row">
-        <span className="property-table-label">Radius</span>
-        <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-          <input value={draft} onChange={(event) => { setDraft(event.target.value); setError(""); }} onBlur={apply} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatArchitectural(radius)); setError(""); } }} aria-label="Fillet radius" aria-invalid={Boolean(error)} spellCheck={false} />
-          <span>ft-in</span>
-        </div>
-        {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      </label>
-      <PropertyGridRow label="Next pick"><span className="property-readout">{stage === 0 ? "First curve" : "Second curve"}</span></PropertyGridRow>
-      <div className="property-action-row"><button type="button" onClick={() => { const next = apply(); if (next !== null) onApplyPolyline(next); }} disabled={!canApplyPolyline}>Fillet Polyline</button><button className={mode ? "is-active" : ""} type="button" onClick={onCancel}>Cancel Fillet</button></div>
-      <p className="property-grid-note">Pick the retained sides of two Lines or Arcs, or apply the radius to every valid corner of one selected straight-segment Polyline. Open endpoints stay fixed. The complete edit is one Undo step.</p>
-    </PropertyGridSection>
-  );
-}
-
-function ChamferControl({
-  canApplyPolyline,
-  firstDistance,
-  mode,
-  onApplyPolyline,
-  onCancel,
-  onDistanceChange,
-  secondDistance,
-  stage,
-}: {
-  canApplyPolyline: boolean;
-  firstDistance: number;
-  mode: boolean;
-  onApplyPolyline: (first: number, second: number) => void;
-  onCancel: () => void;
-  onDistanceChange: (first: number, second: number) => void;
-  secondDistance: number;
-  stage: 0 | 1;
-}) {
-  const [firstDraft, setFirstDraft] = useState(() => formatArchitectural(firstDistance));
-  const [secondDraft, setSecondDraft] = useState(() => formatArchitectural(secondDistance));
-  const [error, setError] = useState("");
-  const apply = (): { first: number; second: number } | null => {
-    const first = parseSignedArchitectural(firstDraft);
-    const second = parseSignedArchitectural(secondDraft);
-    if (first === null || second === null || first < 0 || second < 0 || first > MAXIMUM_COORDINATE || second > MAXIMUM_COORDINATE) {
-      setError("Enter zero or positive architectural distances.");
-      return null;
-    }
-    const nextFirst = snapToSixteenth(first);
-    const nextSecond = snapToSixteenth(second);
-    onDistanceChange(nextFirst, nextSecond);
-    setFirstDraft(formatArchitectural(nextFirst));
-    setSecondDraft(formatArchitectural(nextSecond));
-    setError("");
-    return { first: nextFirst, second: nextSecond };
-  };
-  const restore = () => {
-    setFirstDraft(formatArchitectural(firstDistance));
-    setSecondDraft(formatArchitectural(secondDistance));
-    setError("");
-  };
-  const distanceField = (label: string, value: string, setValue: (value: string) => void, ariaLabel: string) => (
-    <label className="property-table-row property-input-row">
-      <span className="property-table-label">{label}</span>
-      <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-        <input value={value} onChange={(event) => { setValue(event.target.value); setError(""); }} onBlur={apply} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") restore(); }} aria-label={ariaLabel} aria-invalid={Boolean(error)} spellCheck={false} />
-        <span>ft-in</span>
-      </div>
-    </label>
-  );
-  return (
-    <PropertyGridSection className="chamfer-panel" title="Chamfer" meta="Lines or Polyline">
-      {distanceField("First distance", firstDraft, setFirstDraft, "Chamfer first distance")}
-      {distanceField("Second distance", secondDraft, setSecondDraft, "Chamfer second distance")}
-      {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      <PropertyGridRow label="Next pick"><span className="property-readout">{stage === 0 ? "First Line" : "Second Line"}</span></PropertyGridRow>
-      <div className="property-action-row"><button type="button" onClick={() => { const next = apply(); if (next) onApplyPolyline(next.first, next.second); }} disabled={!canApplyPolyline}>Chamfer Polyline</button><button className={mode ? "is-active" : ""} type="button" onClick={onCancel}>Cancel Chamfer</button></div>
-      <p className="property-grid-note">The distances follow the selected path order. Pick two Lines, or apply both setbacks to every valid corner of one selected straight-segment Polyline. Open endpoints stay fixed. The complete edit is one Undo step.</p>
-    </PropertyGridSection>
-  );
-}
-
-function StretchControl({
-  onApply,
-  onCancel,
-  targetCount,
-}: {
-  onApply: (delta: LinePoint) => boolean;
-  onCancel: () => void;
-  targetCount: number;
-}) {
-  const [xDraft, setXDraft] = useState("0");
-  const [yDraft, setYDraft] = useState("0");
-  const [error, setError] = useState("");
-  const apply = () => {
-    const x = parseSignedArchitectural(xDraft);
-    const y = parseSignedArchitectural(yDraft);
-    if (x === null || y === null || (Math.abs(x) < 1 / 16 && Math.abs(y) < 1 / 16)) {
-      setError("Enter a nonzero signed X or Y displacement.");
-      return;
-    }
-    if (!onApply({ x: snapToSixteenth(x), y: snapToSixteenth(y), z: 0 })) {
-      setError("That displacement would create invalid geometry.");
-      return;
-    }
-    setError("");
-  };
-  return (
-    <PropertyGridSection className="stretch-panel" title="Stretch" meta={`${targetCount} target${targetCount === 1 ? "" : "s"}`}>
-      <PropertyGridRow label="X displacement"><input value={xDraft} onChange={(event) => { setXDraft(event.target.value); setError(""); }} aria-label="Stretch X displacement" spellCheck={false} /></PropertyGridRow>
-      <PropertyGridRow label="Y displacement"><input value={yDraft} onChange={(event) => { setYDraft(event.target.value); setError(""); }} aria-label="Stretch Y displacement" spellCheck={false} /></PropertyGridRow>
-      <div className="property-action-row rotation-actions">
-        <button type="button" onClick={apply}>Apply exact</button>
-        <button type="button" onClick={onCancel}>Cancel</button>
-      </div>
-      {error ? <p className="property-grid-note field-error-text">{error}</p> : null}
-      <p className="property-grid-note">Click a base point and target point in the drawing, or enter signed X/Y displacements here.</p>
-    </PropertyGridSection>
-  );
-}
-
-function ExactMoveControl({
-  model,
-  onCommit,
-  selectedFaceIndex,
-}: {
-  model: BoxModel;
-  onCommit: (next: BoxModel) => void;
-  selectedFaceIndex: number | null;
-}) {
-  const [direction, setDirection] = useState<"pull" | "push">("pull");
-  const [draft, setDraft] = useState('6"');
-  const [error, setError] = useState("");
-
-  const apply = () => {
-    if (selectedFaceIndex === null) return;
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || parsed <= 0) {
-      setError("Enter a positive movement distance.");
-      return;
-    }
-    const signedDistance = direction === "pull" ? parsed : -parsed;
-    const next = moveBoxFace(model, selectedFaceIndex, signedDistance);
-    if (!next) {
-      setError("That push would make the box too small.");
-      return;
-    }
-    setError("");
-    onCommit(next);
-  };
-
-  return (
-    <PropertyGridSection className="push-pull-panel" title="Push / Pull" meta="Opposite face fixed">
-      <PropertyGridRow label="Direction">
-        <div className="direction-switch" aria-label="Movement direction">
-          <button
-            type="button"
-            className={direction === "pull" ? "is-active" : ""}
-            onClick={() => setDirection("pull")}
-          >
-            Pull
-          </button>
-          <button
-            type="button"
-            className={direction === "push" ? "is-active" : ""}
-            onClick={() => setDirection("push")}
-          >
-            Push
-          </button>
-        </div>
-      </PropertyGridRow>
-      <label className="property-table-row property-input-row">
-        <span className="property-table-label">Distance</span>
-        <div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}>
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") apply();
-              if (event.key === "Escape") { setDraft('6"'); setError(""); }
-            }}
-            disabled={selectedFaceIndex === null}
-            aria-invalid={Boolean(error)}
-            aria-label="Exact push or pull distance"
-            spellCheck={false}
-          />
-          <span>ft-in</span>
-        </div>
-        {error ? <small className="property-row-error" role="alert">{error}</small> : null}
-      </label>
-      <div className="property-action-row single-action"><button className="apply-move" type="button" onClick={apply} disabled={selectedFaceIndex === null}>Apply {direction}</button></div>
-      <p className="property-grid-note">{selectedFaceIndex === null ? "Select a face to enable movement." : "Drag the highlighted face or apply an exact distance."}</p>
-    </PropertyGridSection>
-  );
-}
-
-function ArcGeometryControl({ arc, onUpdate }: { arc: ArcObject; onUpdate: (geometry: ArcGeometry) => boolean }) {
-  const updateCenter = (axis: "x" | "y" | "z", draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    return onUpdate({ ...arc, center: { ...arc.center, [axis]: snapToSixteenth(value) } });
-  };
-  const updateRadius = (draft: string) => {
-    const value = parseArchitectural(draft);
-    if (value === null || value < 1 / 16) return false;
-    return onUpdate({ ...arc, radius: snapToSixteenth(value) });
-  };
-  const start = arcPointAtFraction(arc, 0);
-  const end = arcPointAtFraction(arc, 1);
-  return (
-    <PropertyGridSection title="Geometry" meta="Three-point Arc">
-      <LineCoordinateField label="Center X" value={arc.center.x} onCommit={(draft) => updateCenter("x", draft)} />
-      <LineCoordinateField label="Center Y" value={arc.center.y} onCommit={(draft) => updateCenter("y", draft)} />
-      <LineCoordinateField label="Elevation" value={arc.center.z} onCommit={(draft) => updateCenter("z", draft)} />
-      <LineCoordinateField label="Radius" value={arc.radius} onCommit={updateRadius} />
-      <PropertyGridRow label="Sweep"><span className="property-readout">{Math.round(arcSweepAngle(arc) * 1000) / 1000}° · {arc.counterclockwise ? "counterclockwise" : "clockwise"}</span></PropertyGridRow>
-      <PropertyGridRow label="Arc length"><span className="property-readout">{formatArchitectural(arcLength(arc))}</span></PropertyGridRow>
-      <PropertyGridRow label="Start"><span className="property-readout">{formatSignedArchitectural(start.x)}, {formatSignedArchitectural(start.y)}</span></PropertyGridRow>
-      <PropertyGridRow label="End"><span className="property-readout">{formatSignedArchitectural(end.x)}, {formatSignedArchitectural(end.y)}</span></PropertyGridRow>
-      <p className="property-grid-note">The green center grip moves the Arc. Blue endpoint and midpoint grips reshape it through three points.</p>
-    </PropertyGridSection>
-  );
-}
-
-function CircleGeometryControl({ circle, onUpdate }: { circle: CircleObject; onUpdate: (geometry: CircleGeometry) => boolean }) {
-  const updateCenter = (axis: "x" | "y" | "z", draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    return onUpdate({ ...circle, center: { ...circle.center, [axis]: snapToSixteenth(value) } });
-  };
-  const updateRadius = (draft: string) => {
-    const value = parseArchitectural(draft);
-    if (value === null || value < 1 / 16) return false;
-    return onUpdate({ ...circle, radius: snapToSixteenth(value) });
-  };
-  return (
-    <PropertyGridSection title="Geometry" meta="Center · radius">
-      <LineCoordinateField label="Center X" value={circle.center.x} onCommit={(draft) => updateCenter("x", draft)} />
-      <LineCoordinateField label="Center Y" value={circle.center.y} onCommit={(draft) => updateCenter("y", draft)} />
-      <LineCoordinateField label="Elevation" value={circle.center.z} onCommit={(draft) => updateCenter("z", draft)} />
-      <LineCoordinateField label="Radius" value={circle.radius} onCommit={updateRadius} />
-      <PropertyGridRow label="Diameter"><span className="property-readout">{formatArchitectural(circleDiameter(circle))}</span></PropertyGridRow>
-      <PropertyGridRow label="Circumference"><span className="property-readout">{formatArchitectural(circleCircumference(circle))}</span></PropertyGridRow>
-      <PropertyGridRow label="Area"><span className="property-readout">{(circleArea(circle) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft</span></PropertyGridRow>
-      <p className="property-grid-note">The green center grip moves the Circle. Four blue quadrant grips change its radius while keeping the center fixed.</p>
-    </PropertyGridSection>
-  );
-}
-
-function PolylineGeometryControl({ elevationLocked = false, polyline, onUpdate }: { elevationLocked?: boolean; polyline: PolylineObject; onUpdate: (geometry: PolylineGeometry) => boolean }) {
-  const updateElevation = (draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    return onUpdate({ ...polyline, elevation: snapToSixteenth(value) });
-  };
-  const updateWidth = (draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || value < 0 || value > MAXIMUM_COORDINATE) return false;
-    return onUpdate({ ...polyline, width: snapToSixteenth(value) });
-  };
-  const first = polyline.vertices[0];
-  const last = polyline.vertices.at(-1)!;
-  const arcCount = polyline.bulges?.filter((bulge) => Math.abs(bulge) > 1e-10).length ?? 0;
-  return (
-    <PropertyGridSection title="Geometry" meta="XY work plane">
-      {elevationLocked ? <PropertyGridRow label="Rough floor"><span className="property-readout">{formatSignedArchitectural(polyline.elevation)} · Story controlled</span></PropertyGridRow> : <LineCoordinateField label="Elevation" value={polyline.elevation} onCommit={updateElevation} />}
-      <LineCoordinateField label="Constant width" value={polyline.width ?? 0} onCommit={updateWidth} unsigned />
-      <PropertyGridRow label="Vertices"><span className="property-readout">{polyline.vertices.length}</span></PropertyGridRow>
-      <PropertyGridRow label="Arc segments"><span className="property-readout">{arcCount}</span></PropertyGridRow>
-      <PropertyGridRow label="Closed"><span className="property-readout">{polyline.closed ? "Yes" : "No"}</span></PropertyGridRow>
-      {polyline.closed ? <PropertyGridRow label="Area"><span className="property-readout">{(polylineArea(polyline) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft</span></PropertyGridRow> : null}
-      <PropertyGridRow label="Total length"><span className="property-readout">{formatArchitectural(polylineLength(polyline))}</span></PropertyGridRow>
-      <PropertyGridRow label="First vertex"><span className="property-readout">{formatSignedArchitectural(first.x)}, {formatSignedArchitectural(first.y)}</span></PropertyGridRow>
-      <PropertyGridRow label="Last vertex"><span className="property-readout">{formatSignedArchitectural(last.x)}, {formatSignedArchitectural(last.y)}</span></PropertyGridRow>
-      <p className="property-grid-note">{elevationLocked ? "Drag a blue vertex grip to reshape the footprint. Its elevation follows the assigned Story rough floor." : "Drag a blue vertex grip to reshape the Polyline. Elevation moves the complete entity to another XY work plane."}</p>
-    </PropertyGridSection>
-  );
-}
-
-function RectangleGeometryControl({ elevationLocked = false, rectangle, onUpdate }: { elevationLocked?: boolean; rectangle: PolylineObject; onUpdate: (geometry: PolylineGeometry) => boolean }) {
-  const first = rectangle.vertices[0];
-  const opposite = rectangle.vertices[2];
-  const dimensions = rectangleDimensions(first, opposite);
-  const updateBase = (axis: "x" | "y", draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    const snapped = snapToSixteenth(value);
-    const delta = snapped - first[axis];
-    return onUpdate({ ...rectangle, vertices: rectangle.vertices.map((point) => ({ ...point, [axis]: snapToSixteenth(point[axis] + delta) })) });
-  };
-  const updateDimension = (axis: "x" | "y", draft: string) => {
-    const value = parseArchitectural(draft);
-    if (value === null || value < 1 / 16) return false;
-    const nextOpposite = { ...opposite };
-    nextOpposite[axis] = first[axis] + Math.sign(opposite[axis] - first[axis]) * snapToSixteenth(value);
-    const geometry = rectangleFromCorners(first, nextOpposite, rectangle.elevation, { width: rectangle.width ?? 0 });
-    return Boolean(geometry && onUpdate(geometry));
-  };
-  const updateElevation = (draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    return onUpdate({ ...rectangle, elevation: snapToSixteenth(value) });
-  };
-  const updateWidth = (draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || value < 0 || value > MAXIMUM_COORDINATE) return false;
-    return onUpdate({ ...rectangle, width: snapToSixteenth(value) });
-  };
-  return (
-    <PropertyGridSection title="Geometry" meta="Rectangular constraint">
-      <LineCoordinateField label="Base X" value={first.x} onCommit={(draft) => updateBase("x", draft)} />
-      <LineCoordinateField label="Base Y" value={first.y} onCommit={(draft) => updateBase("y", draft)} />
-      {elevationLocked ? <PropertyGridRow label="Rough floor"><span className="property-readout">{formatSignedArchitectural(rectangle.elevation)} · Story controlled</span></PropertyGridRow> : <LineCoordinateField label="Elevation" value={rectangle.elevation} onCommit={updateElevation} />}
-      <LineCoordinateField label="Constant width" value={rectangle.width ?? 0} onCommit={updateWidth} unsigned />
-      <LineCoordinateField label="Width (X)" value={dimensions.width} onCommit={(draft) => updateDimension("x", draft)} />
-      <LineCoordinateField label="Height (Y)" value={dimensions.height} onCommit={(draft) => updateDimension("y", draft)} />
-      <PropertyGridRow label="Area"><span className="property-readout">{(dimensions.area / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft</span></PropertyGridRow>
-      <PropertyGridRow label="Perimeter"><span className="property-readout">{formatArchitectural(dimensions.perimeter)}</span></PropertyGridRow>
-      <p className="property-grid-note">{elevationLocked ? "Corner and edge grips reshape the footprint; the elevation follows its assigned Story rough floor." : "Corner grips resize in two directions. Edge grips resize one side. The center grip moves the rectangle."}</p>
-    </PropertyGridSection>
-  );
-}
-
-function LineGeometryControl({ line, onUpdate }: { line: LineObject; onUpdate: (geometry: LineGeometry) => boolean }) {
-  const [lengthDraft, setLengthDraft] = useState(formatArchitectural(lineLength(line)));
-  const [angleDraft, setAngleDraft] = useState(String(lineAngle(line)));
-  const [elevationDraft, setElevationDraft] = useState(String(lineElevationAngle(line)));
-  const [error, setError] = useState("");
-  const updatePoint = (endpoint: "start" | "end", axis: "x" | "y" | "z", draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    const geometry = { start: { ...line.start }, end: { ...line.end } };
-    geometry[endpoint][axis] = snapToSixteenth(value);
-    return onUpdate(geometry);
-  };
-  const applyPolar = () => {
-    const length = parseArchitectural(lengthDraft);
-    const normalizedAngle = angleDraft.trim().replace(/°$/, "");
-    const angle = Number(normalizedAngle);
-    const elevation = Number(elevationDraft.trim().replace(/°$/, ""));
-    if (length === null || length < 1 / 16 || !Number.isFinite(angle) || !Number.isFinite(elevation) || Math.abs(elevation) > 90) {
-      setError("Enter a valid length, plan angle, and elevation from −90° through 90°.");
-      return;
-    }
-    const geometry = lineFromLengthAngles(line.start, snapToSixteenth(length), angle, elevation);
-    if (!geometry || !onUpdate(geometry)) {
-      setError("That line is outside the supported drawing area.");
-      return;
-    }
-    setError("");
-  };
-  const coordinateRows: Array<{ endpoint: "start" | "end"; axis: "x" | "y" | "z"; label: string }> = [
-    { endpoint: "start", axis: "x", label: "Start X" },
-    { endpoint: "start", axis: "y", label: "Start Y" },
-    { endpoint: "start", axis: "z", label: "Start Z" },
-    { endpoint: "end", axis: "x", label: "End X" },
-    { endpoint: "end", axis: "y", label: "End Y" },
-    { endpoint: "end", axis: "z", label: "End Z" },
-  ];
-  return (
-    <>
-      <PropertyGridSection title="Geometry" meta="3D coordinates">
-        {coordinateRows.map(({ endpoint, axis, label }) => (
-          <LineCoordinateField key={`${endpoint}-${axis}-${line[endpoint][axis]}`} label={label} value={line[endpoint][axis]} onCommit={(draft) => updatePoint(endpoint, axis, draft)} />
-        ))}
-      </PropertyGridSection>
-      <PropertyGridSection title="Polar" meta="Start point fixed">
-        <label className="property-table-row property-input-row"><span className="property-table-label">Length</span><div className="property-table-value field-shell"><input value={lengthDraft} onChange={(event) => { setLengthDraft(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyPolar(); }} aria-label="Line length" spellCheck={false} /><span>ft-in</span></div></label>
-        <label className="property-table-row property-input-row"><span className="property-table-label">Angle</span><div className="property-table-value field-shell"><input value={angleDraft} onChange={(event) => { setAngleDraft(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyPolar(); }} aria-label="Line angle" spellCheck={false} /><span>deg</span></div></label>
-        <label className="property-table-row property-input-row"><span className="property-table-label">Elevation</span><div className="property-table-value field-shell"><input value={elevationDraft} onChange={(event) => { setElevationDraft(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") applyPolar(); }} aria-label="Line elevation angle" spellCheck={false} /><span>deg</span></div></label>
-        {error ? <p className="property-grid-note property-row-error" role="alert">{error}</p> : null}
-        <div className="property-action-row single-action"><button type="button" onClick={applyPolar}>Apply Length + Angles</button></div>
-        <p className="property-grid-note">Plan angles measure counterclockwise from +X. Elevation measures above or below the XY plane.</p>
-      </PropertyGridSection>
-    </>
-  );
-}
-
-function WallGeometryControl({
-  document,
-  line,
-  onUpdate,
-}: {
-  document: ModelDocument;
-  line: LineObject;
-  onUpdate: (geometry: LineGeometry) => boolean;
-}) {
-  const vertical = wallVerticalExtent(document, line);
-  const referenceLabel = WALL_REFERENCE_LINE_LABELS[line.wallReferenceLine ?? "wall-center"];
-  const exteriorSideLabel = line.wallExteriorSide === "right" ? "right" : "left";
-  const updatePoint = (endpoint: "start" | "end", axis: "x" | "y", draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    const geometry = { start: { ...line.start }, end: { ...line.end } };
-    geometry[endpoint][axis] = snapToSixteenth(value);
-    return onUpdate(geometry);
-  };
-  return (
-    <PropertyGridSection title="Geometry" meta="Story controlled">
-      <LineCoordinateField label="Start X" value={line.start.x} onCommit={(draft) => updatePoint("start", "x", draft)} />
-      <LineCoordinateField label="Start Y" value={line.start.y} onCommit={(draft) => updatePoint("start", "y", draft)} />
-      <LineCoordinateField label="End X" value={line.end.x} onCommit={(draft) => updatePoint("end", "x", draft)} />
-      <LineCoordinateField label="End Y" value={line.end.y} onCommit={(draft) => updatePoint("end", "y", draft)} />
-      <PropertyGridRow label="Length"><span className="property-readout">{formatArchitectural(Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y))}</span></PropertyGridRow>
-      <PropertyGridRow label="Plan angle"><span className="property-readout">{lineAngle(line)}°</span></PropertyGridRow>
-      <PropertyGridRow label="Automatic base"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.baseElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Automatic top"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.topElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Wall height"><span className="property-readout">{vertical ? formatArchitectural(vertical.height) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Vertical source"><span className="property-readout">{vertical?.source === "rooms" ? `${vertical.adjacentRoomIds.length} adjacent Room${vertical.adjacentRoomIds.length === 1 ? "" : "s"}` : "Story defaults"}</span></PropertyGridRow>
-      <p className="property-grid-note">X and Y define the {referenceLabel.toLowerCase()}. Looking from Start to End, the exterior is on the {exteriorSideLabel}; base and top automatically follow adjacent Room rough conditions, then fall back to the Story defaults.</p>
-      {vertical?.hasDifferentRoomFloors || vertical?.hasDifferentRoomCeilings ? <p className="property-grid-note">Adjacent Rooms have different rough conditions. This Wall spans their full structural envelope; stepped finish profiles will be generated separately.</p> : null}
-    </PropertyGridSection>
-  );
-}
-
-function FoundationWallGeometryControl({
-  document,
-  line,
-  onUpdate,
-}: {
-  document: ModelDocument;
-  line: LineObject;
-  onUpdate: (geometry: LineGeometry) => boolean;
-}) {
-  const vertical = foundationWallVerticalExtent(document, line);
-  const type = document.building.foundationWallTypes.find((candidate) => candidate.id === line.foundationWallTypeId);
-  const referenceLabel = WALL_REFERENCE_LINE_LABELS[line.wallReferenceLine ?? "exterior-main"];
-  const exteriorSideLabel = line.wallExteriorSide === "right" ? "right" : "left";
-  const updatePoint = (endpoint: "start" | "end", axis: "x" | "y", draft: string) => {
-    const value = parseSignedArchitectural(draft);
-    if (value === null || Math.abs(value) > MAXIMUM_COORDINATE) return false;
-    const geometry = { start: { ...line.start }, end: { ...line.end } };
-    geometry[endpoint][axis] = snapToSixteenth(value);
-    return onUpdate(geometry);
-  };
-  return (
-    <PropertyGridSection title="Geometry" meta="Story-controlled foundation">
-      <LineCoordinateField label="Start X" value={line.start.x} onCommit={(draft) => updatePoint("start", "x", draft)} />
-      <LineCoordinateField label="Start Y" value={line.start.y} onCommit={(draft) => updatePoint("start", "y", draft)} />
-      <LineCoordinateField label="End X" value={line.end.x} onCommit={(draft) => updatePoint("end", "x", draft)} />
-      <LineCoordinateField label="End Y" value={line.end.y} onCommit={(draft) => updatePoint("end", "y", draft)} />
-      <PropertyGridRow label="Length"><span className="property-readout">{formatArchitectural(Math.hypot(line.end.x - line.start.x, line.end.y - line.start.y))}</span></PropertyGridRow>
-      <PropertyGridRow label="Concrete top"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.topElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Concrete bottom"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.baseElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Footing bottom"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.footingBottomElevation) : "—"}</span></PropertyGridRow>
-      <PropertyGridRow label="Sill top"><span className="property-readout">{vertical ? formatSignedArchitectural(vertical.sillTopElevation) : "—"}</span></PropertyGridRow>
-      <p className="property-grid-note">X and Y define the {referenceLabel.toLowerCase()}. Looking from Start to End, the exterior is on the {exteriorSideLabel}. Concrete, footing, and foundation-hosted sill geometry comes from {type?.name ?? "the assigned Foundation Wall type"}.</p>
-    </PropertyGridSection>
-  );
-}
-
-function WallOpeningNameField({ opening, onUpdate }: { opening: WallOpening; onUpdate: (change: Partial<WallOpening>) => boolean }) {
-  const [draft, setDraft] = useState(opening.name);
-  const [error, setError] = useState(false);
-  const commit = () => {
-    if (!onUpdate({ name: draft })) {
-      setDraft(opening.name);
-      setError(true);
-      return;
-    }
-    setError(false);
-  };
-  return (
-    <label className="property-table-row property-input-row"><span className="property-table-label">Name</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(opening.name); setError(false); event.currentTarget.blur(); } }} aria-label="Opening name" spellCheck={false} /></div></label>
-  );
-}
-
-function WallOpeningComponentMaterialField({ material, onUpdate }: { material: string; onUpdate: (material: string) => boolean }) {
-  const [draft, setDraft] = useState(material);
-  const [error, setError] = useState(false);
-  const commit = () => {
-    const next = draft.trim();
-    if (!next || !onUpdate(next)) {
-      setDraft(material);
-      setError(true);
-      return;
-    }
-    setError(false);
-  };
-  return <label className="property-table-row property-input-row"><span className="property-table-label">Part material</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(material); setError(false); event.currentTarget.blur(); } }} aria-label="Opening component material" spellCheck={false} /></div></label>;
-}
-
-function WallOpeningsControl({
-  building,
-  layers,
-  line,
-  onAdd,
-  onAssignType,
-  onDelete,
-  onUpdate,
-}: {
-  building: BuildingStructure;
-  layers: ModelDocument["layers"];
-  line: LineObject;
-  onAdd: (kind: WallOpeningKind) => string | null;
-  onAssignType: (openingId: string, typeId: string) => boolean;
-  onDelete: (openingId: string) => void;
-  onUpdate: (openingId: string, change: Partial<WallOpening>) => boolean;
-}) {
-  const [selectedId, setSelectedId] = useState<string | null>(line.wallOpenings[0]?.id ?? null);
-  const initialOpeningType = building.openingTypes.find((type) => type.id === line.wallOpenings[0]?.wallOpeningTypeId) ?? null;
-  const [selectedComponentId, setSelectedComponentId] = useState(initialOpeningType?.components[0]?.id ?? "");
-  const opening = line.wallOpenings.find((candidate) => candidate.id === selectedId) ?? line.wallOpenings.at(-1) ?? null;
-  const add = (kind: WallOpeningKind) => {
-    const id = onAdd(kind);
-    if (id) setSelectedId(id);
-  };
-  const updateDimension = (field: "centerOffset" | "headerBottomHeight", draft: string) => {
-    const value = parseArchitectural(draft);
-    if (value === null || (field === "centerOffset" ? value < 0 : value <= 0)) return false;
-    return opening ? onUpdate(opening.id, { [field]: snapToSixteenth(value) }) : false;
-  };
-  const componentType = building.openingTypes.find((type) => type.id === opening?.wallOpeningTypeId) ?? null;
-  const resolvedComponents = componentType && opening ? resolveOpeningComponents(componentType, opening.componentOverrides) : null;
-  const baseComponent = componentType?.components.find((component) => component.id === selectedComponentId) ?? componentType?.components[0] ?? null;
-  const resolvedComponent = baseComponent ? resolvedComponents?.find((component) => component.id === baseComponent.id) ?? null : null;
-  const componentOverride = opening && baseComponent ? opening.componentOverrides.find((override) => override.componentId === baseComponent.id) ?? null : null;
-  const updateComponentOverride = (change: Partial<Omit<OpeningComponentOverride, "componentId">>) => {
-    if (!opening || !baseComponent) return false;
-    const nextOverride = { ...(componentOverride ?? { componentId: baseComponent.id }), ...change, componentId: baseComponent.id };
-    const componentOverrides = [...opening.componentOverrides.filter((override) => override.componentId !== baseComponent.id), nextOverride].sort((first, second) => first.componentId.localeCompare(second.componentId));
-    return onUpdate(opening.id, { componentOverrides });
-  };
-  const resetComponentOverride = () => opening && baseComponent ? onUpdate(opening.id, { componentOverrides: opening.componentOverrides.filter((override) => override.componentId !== baseComponent.id) }) : false;
-  const updateComponentDimension = (field: "depth" | "depthOffset" | "inset" | "profileWidth", draft: string, signed = false, allowZero = false) => {
-    const value = (signed ? parseSignedArchitectural : parseArchitectural)(draft);
-    if (value === null || (!signed && (allowZero ? value < 0 : value <= 0))) return false;
-    return updateComponentOverride({ [field]: snapToSixteenth(value) });
-  };
-  const wallType = building.wallTypes.find((type) => type.id === line.wallTypeId) ?? null;
-  const resolvedHeader = opening ? resolveWallHeaderType(building, line.wallTypeId, opening.wallOpeningTypeId, opening.headerTypeIdOverride) : null;
-  const compatibleHeaders = building.headerTypes.filter((headerType) => {
-    const required = wallHeaderTypeRequiredMainThickness(headerType);
-    return !wallType || required === 0 || required <= wallLayerGroupThickness(wallType, "main") + 1e-8;
-  });
-  const compatibleTypes = building.openingTypes.filter((type) => type.kind === opening?.kind);
-  const openingLayer = layers.find((layer) => layer.id === opening?.layerId) ?? layers[0];
-  const updateFillOverride = (change: { color?: string; visible?: boolean } | null) => {
-    if (!opening || !openingLayer) return false;
-    const current = opening.fillOverride ?? { color: openingLayer.fillColor, visible: openingLayer.fillVisible };
-    return onUpdate(opening.id, { fillOverride: change === null ? null : { ...current, ...change } });
-  };
-  return (
-    <PropertyGridSection title="Openings" meta={`${line.wallOpenings.length} hosted`}>
-      <div className="property-action-row"><button type="button" onClick={() => add("door")}>+ Door</button><button type="button" onClick={() => add("window")}>+ Window</button></div>
-      {line.wallOpenings.length > 0 ? <PropertyGridRow label="Opening"><select className="property-cell-select" value={opening?.id ?? ""} onChange={(event) => { const nextOpening = line.wallOpenings.find((candidate) => candidate.id === event.target.value); const nextType = building.openingTypes.find((type) => type.id === nextOpening?.wallOpeningTypeId); setSelectedId(event.target.value); setSelectedComponentId(nextType?.components[0]?.id ?? ""); }} aria-label="Hosted wall opening">{line.wallOpenings.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.kind === "door" ? "Door" : "Window"}</option>)}</select></PropertyGridRow> : <p className="property-grid-note">Add a Door or Window to cut its rough opening through every Wall layer.</p>}
-      {opening ? <>
-        <WallOpeningNameField key={`${opening.id}:${opening.name}`} opening={opening} onUpdate={(change) => onUpdate(opening.id, change)} />
-        <PropertyGridRow label="Layer"><select className="property-cell-select" value={opening.layerId} onChange={(event) => onUpdate(opening.id, { layerId: event.target.value })} aria-label={`${opening.kind} layer`}>{layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}{!layer.visible ? " (hidden)" : ""}</option>)}</select></PropertyGridRow>
-        {openingLayer ? <>
-          <PropertyGridRow label="By Layer"><button type="button" className={!opening.fillOverride ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => updateFillOverride(opening.fillOverride ? null : {})}>{!opening.fillOverride ? "✓ Inherited" : "○ Use Layer"}</button></PropertyGridRow>
-          <PropertyGridRow label="Fill color"><span className="object-fill-field"><LayerColorField key={`${opening.id}:fill:${opening.fillOverride?.color ?? openingLayer.fillColor}`} color={opening.fillOverride?.color ?? openingLayer.fillColor} label={`${opening.name} fill color`} onCommit={(color) => updateFillOverride({ color })} /></span></PropertyGridRow>
-          <PropertyGridRow label="Fill"><button type="button" className={(opening.fillOverride?.visible ?? openingLayer.fillVisible) ? "property-cell-button is-locked" : "property-cell-button"} onClick={() => updateFillOverride({ visible: !(opening.fillOverride?.visible ?? openingLayer.fillVisible) })}>{(opening.fillOverride?.visible ?? openingLayer.fillVisible) ? "● On" : "○ Off"}</button></PropertyGridRow>
-        </> : null}
-        <PropertyGridRow label="Component type"><select className="property-cell-select" value={opening.wallOpeningTypeId ?? ""} onChange={(event) => onAssignType(opening.id, event.target.value)} aria-label="Door or Window component type">{opening.wallOpeningTypeId === null ? <option value="" disabled>Legacy custom opening</option> : null}{compatibleTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></PropertyGridRow>
-        {componentType ? <PropertyGridRow label="3D assembly"><span className="property-readout">{componentType.components.length} joined components</span></PropertyGridRow> : null}
-        {componentType && baseComponent && resolvedComponent ? <>
-          <PropertyGridRow label="Assembly part"><select className="property-cell-select" value={baseComponent.id} onChange={(event) => setSelectedComponentId(event.target.value)} aria-label="Placed opening assembly component">{componentType.components.map((component) => <option key={component.id} value={component.id}>{component.name} · {component.role}</option>)}</select></PropertyGridRow>
-          <PropertyGridRow label="Part source"><span className="property-readout">{componentOverride ? "Opening override" : "Type default"}</span></PropertyGridRow>
-          <WallOpeningComponentMaterialField key={`${opening.id}:${baseComponent.id}:${resolvedComponent.material}`} material={resolvedComponent.material} onUpdate={(material) => updateComponentOverride({ material })} />
-          <PropertyGridRow label="Part display"><label className="property-checkbox"><input type="checkbox" checked={resolvedComponent.visible} onChange={(event) => updateComponentOverride({ visible: event.target.checked })} /><span>Visible</span></label></PropertyGridRow>
-          <LineCoordinateField label="Part inset" value={resolvedComponent.inset} onCommit={(draft) => updateComponentDimension("inset", draft, true)} />
-          <LineCoordinateField label={resolvedComponent.geometry === "panel-grid" ? "Panel gap" : resolvedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} unsigned value={resolvedComponent.profileWidth} onCommit={(draft) => updateComponentDimension("profileWidth", draft)} />
-          <LineCoordinateField label="Part depth" unsigned value={resolvedComponent.depth} onCommit={(draft) => updateComponentDimension("depth", draft)} />
-          <PropertyGridRow label="Depth anchor"><select className="property-cell-select" value={resolvedComponent.depthAnchor} onChange={(event) => updateComponentOverride({ depthAnchor: event.target.value as OpeningAssemblyComponent["depthAnchor"] })} aria-label="Placed opening component depth anchor">{OPENING_COMPONENT_DEPTH_ANCHORS.map((anchor) => <option key={anchor} value={anchor}>{titleCase(anchor)} face</option>)}</select></PropertyGridRow>
-          <LineCoordinateField label="Depth offset" unsigned value={resolvedComponent.depthOffset} onCommit={(draft) => updateComponentDimension("depthOffset", draft, false, true)} />
-          {resolvedComponent.geometry.includes("divider") || resolvedComponent.geometry === "panel-grid" ? <PropertyGridRow label={resolvedComponent.geometry === "panel-grid" ? "Panel count" : "Divider count"}><select className="property-cell-select" value={resolvedComponent.divisionCount} onChange={(event) => updateComponentOverride({ divisionCount: Number(event.target.value) })} aria-label="Placed opening component division count">{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></PropertyGridRow> : null}
-          {componentOverride ? <div className="property-action-row single-action"><button type="button" onClick={resetComponentOverride}>Reset Part to Type</button></div> : null}
-        </> : null}
-        <LineCoordinateField label="Center from start" unsigned value={opening.centerOffset} onCommit={(draft) => updateDimension("centerOffset", draft)} />
-        <PropertyGridRow label="Unit size"><span className="property-readout">{formatArchitectural(opening.unitWidth)} × {formatArchitectural(opening.unitHeight)}</span></PropertyGridRow>
-        <PropertyGridRow label="Rough opening"><span className="property-readout">{formatArchitectural(opening.roughWidth)} × {formatArchitectural(opening.roughHeight)}</span></PropertyGridRow>
-        {componentType ? <PropertyGridRow label="Finish returns"><span className="property-readout">Ext {formatArchitectural(componentType.exteriorReturnDepth)} · Int {formatArchitectural(componentType.interiorReturnDepth)}</span></PropertyGridRow> : null}
-        <PropertyGridRow label="Header override"><select className="property-cell-select" value={opening.headerTypeIdOverride ?? ""} onChange={(event) => onUpdate(opening.id, { headerTypeIdOverride: event.target.value || null })} aria-label="Placed opening header override"><option value="">Automatic · {resolvedHeader?.scheduleMark ?? "—"} {resolvedHeader?.name ?? "No compatible header"}</option>{compatibleHeaders.map((headerType) => <option key={headerType.id} value={headerType.id}>{headerType.scheduleMark} · {headerType.name}{headerType.engineeringRequired ? " · Engineering" : ""}</option>)}</select></PropertyGridRow>
-        {resolvedHeader ? <PropertyGridRow label="Resolved header"><span className="property-readout">{resolvedHeader.scheduleMark} · {opening.headerTypeIdOverride ? "Opening override" : componentType?.headerTypeId ? "Component override" : "Wall default"}{resolvedHeader.engineeringRequired ? " · Engineering required" : ""}</span></PropertyGridRow> : null}
-        {opening.kind === "window" ? <>
-          <LineCoordinateField label="Bottom of header" unsigned value={opening.headerBottomHeight} onCommit={(draft) => updateDimension("headerBottomHeight", draft)} />
-          <PropertyGridRow label="Rough sill"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight - opening.roughHeight)}</span></PropertyGridRow>
-        </> : <PropertyGridRow label="Bottom of header"><span className="property-readout">{formatArchitectural(opening.headerBottomHeight)}</span></PropertyGridRow>}
-        <div className="property-action-row single-action"><button type="button" onClick={() => onDelete(opening.id)}>Delete Opening</button></div>
-        <p className="property-grid-note">The reusable Type controls assembly topology, unit size, rough opening, and generated finish returns. Part controls above override only this placed opening; Reset Part to Type restores inheritance. Header priority is placed-opening override, component override, then host Wall default. Window header height remains measured to the bottom of the structural header above the Story subfloor.</p>
-      </> : null}
-    </PropertyGridSection>
-  );
-}
-
-function LineCoordinateField({ label, onCommit, unsigned = false, value }: { label: string; onCommit: (draft: string) => boolean; unsigned?: boolean; value: number }) {
-  const formatValue = unsigned ? formatArchitectural : formatSignedArchitectural;
-  const [draft, setDraft] = useState(formatValue(value));
-  const [error, setError] = useState(false);
-  const commit = () => {
-    if (!onCommit(draft)) {
-      setDraft(formatValue(value));
-      setError(true);
-      return;
-    }
-    setError(false);
-  };
-  return (
-    <label className="property-table-row property-input-row"><span className="property-table-label">{label}</span><div className={error ? "property-table-value field-shell field-error" : "property-table-value field-shell"}><input value={draft} onChange={(event) => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(formatValue(value)); setError(false); event.currentTarget.blur(); } }} aria-label={`${label} coordinate`} spellCheck={false} /><span>ft-in</span></div></label>
-  );
-}
-
-const ASSEMBLY_ROLE_LABELS: Record<AssemblyLayerRole, string> = {
-  "air-gap": "Air gap",
-  finish: "Finish",
-  framing: "Framing",
-  insulation: "Insulation",
-  membrane: "Membrane",
-  sheathing: "Sheathing / subfloor",
-  structure: "Structure / slab",
-  substrate: "Substrate",
-};
-
-const STORY_PURPOSE_LABELS: Record<StoryPurpose, string> = {
-  standard: "Standard / above-grade",
-  basement: "Basement",
-  crawlspace: "Crawlspace",
-  "slab-on-grade": "Slab-on-grade",
-};
-
-const STORY_PURPOSE_HELP: Record<StoryPurpose, string> = {
-  standard: "An ordinary framed level. Stories above and below stack from its rough framing reference elevations.",
-  basement: "A full lower level with its own walls, rooms, openings, slab, ceiling height, and plan view.",
-  crawlspace: "A non-occupiable service or foundation level. Use a separate Story only when it needs its own plan or controlled height.",
-  "slab-on-grade": "The occupied level bears on a slab. Do not add a Basement Story below solely to represent the slab.",
-};
-
-const FLOOR_STRUCTURE_PRESET_LABELS: Record<FloorStructurePreset, string> = {
-  "wood-framed": "Wood-framed floor",
-  "basement-slab": "4 in. basement slab",
-  "slab-on-grade": "4 in. insulated slab-on-grade",
-};
-
-const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
-  "new-construction": "New construction",
-  addition: "Addition",
-  remodel: "Remodel",
-  "as-built": "Existing / as-built",
-};
-
-const WALL_USE_LABELS: Record<WallUse, string> = {
-  exterior: "Exterior Wall",
-  "interior-bearing": "Interior Bearing Wall",
-  "interior-partition": "Interior Partition",
-};
-
-const WALL_LAYER_GROUP_LABELS: Record<WallLayerGroup, string> = {
-  exterior: "Exterior Layers",
-  main: "Main Layers",
-  interior: "Interior Layers",
-};
-
-const ROOF_LAYER_SIDE_LABELS: Record<RoofLayerSide, string> = {
-  exterior: "Above Roof Plane",
-  interior: "Below Roof Plane",
-};
-
-const WALL_REFERENCE_LINE_LABELS: Record<WallReferenceLine, string> = {
-  "wall-center": "Wall centerline",
-  "exterior-main": "Exterior face of Main",
-  "center-main": "Center of Main",
-  "interior-main": "Interior face of Main",
-};
-
-function nextAssemblyLayerId(assembly: LayeredAssembly): string {
-  let number = 1;
-  const ids = new Set(assembly.layers.map((layer) => layer.id));
-  while (ids.has(`${assembly.id}-${String(number).padStart(2, "0")}`)) number += 1;
-  return `${assembly.id}-${String(number).padStart(2, "0")}`;
-}
-
-function StoryDimensionInput({
-  allowZero = false,
-  label,
-  onChange,
-  signed = false,
-  value,
-}: {
-  allowZero?: boolean;
-  label: string;
-  onChange: (value: number) => void;
-  signed?: boolean;
-  value: number;
-}) {
-  const formatter = signed ? formatSignedArchitectural : formatArchitectural;
-  const parser = signed ? parseSignedArchitectural : parseArchitectural;
-  const [draft, setDraft] = useState(() => formatter(value));
-  const [error, setError] = useState(false);
-
-  const commit = () => {
-    const parsed = parser(draft);
-    if (parsed === null || (!signed && (allowZero ? parsed < 0 : parsed <= 0))) {
-      setError(true);
-      return;
-    }
-    setError(false);
-    onChange(snapToSixteenth(parsed));
-  };
-
-  return (
-    <label className="story-field">
-      <span>{label}</span>
-      <div className={error ? "story-field-shell is-error" : "story-field-shell"}>
-        <input
-          value={draft}
-          onChange={(event) => { setDraft(event.target.value); setError(false); }}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") { setDraft(formatter(value)); setError(false); event.currentTarget.blur(); }
-          }}
-          aria-label={label}
-          spellCheck={false}
-        />
-        <small>ft-in</small>
-      </div>
-    </label>
-  );
-}
-
-function AssemblyMaterialSelect({
-  layer,
-  onChange,
-}: {
-  layer: AssemblyLayer;
-  onChange: (material: string) => void;
-}) {
-  const definition = architecturalMaterialByName(layer.material);
-  const compatibleMaterials = architecturalMaterialsForRole(layer.role);
-  const compatibleNames = new Set(compatibleMaterials.map((material) => material.name));
-  const currentNeedsFallback = !compatibleNames.has(layer.material);
-  const summary = definition
-    ? `Plan: ${definition.plan.pattern} · 3D surface properties ready · texture ${definition.model.textureAssetId ? "assigned" : "not assigned"}`
-    : "Existing project material · preserved until a library material is selected";
-
-  return (
-    <div className="story-material-choice" title={summary}>
-      <i style={{ backgroundColor: definition?.plan.color ?? "#a8b1b6" }} aria-hidden="true" />
-      <select value={layer.material} onChange={(event) => onChange(event.target.value)} aria-label={`${layer.name} material`}>
-        {currentNeedsFallback ? <optgroup label="Current project material"><option value={layer.material}>{layer.material}</option></optgroup> : null}
-        {MATERIAL_CATEGORIES.map((category) => {
-          const options = compatibleMaterials.filter((material) => material.category === category);
-          return options.length ? <optgroup label={MATERIAL_CATEGORY_LABELS[category]} key={category}>{options.map((material) => <option value={material.name} key={material.name}>{material.name}</option>)}</optgroup> : null;
-        })}
-      </select>
-    </div>
-  );
-}
-
-function StoryAssemblyEditor({
-  assembly,
-  defaultOpen = true,
-  onChange,
-  onSelectLayer,
-  selectedLayerId,
-}: {
-  assembly: LayeredAssembly;
-  defaultOpen?: boolean;
-  onChange: (assembly: LayeredAssembly) => void;
-  onSelectLayer?: (layerId: string) => void;
-  selectedLayerId?: string;
-}) {
-  const [expanded, setExpanded] = useState(defaultOpen);
-  const isWallAssembly = assembly.kind === "wall-structure";
-  const isRoofAssembly = assembly.kind === "roof-assembly";
-  const addLayer = (wallGroup?: WallLayerGroup, roofSide?: RoofLayerSide) => {
-    const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
-    const role: AssemblyLayerRole = isWallAssembly
-      ? wallGroup === "main" ? "framing" : "finish"
-      : isRoofAssembly ? roofSide === "exterior" ? "sheathing" : "insulation"
-        : assembly.kind === "floor-structure" || assembly.kind === "ceiling-structure" ? "framing" : "finish";
-    const layer: AssemblyLayer = {
-      id: nextAssemblyLayerId(next),
-      material: isWallAssembly && wallGroup === "exterior"
-        ? "Exterior Cladding"
-        : role === "framing" ? "Lumber" : role === "sheathing" ? "OSB" : role === "insulation" ? "Fiberglass Batt" : "Gypsum Board",
-      name: "New Layer",
-      role,
-      thickness: 0.5,
-    };
-    if (isWallAssembly) {
-      layer.participatesInJoin = true;
-      layer.wallGroup = wallGroup ?? "main";
-    }
-    if (isRoofAssembly) layer.roofSide = roofSide ?? "exterior";
-    next.layers.push(layer);
-    if (isWallAssembly) {
-      next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
-    }
-    if (isRoofAssembly) next.layers.sort((first, second) => ROOF_LAYER_SIDES.indexOf(first.roofSide ?? "exterior") - ROOF_LAYER_SIDES.indexOf(second.roofSide ?? "exterior"));
-    onChange(next);
-    onSelectLayer?.(layer.id);
-  };
-  const updateLayer = (index: number, change: Partial<LayeredAssembly["layers"][number]>) => {
-    const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
-    next.layers[index] = { ...next.layers[index], ...change };
-    if (isWallAssembly && (next.layers[index].role !== "finish" || next.layers[index].thickness <= 0)) {
-      next.wallEndCapLayerIds = (next.wallEndCapLayerIds ?? []).filter((layerId) => layerId !== next.layers[index].id);
-    }
-    if (isWallAssembly && change.wallGroup !== undefined) {
-      next.layers.sort((first, second) => WALL_LAYER_GROUPS.indexOf(first.wallGroup ?? "main") - WALL_LAYER_GROUPS.indexOf(second.wallGroup ?? "main"));
-    }
-    if (isRoofAssembly && change.roofSide !== undefined) next.layers.sort((first, second) => ROOF_LAYER_SIDES.indexOf(first.roofSide ?? "exterior") - ROOF_LAYER_SIDES.indexOf(second.roofSide ?? "exterior"));
-    onChange(next);
-  };
-  const moveLayer = (index: number, direction: -1 | 1) => {
-    const target = index + direction;
-    if (target < 0 || target >= assembly.layers.length) return;
-    if (isWallAssembly && assembly.layers[index].wallGroup !== assembly.layers[target].wallGroup || isRoofAssembly && assembly.layers[index].roofSide !== assembly.layers[target].roofSide) return;
-    const next = { ...assembly, layers: assembly.layers.map((layer) => ({ ...layer })) };
-    [next.layers[index], next.layers[target]] = [next.layers[target], next.layers[index]];
-    onChange(next);
-  };
-  const removeLayer = (index: number) => {
-    const removedLayerId = assembly.layers[index]?.id;
-    const next = { ...assembly, layers: assembly.layers.filter((_, candidate) => candidate !== index).map((layer) => ({ ...layer })) };
-    if (isWallAssembly) next.wallEndCapLayerIds = (next.wallEndCapLayerIds ?? []).filter((layerId) => layerId !== assembly.layers[index]?.id);
-    onChange(next);
-    if (removedLayerId === selectedLayerId && next.layers.length > 0) {
-      onSelectLayer?.(next.layers[Math.min(index, next.layers.length - 1)].id);
-    }
-  };
-  const toggleEndCapLayer = (layerId: string, enabled: boolean) => {
-    const selectedIds = new Set(assembly.wallEndCapLayerIds ?? []);
-    if (enabled) selectedIds.add(layerId);
-    else selectedIds.delete(layerId);
-    onChange({ ...assembly, wallEndCapLayerIds: assembly.layers.flatMap((layer) => selectedIds.has(layer.id) ? [layer.id] : []) });
-  };
-  const mainLayerCount = assembly.layers.filter((layer) => layer.wallGroup === "main").length;
-  const renderLayer = (layer: AssemblyLayer, index: number) => {
-    const isOnlyMainLayer = isWallAssembly && layer.wallGroup === "main" && mainLayerCount === 1;
-    const previousLayer = assembly.layers[index - 1];
-    const nextLayer = assembly.layers[index + 1];
-    return (
-      <div
-        className={`${isWallAssembly ? "story-layer-grid is-wall-assembly" : isRoofAssembly ? "story-layer-grid is-roof-assembly" : "story-layer-grid"}${layer.id === selectedLayerId ? " is-selected" : ""}`}
-        key={layer.id}
-        onFocusCapture={() => onSelectLayer?.(layer.id)}
-      >
-        <span>{index + 1}</span>
-        <div className="story-layer-names">
-          <input value={layer.name} onChange={(event) => updateLayer(index, { name: event.target.value })} aria-label={`${assembly.name} layer ${index + 1} name`} />
-          <AssemblyMaterialSelect layer={layer} onChange={(material) => updateLayer(index, { material })} />
-        </div>
-        {isRoofAssembly ? <select value={layer.roofSide ?? "exterior"} onChange={(event) => updateLayer(index, { roofSide: event.target.value as RoofLayerSide })} aria-label={`${layer.name} side of structural Roof Plane`}>{ROOF_LAYER_SIDES.map((side) => <option key={side} value={side}>{side === "exterior" ? "Above" : "Below"}</option>)}</select> : null}
-        <select value={layer.role} onChange={(event) => updateLayer(index, { role: event.target.value as AssemblyLayerRole })} aria-label={`${layer.name} role`}>
-          {Object.entries(ASSEMBLY_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
-        </select>
-        <StoryDimensionInput allowZero={isWallAssembly || layer.role === "membrane"} key={`${layer.id}:${layer.thickness}`} label={`${layer.name} thickness`} value={layer.thickness} onChange={(thickness) => updateLayer(index, { thickness })} />
-        {isWallAssembly ? <label className="story-layer-join" title="When enabled, this layer is trimmed or mitered by automatic wall junctions."><input type="checkbox" checked={layer.participatesInJoin ?? true} onChange={(event) => updateLayer(index, { participatesInJoin: event.target.checked })} aria-label={`${layer.name} participates in automatic wall joins`} /><span>{layer.participatesInJoin === false ? "Square" : "Auto"}</span></label> : null}
-        {isWallAssembly ? <label className="story-layer-join" title={layer.role === "finish" && layer.thickness > 0 ? "Wrap this finish across truly open wall ends." : "Only positive-thickness Finish layers can wrap open wall ends."}><input type="checkbox" checked={(assembly.wallEndCapLayerIds ?? []).includes(layer.id)} disabled={layer.role !== "finish" || layer.thickness <= 0} onChange={(event) => toggleEndCapLayer(layer.id, event.target.checked)} aria-label={`${layer.name} wraps open wall ends`} /><span>{(assembly.wallEndCapLayerIds ?? []).includes(layer.id) ? "Wrap" : "Off"}</span></label> : null}
-        <div className="story-layer-actions"><button type="button" onClick={() => moveLayer(index, -1)} disabled={!previousLayer || (isWallAssembly && previousLayer.wallGroup !== layer.wallGroup) || (isRoofAssembly && previousLayer.roofSide !== layer.roofSide)} aria-label={`Move ${layer.name} up`}>↑</button><button type="button" onClick={() => moveLayer(index, 1)} disabled={!nextLayer || (isWallAssembly && nextLayer.wallGroup !== layer.wallGroup) || (isRoofAssembly && nextLayer.roofSide !== layer.roofSide)} aria-label={`Move ${layer.name} down`}>↓</button><button type="button" onClick={() => removeLayer(index)} disabled={isOnlyMainLayer || isRoofAssembly && assembly.layers.length === 1} aria-label={`Remove ${layer.name}`}>×</button></div>
-      </div>
-    );
-  };
-  return (
-    <details className="story-assembly" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
-      <summary>
-        <div><strong>{assembly.name}</strong><span>{assembly.kind === "floor-structure" ? "Controls floor-to-floor stacking" : assembly.kind === "ceiling-structure" ? "Builds down from the rough ceiling" : assembly.kind === "wall-structure" ? "Exterior-to-interior wall layers" : assembly.kind === "roof-assembly" ? "Layers above and below the structural Roof Plane" : "Finish only · does not move Story reference elevations"}</span></div>
-        <b>{formatArchitectural(assemblyTotalThickness(assembly))}</b>
-      </summary>
-      <div className="story-assembly-body">
-      <div className={isWallAssembly ? "story-layer-grid story-layer-head is-wall-assembly" : isRoofAssembly ? "story-layer-grid story-layer-head is-roof-assembly" : "story-layer-grid story-layer-head"}><span>#</span><span>Layer / material</span>{isRoofAssembly ? <span>Side</span> : null}<span>Role</span><span>Thickness</span>{isWallAssembly ? <><span>Join</span><span>End</span></> : null}<span>Order</span></div>
-      {isWallAssembly ? WALL_LAYER_GROUPS.map((group) => (
-        <div className="story-wall-layer-group" key={group}>
-          <div className={`story-wall-group-heading is-${group}`}><strong>{WALL_LAYER_GROUP_LABELS[group]}</strong><span>{group === "main" ? "Structural core and future reference layer" : group === "exterior" ? "Outside of the Main layer" : "Room side of the Main layer"}</span><b>{formatArchitectural(wallLayerGroupThickness(assembly, group))}</b><button type="button" className="story-wall-group-add" onClick={() => addLayer(group)} aria-label={`Add ${WALL_LAYER_GROUP_LABELS[group].toLowerCase()} layer`}>＋</button></div>
-          {assembly.layers.map((layer, index) => layer.wallGroup === group ? renderLayer(layer, index) : null)}
-        </div>
-      )) : isRoofAssembly ? ROOF_LAYER_SIDES.map((side) => (
-        <div className="story-wall-layer-group" key={side}>
-          <div className={`story-wall-group-heading is-${side}`}><strong>{ROOF_LAYER_SIDE_LABELS[side]}</strong><span>{side === "exterior" ? "Roofing, membranes, insulation, and sheathing" : "Framing or truss zone, insulation, and interior finish"}</span><b>{formatArchitectural(assembly.layers.filter((layer) => layer.roofSide === side).reduce((total, layer) => total + layer.thickness, 0))}</b><button type="button" className="story-wall-group-add" onClick={() => addLayer(undefined, side)} aria-label={`Add layer ${side === "exterior" ? "above" : "below"} Roof Plane`}>＋</button></div>
-          {assembly.layers.map((layer, index) => layer.roofSide === side ? renderLayer(layer, index) : null)}
-        </div>
-      )) : assembly.layers.map(renderLayer)}
-      {!isWallAssembly && !isRoofAssembly ? <button type="button" className="story-add-layer" onClick={() => addLayer()}>＋ Add layer</button> : null}
-      </div>
-    </details>
-  );
-}
-
-function ReferenceDisplayDialog({
-  layerSets,
-  onCancel,
-  onSave,
-  stories,
-  view,
-}: {
-  layerSets: readonly LayerSet[];
-  onCancel: () => void;
-  onSave: (view: SavedPlanView) => void;
-  stories: BuildingStructure["stories"];
-  view: SavedPlanView;
-}) {
-  const [draft, setDraft] = useState(() => ({ ...view }));
-  const orderedStoryIds = stories.map((story) => story.id);
-  const availableStories = stories.filter((story) => story.id !== draft.storyId);
-  const resolvedStoryId = resolveReferenceStoryId({ ...draft, referenceDisplayEnabled: true }, orderedStoryIds);
-  const resolvedStory = stories.find((story) => story.id === resolvedStoryId);
-  const currentStory = stories.find((story) => story.id === draft.storyId);
-  const selectMode = (referenceMode: ReferenceDisplayMode) => {
-    const fallbackStoryId = availableStories[0]?.id ?? null;
-    setDraft((current) => ({
-      ...current,
-      referenceMode,
-      referenceStoryId: referenceMode === "specific" && (!current.referenceStoryId || current.referenceStoryId === current.storyId)
-        ? fallbackStoryId
-        : current.referenceStoryId,
-    }));
-  };
-
-  return <div className="story-manager-backdrop" role="presentation">
-    <section className="reference-display-dialog" role="dialog" aria-modal="true" aria-labelledby="reference-display-title">
-      <header className="story-manager-header"><div><strong id="reference-display-title">Floor / Reference Display</strong><span>Overlay another Story for coordination without making its objects editable.</span></div><button type="button" onClick={onCancel} aria-label="Close Floor Reference Display">×</button></header>
-      <div className="reference-display-body">
-        <section className="reference-current-floor"><span>Current editable floor</span><strong>{currentStory?.name ?? "Current Story"}</strong><small>Reference objects remain visible for alignment but cannot be selected or modified.</small></section>
-        <label className="reference-enable"><input type="checkbox" checked={draft.referenceDisplayEnabled} disabled={availableStories.length === 0} onChange={(event) => setDraft((current) => ({ ...current, referenceDisplayEnabled: event.target.checked }))} /><span><strong>Show reference floor</strong><small>{availableStories.length ? "Display the selected floor behind the active plan." : "Add another Story before enabling a reference."}</small></span></label>
-        <div className="reference-display-grid">
-          <label><span>Reference source</span><select value={draft.referenceMode} onChange={(event) => selectMode(event.target.value as ReferenceDisplayMode)}><option value="automatic">Automatic — below, otherwise above</option><option value="below">Floor below</option><option value="above">Floor above</option><option value="specific">Specific floor</option></select></label>
-          <label><span>Reference floor</span>{draft.referenceMode === "specific" ? <select value={draft.referenceStoryId ?? ""} onChange={(event) => setDraft((current) => ({ ...current, referenceStoryId: event.target.value || null }))}><option value="">Choose a floor</option>{availableStories.map((story) => <option value={story.id} key={story.id}>{story.name}</option>)}</select> : <output>{resolvedStory?.name ?? "No floor available"}</output>}</label>
-          <label><span>Reference Layer Set</span><select value={draft.referenceLayerSetId} onChange={(event) => setDraft((current) => ({ ...current, referenceLayerSetId: event.target.value }))}>{layerSets.map((set) => <option value={set.id} key={set.id}>{set.name}</option>)}</select></label>
-          <label className="reference-detail-toggle"><input type="checkbox" checked={draft.referenceFillsVisible} onChange={(event) => setDraft((current) => ({ ...current, referenceFillsVisible: event.target.checked }))} /><span><strong>Show fills and details</strong><small>Off keeps the reference as clean linework.</small></span></label>
-        </div>
-        <aside><strong>Visibility control</strong><span>The Reference Layer Set independently controls which Walls, fixtures, openings, annotations, and other object layers appear. Copy a Layer Set to create purpose-specific references such as “Plumbing Above” or “Wall Alignment.”</span></aside>
-      </div>
-      <footer className="story-manager-footer"><span>{draft.referenceDisplayEnabled ? resolvedStory ? `${resolvedStory.name} will display as a non-editable reference.` : "The selected direction has no available floor." : "Reference display is off for this Saved Plan View."}</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" disabled={draft.referenceDisplayEnabled && !resolvedStory} onClick={() => onSave(draft)}>Apply Reference</button></div></footer>
-    </section>
-  </div>;
-}
-
-function StoryManagerDialog({
-  building,
-  onCancel,
-  onSave,
-}: {
-  building: BuildingStructure;
-  onCancel: () => void;
-  onSave: (building: BuildingStructure) => void;
-}) {
-  const [draft, setDraft] = useState(() => cloneBuildingStructure(building));
-  const [selectedStoryId, setSelectedStoryId] = useState(building.activeStoryId);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-  const calculations = calculateStoryElevations(draft);
-  const selectedIndex = draft.stories.findIndex((story) => story.id === selectedStoryId);
-  const selectedStory = draft.stories[selectedIndex] ?? draft.stories[0];
-  const selectedCalculation = calculations.find((item) => item.storyId === selectedStory.id);
-
-  const replaceSelectedStory = (change: Partial<typeof selectedStory>) => {
-    setDraft((current) => {
-      const next = cloneBuildingStructure(current);
-      const index = next.stories.findIndex((story) => story.id === selectedStory.id);
-      if (index >= 0) next.stories[index] = { ...next.stories[index], ...change };
-      return next;
-    });
-    setError("");
-  };
-  const replaceAssembly = (kind: AssemblyKind, assembly: LayeredAssembly) => {
-    replaceSelectedStory(kind === "floor-structure" ? { floorStructure: assembly } : kind === "floor-finish" ? { floorFinish: assembly } : kind === "ceiling-structure" ? { ceilingStructure: assembly } : { ceilingFinish: assembly });
-  };
-  const addStory = (placement: "above" | "below") => {
-    const next = addBuildingStory(draft, selectedStory.id, placement);
-    if (!next) return;
-    setDraft(next);
-    setSelectedStoryId(next.activeStoryId);
-    setError("");
-  };
-  const removeStory = () => {
-    const next = removeBuildingStory(draft, selectedStory.id);
-    if (!next) return;
-    setDraft(next);
-    setSelectedStoryId(next.activeStoryId);
-    setError("");
-  };
-  const setDatumAnchor = () => {
-    const elevation = calculations.find((item) => item.storyId === selectedStory.id)?.roughFloorElevation;
-    if (elevation === undefined) return;
-    setDraft((current) => ({ ...cloneBuildingStructure(current), anchorStoryId: selectedStory.id, datumElevation: elevation }));
-  };
-  const applyFloorPreset = (preset: FloorStructurePreset) => {
-    replaceSelectedStory(applyFloorStructurePreset(selectedStory, preset));
-  };
-  const save = () => {
-    const next = cloneBuildingStructure(draft);
-    next.activeStoryId = selectedStory.id;
-    if (!buildingStructureIsValid(next)) {
-      setError("Check Story names, rough heights, and assembly layers. Names must be unique and every thickness must be a valid architectural dimension.");
-      return;
-    }
-    onSave(next);
-  };
-
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager" role="dialog" aria-modal="true" aria-labelledby="story-manager-title">
-        <header className="story-manager-header"><div><strong id="story-manager-title">Story &amp; Assembly Manager</strong><span>Rough framing establishes reference elevations. Finish layers calculate finished dimensions.</span></div><button type="button" onClick={onCancel} aria-label="Close Story Manager">×</button></header>
-        <div className="story-manager-body">
-          <aside className="story-list">
-            <header><strong>Stories</strong><span>Bottom to top</span></header>
-            {[...draft.stories].reverse().map((story) => {
-              const calculation = calculations.find((item) => item.storyId === story.id);
-              return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>{STORY_PURPOSE_LABELS[story.purpose]} · Rough floor {calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span>{story.id === draft.anchorStoryId ? <small>ELEVATION REFERENCE</small> : null}</button>;
-            })}
-            <div className="story-list-actions"><button type="button" onClick={() => addStory("above")}>＋ Above</button><button type="button" onClick={() => addStory("below")}>＋ Below</button><button type="button" onClick={removeStory} disabled={draft.stories.length === 1}>Delete</button></div>
-          </aside>
-          <main className="story-editor">
-            <section className="story-editor-summary">
-              <label><span>Story name</span><input value={selectedStory.name} maxLength={80} onChange={(event) => replaceSelectedStory({ name: event.target.value })} /></label>
-              <StoryDimensionInput key={`${selectedStory.id}:${selectedStory.roughCeilingHeight}`} label="Rough ceiling / plate height" value={selectedStory.roughCeilingHeight} onChange={(roughCeilingHeight) => replaceSelectedStory({ roughCeilingHeight })} />
-              <StoryDimensionInput key={`${draft.anchorStoryId}:${draft.datumElevation}`} label="Reference elevation" signed value={draft.datumElevation} onChange={(datumElevation) => setDraft((current) => ({ ...cloneBuildingStructure(current), datumElevation }))} />
-              <button type="button" className={selectedStory.id === draft.anchorStoryId ? "is-anchor" : ""} onClick={setDatumAnchor}>{selectedStory.id === draft.anchorStoryId ? "Elevation reference" : "Set as elevation reference"}</button>
-            </section>
-            <section className="story-classification-panel">
-              <label className="story-field">
-                <span>Story type</span>
-                <select value={selectedStory.purpose} onChange={(event) => replaceSelectedStory({ purpose: event.target.value as StoryPurpose })} aria-label="Story type">
-                  {Object.entries(STORY_PURPOSE_LABELS).map(([purpose, label]) => <option key={purpose} value={purpose}>{label}</option>)}
-                </select>
-              </label>
-              <div className="story-floor-presets">
-                <span>Floor structure presets</span>
-                <div>{Object.entries(FLOOR_STRUCTURE_PRESET_LABELS).map(([preset, label]) => <button type="button" key={preset} onClick={() => applyFloorPreset(preset as FloorStructurePreset)}>{label}</button>)}</div>
-              </div>
-              <p><strong>{STORY_PURPOSE_LABELS[selectedStory.purpose]}:</strong> {STORY_PURPOSE_HELP[selectedStory.purpose]} Applying a preset replaces this Story&apos;s floor-structure layers; floor finishes remain separate and editable.</p>
-            </section>
-            <div className="story-section-label"><strong>Calculated Results</strong><span>Read-only values derived from Story height and assembly thicknesses</span></div>
-            <section className="story-calculated-grid" aria-label="Calculated Story elevations">
-              <div><span>Rough floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughFloorElevation) : "—"}</strong></div>
-              <div><span>Finished floor</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedFloorElevation) : "—"}</strong></div>
-              <div><span>Rough ceiling</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughCeilingElevation) : "—"}</strong></div>
-              <div><span>Floor structure depth</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.floorStructureThickness) : "—"}</strong></div>
-              <div><span>Ceiling structure depth</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.ceilingStructureThickness) : "—"}</strong></div>
-              <div><span>Finished ceiling</span><strong>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedCeilingElevation) : "—"}</strong></div>
-              <div><span>Finished clear height</span><strong>{selectedCalculation ? formatArchitectural(selectedCalculation.finishedClearHeight) : "—"}</strong></div>
-              <div><span>Floor above</span><strong>{selectedCalculation?.floorAboveElevation !== null && selectedCalculation?.floorAboveElevation !== undefined ? formatSignedArchitectural(selectedCalculation.floorAboveElevation) : "No Story above"}</strong></div>
-            </section>
-            <StoryAssemblyEditor assembly={selectedStory.floorStructure} defaultOpen onChange={(assembly) => replaceAssembly("floor-structure", assembly)} />
-            <StoryAssemblyEditor assembly={selectedStory.floorFinish} defaultOpen={false} onChange={(assembly) => replaceAssembly("floor-finish", assembly)} />
-            <StoryAssemblyEditor assembly={selectedStory.ceilingStructure} defaultOpen={false} onChange={(assembly) => replaceAssembly("ceiling-structure", assembly)} />
-            <StoryAssemblyEditor assembly={selectedStory.ceilingFinish} defaultOpen={false} onChange={(assembly) => replaceAssembly("ceiling-finish", assembly)} />
-          </main>
-          <aside className="story-section-preview" aria-label="Story section preview">
-            <header><strong>Section Preview</strong><span>Calculated rough and finish planes</span></header>
-            <div className="story-pole">
-              {[...draft.stories].reverse().map((story) => {
-                const calculation = calculations.find((item) => item.storyId === story.id);
-                if (!calculation) return null;
-                return <button type="button" key={story.id} className={story.id === selectedStory.id ? "story-pole-level is-selected" : "story-pole-level"} onClick={() => setSelectedStoryId(story.id)}><span className="story-pole-ceiling"><b>ROUGH CEILING</b>{formatSignedArchitectural(calculation.roughCeilingElevation)}</span><strong>{story.name}</strong><span className="story-pole-floor"><b>ROUGH FLOOR</b>{formatSignedArchitectural(calculation.roughFloorElevation)}</span><i style={{ height: `${Math.max(5, Math.min(24, calculation.floorStructureThickness))}px` }} title={`Rough floor structure ${formatArchitectural(calculation.floorStructureThickness)}`} /></button>;
-              })}
-            </div>
-            <p>Gold lines are rough framing reference elevations. Thin interior lines represent finish surfaces.</p>
-          </aside>
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>{draft.stories.length} Stor{draft.stories.length === 1 ? "y" : "ies"} · active plan: {selectedStory.name}</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Story Settings</button></div></footer>
-      </section>
-    </div>
-  );
-}
-
-function nextWallTypeId(building: BuildingStructure): string {
-  let number = 1;
-  const ids = new Set(building.wallTypes.map((wallType) => wallType.id));
-  while (ids.has(`wall-type-${String(number).padStart(2, "0")}`)) number += 1;
-  return `wall-type-${String(number).padStart(2, "0")}`;
-}
-
-const WALL_PREVIEW_REFERENCE_CODES: Record<WallReferenceLine, string> = {
-  "center-main": "CM",
-  "exterior-main": "EM",
-  "interior-main": "IM",
-  "wall-center": "WC",
-};
-
-function WallAssemblyPreview({
-  assembly,
-  onChangeLayer,
-  onSelectLayer,
-  selectedLayerId,
-}: {
-  assembly: LayeredAssembly;
-  onChangeLayer: (layerId: string, change: Partial<AssemblyLayer>) => void;
-  onSelectLayer: (layerId: string) => void;
-  selectedLayerId: string;
-}) {
-  const totalThickness = assemblyTotalThickness(assembly);
-  const scaleThickness = Math.max(totalThickness, 1 / 16);
-  const ranges = wallLayerDistanceRanges(assembly);
-  const selectedLayer = assembly.layers.find((layer) => layer.id === selectedLayerId) ?? assembly.layers[0];
-  const selectedRange = ranges.find((range) => range.layerId === selectedLayer?.id);
-  const drawingLeft = 35;
-  const drawingWidth = 270;
-  const referenceLines: WallReferenceLine[] = ["exterior-main", "wall-center", "center-main", "interior-main"];
-  const referenceLabelRows: Record<WallReferenceLine, number> = {
-    "exterior-main": 22,
-    "wall-center": 34,
-    "center-main": 46,
-    "interior-main": 58,
-  };
-  const pointFromExterior = (distance: number) => drawingLeft + drawingWidth * distance / scaleThickness;
-
-  return (
-    <aside className="wall-assembly-preview" aria-label="Wall assembly plan section preview">
-      <header><strong>Assembly Preview</strong><span>Plan section · exterior at left</span></header>
-      <div className="wall-preview-canvas">
-        <svg viewBox="0 0 340 225" aria-label={`${assembly.name} wall layer diagram`}>
-          <text className="wall-preview-side-label" x="35" y="68">EXTERIOR</text>
-          <text className="wall-preview-side-label" x="305" y="68" textAnchor="end">INTERIOR</text>
-          {referenceLines.map((referenceLine) => {
-            const x = pointFromExterior(wallReferenceDistanceFromExterior(assembly, referenceLine));
-            return (
-              <g className={`wall-preview-reference is-${referenceLine}`} key={referenceLine}>
-                <line x1={x} y1={referenceLabelRows[referenceLine] + 3} x2={x} y2="155" />
-                <text x={x} y={referenceLabelRows[referenceLine]} textAnchor="middle">{WALL_PREVIEW_REFERENCE_CODES[referenceLine]}</text>
-              </g>
-            );
-          })}
-          <rect className="wall-preview-outline" x={drawingLeft} y="72" width={drawingWidth} height="76" />
-          {assembly.layers.map((layer, index) => {
-            const range = ranges[index];
-            const x = pointFromExterior(range.start);
-            const width = Math.max(layer.thickness === 0 ? 1 : drawingWidth * layer.thickness / scaleThickness, 1);
-            const selected = layer.id === selectedLayer?.id;
-            return (
-              <g
-                aria-label={`${layer.name}, ${formatArchitectural(layer.thickness)}`}
-                className={`wall-preview-layer is-${layer.role}${selected ? " is-selected" : ""}${layer.thickness === 0 ? " is-zero" : ""}`}
-                key={layer.id}
-                onClick={() => onSelectLayer(layer.id)}
-                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelectLayer(layer.id); }}
-                role="button"
-                tabIndex={0}
-              >
-                <title>{`${index + 1}. ${layer.name} · ${layer.material} · ${formatArchitectural(layer.thickness)}`}</title>
-                <rect x={x} y="72" width={width} height="76" />
-                {width >= 17 ? <text x={x + width / 2} y="113" textAnchor="middle">{index + 1}</text> : null}
-              </g>
-            );
-          })}
-          <g className="wall-preview-total-dimension">
-            <line x1={drawingLeft} y1="172" x2={drawingLeft + drawingWidth} y2="172" />
-            <line x1={drawingLeft} y1="164" x2={drawingLeft} y2="180" />
-            <line x1={drawingLeft + drawingWidth} y1="164" x2={drawingLeft + drawingWidth} y2="180" />
-            <text x={drawingLeft + drawingWidth / 2} y="168" textAnchor="middle">TOTAL {formatArchitectural(totalThickness)}</text>
-          </g>
-          {WALL_LAYER_GROUPS.map((group, groupIndex) => {
-            const thickness = wallLayerGroupThickness(assembly, group);
-            const groupDistance = WALL_LAYER_GROUPS.slice(0, groupIndex).reduce((total, candidate) => total + wallLayerGroupThickness(assembly, candidate), 0);
-            const x = pointFromExterior(groupDistance);
-            const width = drawingWidth * thickness / scaleThickness;
-            return (
-              <g className={`wall-preview-group is-${group}`} key={group}>
-                <line x1={x} y1="196" x2={x + width} y2="196" />
-                <text x={x + width / 2} y="210" textAnchor="middle">{group.toUpperCase()} · {formatArchitectural(thickness)}</text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-      <div className="wall-preview-reference-key" aria-label="Wall reference line key">
-        {referenceLines.map((referenceLine) => <div key={referenceLine}><b>{WALL_PREVIEW_REFERENCE_CODES[referenceLine]}</b><span>{WALL_REFERENCE_LINE_LABELS[referenceLine]}</span><output>{formatArchitectural(wallReferenceDistanceFromExterior(assembly, referenceLine))} from exterior</output></div>)}
-      </div>
-      {selectedLayer ? (
-        <section className="wall-preview-selected-layer">
-          <header><div><strong>Layer {assembly.layers.indexOf(selectedLayer) + 1} · {selectedLayer.name}</strong><span>{WALL_LAYER_GROUP_LABELS[selectedLayer.wallGroup ?? "main"]} · {ASSEMBLY_ROLE_LABELS[selectedLayer.role]}</span></div><i className={`is-${selectedLayer.role}`} /></header>
-          <p>{selectedLayer.material}</p>
-          <StoryDimensionInput allowZero key={`${selectedLayer.id}:${selectedLayer.thickness}`} label="Layer thickness" value={selectedLayer.thickness} onChange={(thickness) => onChangeLayer(selectedLayer.id, { thickness })} />
-          <small>{selectedRange ? `${formatArchitectural(selectedRange.start)} to ${formatArchitectural(selectedRange.end)} from the exterior face` : ""}</small>
-        </section>
-      ) : null}
-      <dl className="wall-preview-facts">
-        <div><dt>Main core</dt><dd>{formatArchitectural(wallLayerGroupThickness(assembly, "main"))}</dd></div>
-        <div><dt>Open-end wrap</dt><dd>{assembly.wallEndCapLayerIds?.length ?? 0} layer{assembly.wallEndCapLayerIds?.length === 1 ? "" : "s"}</dd></div>
-      </dl>
-    </aside>
-  );
-}
-
-function WallTypeManagerDialog({
-  building,
-  onCancel,
-  onSave,
-}: {
-  building: BuildingStructure;
-  onCancel: () => void;
-  onSave: (building: BuildingStructure) => void;
-}) {
-  const [draft, setDraft] = useState(() => cloneBuildingStructure(building));
-  const [selectedId, setSelectedId] = useState(building.activeWallTypeId);
-  const [selectedLayerId, setSelectedLayerId] = useState(() => building.wallTypes.find((wallType) => wallType.id === building.activeWallTypeId)?.layers[0]?.id ?? building.wallTypes[0]?.layers[0]?.id ?? "");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-  const selected = draft.wallTypes.find((wallType) => wallType.id === selectedId) ?? draft.wallTypes[0];
-  const defaultWallTypeIds = new Set([
-    draft.defaultExteriorWallTypeId,
-    draft.defaultInteriorBearingWallTypeId,
-    draft.defaultInteriorPartitionWallTypeId,
-  ]);
-  const selectedIsProjectDefault = defaultWallTypeIds.has(selected.id);
-  const effectiveSelectedLayerId = selected.layers.some((layer) => layer.id === selectedLayerId) ? selectedLayerId : selected.layers[0]?.id ?? "";
-  const selectedMainThickness = wallLayerGroupThickness(selected, "main");
-  const compatibleHeaders = draft.headerTypes.filter((headerType) => {
-    const required = wallHeaderTypeRequiredMainThickness(headerType);
-    return required === 0 || required <= selectedMainThickness + 1e-8;
-  });
-  const replaceSelected = (assembly: LayeredAssembly) => {
-    setDraft((current) => ({
-      ...cloneBuildingStructure(current),
-      wallTypes: current.wallTypes.map((wallType) => wallType.id === selected.id ? { ...assembly, kind: "wall-structure" } : { ...wallType, layers: wallType.layers.map((layer) => ({ ...layer })) }),
-    }));
-    setError("");
-  };
-  const replaceSelectedLayer = (layerId: string, change: Partial<AssemblyLayer>) => {
-    replaceSelected({
-      ...selected,
-      layers: selected.layers.map((layer) => layer.id === layerId ? { ...layer, ...change } : { ...layer }),
-    });
-  };
-  const addType = () => {
-    if (draft.wallTypes.length >= 32) return;
-    const id = nextWallTypeId(draft);
-    const layerIdMap = new Map(selected.layers.map((layer, index) => [layer.id, `${id}-${String(index + 1).padStart(2, "0")}`]));
-    const copy: LayeredAssembly = {
-      ...selected,
-      id,
-      name: `${selected.name} Copy`,
-      layers: selected.layers.map((layer) => ({ ...layer, id: layerIdMap.get(layer.id) ?? layer.id })),
-      wallEndCapLayerIds: (selected.wallEndCapLayerIds ?? []).flatMap((layerId) => layerIdMap.get(layerId) ?? []),
-    };
-    setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallUse: wallUseForType(copy), activeWallTypeId: id, wallTypes: [...current.wallTypes.map((wallType) => ({ ...wallType, layers: wallType.layers.map((layer) => ({ ...layer })) })), copy] }));
-    setSelectedId(id);
-    setSelectedLayerId(copy.layers[0]?.id ?? "");
-  };
-  const deleteType = () => {
-    if (draft.wallTypes.length <= 1 || selectedIsProjectDefault) return;
-    const remaining = draft.wallTypes.filter((wallType) => wallType.id !== selected.id);
-    const nextActive = draft.activeWallTypeId === selected.id ? remaining[0].id : draft.activeWallTypeId;
-    const nextActiveType = remaining.find((wallType) => wallType.id === nextActive) ?? remaining[0];
-    setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallUse: wallUseForType(nextActiveType), activeWallTypeId: nextActive, wallTypes: remaining }));
-    setSelectedId(nextActive);
-  };
-  const save = () => {
-    const next = cloneBuildingStructure(draft);
-    if (!buildingStructureIsValid(next)) {
-      setError("Wall types need unique names, ordered Exterior/Main/Interior groups, a positive-thickness Main layer, and a compatible default header assembly.");
-      return;
-    }
-    onSave(next);
-  };
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager wall-type-manager" role="dialog" aria-modal="true" aria-labelledby="wall-type-manager-title">
-        <header className="story-manager-header"><div><strong id="wall-type-manager-title">Wall Type Manager</strong><span>Reusable assemblies define wall thickness from exterior to interior.</span></div><button type="button" onClick={onCancel} aria-label="Close Wall Type Manager">×</button></header>
-        <div className="story-manager-body">
-          <aside className="story-list">
-            <header><strong>Wall Types</strong><span>{draft.wallTypes.length} defined</span></header>
-            {draft.wallTypes.map((wallType) => <button type="button" key={wallType.id} className={wallType.id === selected.id ? "is-selected" : ""} onClick={() => { setSelectedId(wallType.id); setSelectedLayerId(wallType.layers[0]?.id ?? ""); }}><strong>{wallType.name}</strong><span>{formatArchitectural(assemblyTotalThickness(wallType))} total</span>{wallType.id === draft.activeWallTypeId ? <small>ACTIVE TYPE</small> : null}</button>)}
-            <div className="story-list-actions"><button type="button" onClick={addType} disabled={draft.wallTypes.length >= 32}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={draft.wallTypes.length <= 1 || selectedIsProjectDefault} title={selectedIsProjectDefault ? "Choose another project default before deleting this Type" : undefined}>Delete</button></div>
-          </aside>
-          <main className="story-editor">
-            <section className="story-editor-summary">
-              <label><span>Type name</span><input value={selected.name} maxLength={80} onChange={(event) => replaceSelected({ ...selected, name: event.target.value })} /></label>
-              <label><span>Open-end wrap</span><output>{selected.wallEndCapLayerIds?.length ? `${selected.wallEndCapLayerIds.length} finish layer${selected.wallEndCapLayerIds.length === 1 ? "" : "s"}` : "None"}</output></label>
-              <button type="button" className={selected.id === draft.activeWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeWallUse: wallUseForType(selected), activeWallTypeId: selected.id }))}>{selected.id === draft.activeWallTypeId ? "Active wall type" : "Make active"}</button>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Wall Use &amp; Opening Framing</strong><span>The host Wall supplies the normal header assembly; a Door/Window Type or placed opening can override it.</span></div></header>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Wall location</span><select value={selected.wallLocation ?? "exterior"} disabled={selectedIsProjectDefault} title={selectedIsProjectDefault ? "Change the project default assignment before reclassifying this Type" : undefined} onChange={(event) => { const wallLocation = event.target.value as WallLocation; const next = { ...selected, wallLocation }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="exterior">Exterior</option><option value="interior">Interior</option></select></label>
-                <label className="story-field"><span>Structural role</span><select value={selected.wallStructuralRole ?? "bearing"} disabled={selectedIsProjectDefault} title={selectedIsProjectDefault ? "Change the project default assignment before reclassifying this Type" : undefined} onChange={(event) => { const wallStructuralRole = event.target.value as WallStructuralRole; const next = { ...selected, wallStructuralRole }; replaceSelected({ ...next, defaultHeaderTypeId: recommendedWallHeaderTypeId(next) }); }}><option value="bearing">Bearing</option><option value="non-bearing">Non-bearing</option></select></label>
-                <label className="story-field"><span>Default header assembly</span><select value={wallDefaultHeaderTypeId(selected)} onChange={(event) => replaceSelected({ ...selected, defaultHeaderTypeId: event.target.value })}>{compatibleHeaders.map((headerType) => <option key={headerType.id} value={headerType.id}>{headerType.scheduleMark} · {headerType.name}{headerType.engineeringRequired ? " · Engineering" : ""}</option>)}</select></label>
-              </div>
-              {selectedIsProjectDefault ? <p className="story-help-text">This Type is assigned as a project Wall default. Choose a different default in Project Setup before deleting or reclassifying it.</p> : null}
-              <p className="opening-type-note">Changing the location or structural role applies the recommended residential default. The selected assembly remains an explicit project rule; loads, spans, species, grades, and code compliance are not calculated here.</p>
-            </section>
-            <StoryAssemblyEditor assembly={selected} onChange={replaceSelected} onSelectLayer={setSelectedLayerId} selectedLayerId={effectiveSelectedLayerId} />
-            <p className="property-grid-note">Layers are stored from exterior to interior. The Main group is the structural core. Use End to stack one or more positive Finish layers across truly open or manually disconnected ends. Each wrap uses its material thickness, and body layers stop behind the complete stack so solids do not overlap. New walls use the active type; existing walls retain their assigned type until changed.</p>
-          </main>
-          <WallAssemblyPreview assembly={selected} onChangeLayer={replaceSelectedLayer} onSelectLayer={setSelectedLayerId} selectedLayerId={effectiveSelectedLayerId} />
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>{selected.name} · {formatArchitectural(assemblyTotalThickness(selected))}</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Wall Types</button></div></footer>
-      </section>
-    </div>
-  );
-}
-
-const FOUNDATION_CONDITION_LABELS: Record<FoundationWallCondition, string> = {
-  "dropped-wall": "Dropped Foundation Wall",
-  "garage-wall": "Garage Foundation Wall",
-  "interior-mudsill": "Interior Mudsill",
-  "slab-walkout": "Complete Slab Walk-out",
-  "standard-bearing": "Standard Bearing Wall",
-};
-
-function nextFoundationWallTypeId(building: BuildingStructure): string {
-  let number = 1;
-  const ids = new Set(building.foundationWallTypes.map((type) => type.id));
-  while (ids.has(`foundation-wall-type-${String(number).padStart(2, "0")}`)) number += 1;
-  return `foundation-wall-type-${String(number).padStart(2, "0")}`;
-}
-
-function FoundationDiagramDimension({
-  label,
-  onChange,
-  value,
-}: {
-  label: string;
-  onChange: (value: number) => void;
-  value: number;
-}) {
-  const [draft, setDraft] = useState(() => formatArchitectural(value));
-  const [error, setError] = useState(false);
-  const commit = () => {
-    const parsed = parseArchitectural(draft);
-    if (parsed === null || parsed <= 0) {
-      setError(true);
-      return;
-    }
-    setError(false);
-    onChange(snapToSixteenth(parsed));
-  };
-  return (
-    <div className={error ? "foundation-diagram-input is-error" : "foundation-diagram-input"}>
-      <span>{label}</span>
-      <input
-        aria-label={`${label} in section diagram`}
-        value={draft}
-        onChange={(event) => { setDraft(event.target.value); setError(false); }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-          if (event.key === "Escape") { setDraft(formatArchitectural(value)); setError(false); event.currentTarget.blur(); }
-        }}
-        spellCheck={false}
-      />
-    </div>
-  );
-}
-
-function FoundationSectionDiagram({
-  onFootingChange,
-  onSillChange,
-  onWallHeightChange,
-  onWallWidthChange,
-  type,
-}: {
-  onFootingChange: (change: Partial<FoundationWallType["footing"]>) => void;
-  onSillChange: (change: Partial<FoundationWallType["sill"]>) => void;
-  onWallHeightChange: (wallHeight: number) => void;
-  onWallWidthChange: (wallWidth: number) => void;
-  type: FoundationWallType;
-}) {
-  const maximumWidth = Math.max(type.wallWidth, type.sill.plateWidth, type.footing.enabled ? type.footing.width : 0, 18);
-  const horizontalScale = 205 / maximumWidth;
-  const verticalScale = Math.min(2.4, 240 / type.wallHeight);
-  const centerX = 185;
-  const wallWidth = Math.max(8, type.wallWidth * horizontalScale);
-  const wallTop = 152 - Math.max(-34, Math.min(34, type.topOffset * 1.5));
-  const wallBottom = wallTop + Math.max(24, type.wallHeight * verticalScale);
-  const footingHeight = type.footing.enabled ? Math.max(10, Math.min(60, type.footing.height * verticalScale)) : 0;
-  const footingTop = wallBottom;
-  const footingBottom = footingTop + footingHeight;
-  const wallX = centerX - wallWidth / 2;
-  const plateHeight = Math.max(6, Math.min(22, type.sill.plateHeight * verticalScale));
-  const plateStackHeight = plateHeight * type.sill.foundationPlateCount;
-  const plateTop = wallTop - plateStackHeight;
-  const plateWidth = Math.max(8, type.sill.plateWidth * horizontalScale);
-  const plateX = Math.max(18, Math.min(374 - plateWidth, wallX + type.sill.exteriorSetback * horizontalScale));
-  const rawFootingWidth = type.footing.width * horizontalScale;
-  const footingWidth = Math.max(wallWidth, Math.min(300, rawFootingWidth));
-  const rawFootingX = centerX + type.footing.centerOffset * horizontalScale - footingWidth / 2;
-  const footingX = Math.max(18, Math.min(392 - footingWidth, rawFootingX));
-  const floorHeight = 48;
-  const floorY = plateTop - floorHeight;
-  const floorX = plateX;
-  const floorWidth = Math.max(30, 397 - floorX);
-  const wallDimensionY = Math.min(wallBottom - 52, wallTop + 105);
-
-  return (
-    <svg className="foundation-section-svg" viewBox="0 0 420 490" role="img" aria-labelledby="foundation-section-title foundation-section-description">
-      <title id="foundation-section-title">Editable Foundation Wall support section</title>
-      <desc id="foundation-section-description">A proportional section through the concrete wall, sill plates, floor platform, and continuous footing. Dimension fields in the drawing edit the same values as the form.</desc>
-      <defs>
-        <pattern id="foundation-concrete-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
-          <rect width="20" height="20" className="foundation-svg-concrete-fill" />
-          <circle cx="4" cy="5" r="1.3" className="foundation-svg-concrete-stone" />
-          <circle cx="15" cy="13" r="1" className="foundation-svg-concrete-stone" />
-          <path d="M0 18L7 14M13 3L20 0" className="foundation-svg-concrete-mark" />
-        </pattern>
-        <pattern id="foundation-floor-pattern" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
-          <rect width="12" height="12" className="foundation-svg-floor-fill" />
-          <line x1="0" y1="0" x2="0" y2="12" className="foundation-svg-floor-line" />
-        </pattern>
-        <marker id="foundation-dimension-arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse">
-          <path d="M0,3 L6,0 L6,6 Z" className="foundation-svg-dimension-arrow" />
-        </marker>
-      </defs>
-
-      <path d={`M18 ${Math.min(285, wallTop + 65)} H${Math.max(18, wallX - 5)} M18 ${Math.min(285, wallTop + 65)} L18 430`} className="foundation-svg-grade" />
-      <text x="22" y={Math.min(279, wallTop + 59)} className="foundation-svg-note">EXTERIOR GRADE</text>
-      <line x1="18" y1="102" x2="397" y2="102" className="foundation-svg-datum" />
-      <text x="22" y="96" className="foundation-svg-note">PROJECT FOUNDATION TOP DATUM · OFFSET {formatSignedArchitectural(type.topOffset)}</text>
-
-      <rect x={floorX} y={floorY} width={floorWidth} height={floorHeight} rx="1" fill="url(#foundation-floor-pattern)" className="foundation-svg-floor" />
-      <rect x={floorX} y={floorY} width={floorWidth} height="7" className="foundation-svg-subfloor" />
-      <text x={floorX + floorWidth / 2} y={floorY + 29} textAnchor="middle" className="foundation-svg-component-label">FLOOR PLATFORM</text>
-      <line x1={floorX} y1={floorY - 7} x2={floorX} y2={floorY + floorHeight + 6} className="foundation-svg-stop-edge" />
-      <text x={Math.min(392, floorX + 7)} y={floorY - 11} className="foundation-svg-stop-label">FLOOR STOP EDGE</text>
-
-      {Array.from({ length: type.sill.foundationPlateCount }, (_, index) => (
-        <rect key={index} x={plateX} y={wallTop - plateHeight * (index + 1)} width={plateWidth} height={plateHeight} className="foundation-svg-lumber" />
-      ))}
-      {Array.from({ length: type.sill.upperWallBottomPlateCount }, (_, index) => (
-        <rect key={index} x={plateX} y={floorY - plateHeight * (index + 1)} width={plateWidth} height={plateHeight} className="foundation-svg-lumber foundation-svg-upper-wall-plate" />
-      ))}
-      {type.sill.upperWallBottomPlateCount ? <text x={plateX + plateWidth / 2} y={Math.max(10, floorY - plateHeight * type.sill.upperWallBottomPlateCount - 5)} textAnchor="middle" className="foundation-svg-upper-wall-label">FRAMED-WALL PLATE</text> : null}
-      <rect x={wallX} y={wallTop} width={wallWidth} height={Math.max(24, wallBottom - wallTop)} fill="url(#foundation-concrete-pattern)" className="foundation-svg-concrete" />
-      {type.footing.enabled ? <rect x={footingX} y={footingTop} width={footingWidth} height={footingHeight} fill="url(#foundation-concrete-pattern)" className="foundation-svg-concrete foundation-svg-footing" /> : null}
-      <line x1={centerX} y1={wallTop - 8} x2={centerX} y2={footingBottom + 10} className="foundation-svg-centerline" />
-      <text x={centerX} y={(wallTop + wallBottom) / 2} textAnchor="middle" className="foundation-svg-material-label">{type.material}</text>
-
-      <line x1={plateX} y1={plateTop - 11} x2={plateX + plateWidth} y2={plateTop - 11} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
-      <line x1={plateX} y1={plateTop - 17} x2={plateX} y2={plateTop - 3} className="foundation-svg-extension" />
-      <line x1={plateX + plateWidth} y1={plateTop - 17} x2={plateX + plateWidth} y2={plateTop - 3} className="foundation-svg-extension" />
-      <foreignObject x="294" y="24" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-pw:${type.sill.plateWidth}`} label="Sill plate width" value={type.sill.plateWidth} onChange={(plateWidth) => onSillChange({ plateWidth })} /></foreignObject>
-
-      <line x1={Math.max(8, plateX - 12)} y1={plateTop} x2={Math.max(8, plateX - 12)} y2={wallTop} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
-      <foreignObject x="7" y="112" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-ph:${type.sill.plateHeight}`} label="Plate height each" value={type.sill.plateHeight} onChange={(plateHeight) => onSillChange({ plateHeight })} /></foreignObject>
-
-      <line x1={wallX} y1={wallDimensionY} x2={wallX + wallWidth} y2={wallDimensionY} className="foundation-svg-dimension foundation-svg-dimension-contrast" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
-      <foreignObject x="294" y="207" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-ww:${type.wallWidth}`} label="Concrete width" value={type.wallWidth} onChange={onWallWidthChange} /></foreignObject>
-
-      <line x1={Math.max(8, wallX - 17)} y1={wallTop} x2={Math.max(8, wallX - 17)} y2={wallBottom} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
-      <foreignObject x="7" y="270" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-wh:${type.wallHeight}`} label="Concrete height" value={type.wallHeight} onChange={onWallHeightChange} /></foreignObject>
-
-      {type.footing.enabled ? <>
-        <line x1={footingX} y1={footingBottom + 18} x2={footingX + footingWidth} y2={footingBottom + 18} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
-        <line x1={footingX} y1={footingBottom + 4} x2={footingX} y2={footingBottom + 24} className="foundation-svg-extension" />
-        <line x1={footingX + footingWidth} y1={footingBottom + 4} x2={footingX + footingWidth} y2={footingBottom + 24} className="foundation-svg-extension" />
-        <foreignObject x="151" y="443" width="118" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-fw:${type.footing.width}`} label="Footing width" value={type.footing.width} onChange={(width) => onFootingChange({ width })} /></foreignObject>
-        <line x1={Math.min(402, footingX + footingWidth + 12)} y1={footingTop} x2={Math.min(402, footingX + footingWidth + 12)} y2={footingBottom} className="foundation-svg-dimension" markerStart="url(#foundation-dimension-arrow)" markerEnd="url(#foundation-dimension-arrow)" />
-        <foreignObject x="294" y="350" width="116" height="47"><FoundationDiagramDimension key={`${type.id}:diagram-fh:${type.footing.height}`} label="Footing height" value={type.footing.height} onChange={(height) => onFootingChange({ height })} /></foreignObject>
-      </> : <text x="210" y="433" textAnchor="middle" className="foundation-svg-disabled-note">CONTINUOUS FOOTING OFF</text>}
-    </svg>
-  );
-}
-
-function FoundationWallManagerDialog({
-  building,
-  onCancel,
-  onSave,
-}: {
-  building: BuildingStructure;
-  onCancel: () => void;
-  onSave: (building: BuildingStructure) => void;
-}) {
-  const [draft, setDraft] = useState(() => cloneBuildingStructure(building));
-  const [selectedId, setSelectedId] = useState(building.activeFoundationWallTypeId);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-  const selected = draft.foundationWallTypes.find((type) => type.id === selectedId) ?? draft.foundationWallTypes[0];
-  const replaceSelected = (change: Partial<FoundationWallType>) => {
-    setDraft((current) => ({
-      ...cloneBuildingStructure(current),
-      foundationWallTypes: current.foundationWallTypes.map((type) => type.id === selected.id ? { ...cloneFoundationWallType(type), ...change } : cloneFoundationWallType(type)),
-    }));
-    setError("");
-  };
-  const replaceFooting = (change: Partial<FoundationWallType["footing"]>) => replaceSelected({ footing: { ...selected.footing, ...change } });
-  const replaceSill = (change: Partial<FoundationWallType["sill"]>) => replaceSelected({ sill: { ...selected.sill, ...change } });
-  const changeCondition = (condition: FoundationWallCondition) => replaceSelected({
-    condition,
-    sill: { ...selected.sill, ...foundationConditionPlateDefaults(condition) },
-  });
-  const duplicateType = () => {
-    if (draft.foundationWallTypes.length >= 32) return;
-    const id = nextFoundationWallTypeId(draft);
-    const copy = { ...cloneFoundationWallType(selected), id, name: `${selected.name} Copy` };
-    setDraft((current) => ({ ...cloneBuildingStructure(current), activeFoundationWallTypeId: id, foundationWallTypes: [...current.foundationWallTypes.map(cloneFoundationWallType), copy] }));
-    setSelectedId(id);
-  };
-  const deleteType = () => {
-    if (draft.foundationWallTypes.length <= 1) return;
-    const remaining = draft.foundationWallTypes.filter((type) => type.id !== selected.id).map(cloneFoundationWallType);
-    const nextActive = draft.activeFoundationWallTypeId === selected.id ? remaining[0].id : draft.activeFoundationWallTypeId;
-    setDraft((current) => ({ ...cloneBuildingStructure(current), activeFoundationWallTypeId: nextActive, foundationWallTypes: remaining }));
-    setSelectedId(nextActive);
-  };
-  const save = () => {
-    const next = cloneBuildingStructure(draft);
-    if (!buildingStructureIsValid(next)) {
-      setError("Check the type names and dimensions. Footings cannot be narrower than their concrete Wall, and plate counts must remain within the supported range.");
-      return;
-    }
-    onSave(next);
-  };
-  const plateStackHeight = foundationSillStackHeight(selected);
-  const ownershipLabel = selected.sill.upperWallBottomPlateCount
-    ? `${selected.sill.foundationPlateCount} foundation sill + ${selected.sill.upperWallBottomPlateCount} framed-Wall bottom plate`
-    : `${selected.sill.foundationPlateCount} foundation-hosted sill plates`;
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager foundation-manager" role="dialog" aria-modal="true" aria-labelledby="foundation-manager-title">
-        <header className="story-manager-header"><div><strong id="foundation-manager-title">Foundation Wall Type Manager</strong><span>Define concrete support, footing geometry, and the sill edge that controls the floor perimeter.</span></div><button type="button" onClick={onCancel} aria-label="Close Foundation Wall Type Manager">×</button></header>
-        <div className="story-manager-body">
-          <aside className="story-list">
-            <header><strong>Foundation Wall Types</strong><span>{draft.foundationWallTypes.length} defined</span></header>
-            {draft.foundationWallTypes.map((type) => <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => setSelectedId(type.id)}><strong>{type.name}</strong><span>{formatArchitectural(type.wallWidth)} concrete · {type.sill.foundationPlateCount} sill plate{type.sill.foundationPlateCount === 1 ? "" : "s"}</span>{type.id === draft.activeFoundationWallTypeId ? <small>ACTIVE TYPE</small> : null}</button>)}
-            <div className="story-list-actions"><button type="button" onClick={duplicateType} disabled={draft.foundationWallTypes.length >= 32}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={draft.foundationWallTypes.length <= 1}>Delete</button></div>
-          </aside>
-          <main className="story-editor foundation-editor">
-            <section className="story-editor-summary foundation-editor-summary">
-              <label><span>Type name</span><input value={selected.name} maxLength={100} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
-              <label><span>Foundation condition</span><select value={selected.condition} onChange={(event) => changeCondition(event.target.value as FoundationWallCondition)}>{FOUNDATION_WALL_CONDITIONS.map((condition) => <option value={condition} key={condition}>{FOUNDATION_CONDITION_LABELS[condition]}</option>)}</select></label>
-              <button type="button" className={selected.id === draft.activeFoundationWallTypeId ? "is-anchor" : ""} onClick={() => setDraft((current) => ({ ...cloneBuildingStructure(current), activeFoundationWallTypeId: selected.id }))}>{selected.id === draft.activeFoundationWallTypeId ? "Active foundation type" : "Make active"}</button>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Concrete Wall</strong><span>Structural stem and project top condition</span></div></header>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Material</span><input value={selected.material} maxLength={120} onChange={(event) => replaceSelected({ material: event.target.value })} /></label>
-                <StoryDimensionInput key={`${selected.id}:wall-height:${selected.wallHeight}`} label="Wall height" value={selected.wallHeight} onChange={(wallHeight) => replaceSelected({ wallHeight })} />
-                <StoryDimensionInput key={`${selected.id}:wall:${selected.wallWidth}`} label="Wall width" value={selected.wallWidth} onChange={(wallWidth) => replaceSelected({ wallWidth })} />
-                <StoryDimensionInput signed key={`${selected.id}:top:${selected.topOffset}`} label="Top offset" value={selected.topOffset} onChange={(topOffset) => replaceSelected({ topOffset })} />
-              </div>
-            </section>
-            <section className="foundation-setting-section">
-              <header><label><input type="checkbox" checked={selected.footing.enabled} onChange={(event) => replaceFooting({ enabled: event.target.checked })} /><strong>Continuous Footing</strong></label><span>Centered under the concrete Main layer unless offset</span></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`${selected.id}:fw:${selected.footing.width}`} label="Footing width" value={selected.footing.width} onChange={(width) => replaceFooting({ width })} />
-                <StoryDimensionInput key={`${selected.id}:fh:${selected.footing.height}`} label="Footing height" value={selected.footing.height} onChange={(height) => replaceFooting({ height })} />
-                <StoryDimensionInput signed key={`${selected.id}:fo:${selected.footing.centerOffset}`} label="Center offset" value={selected.footing.centerOffset} onChange={(centerOffset) => replaceFooting({ centerOffset })} />
-              </div>
-            </section>
-            <section className="foundation-setting-section foundation-sill-settings">
-              <header><div><strong>Sill Support</strong><span>The exterior sill edge becomes the authoritative floor-perimeter stop.</span></div><output>{ownershipLabel}</output></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`${selected.id}:sw:${selected.sill.plateWidth}`} label="Plate width" value={selected.sill.plateWidth} onChange={(plateWidth) => replaceSill({ plateWidth })} />
-                <StoryDimensionInput key={`${selected.id}:sh:${selected.sill.plateHeight}`} label="Plate height" value={selected.sill.plateHeight} onChange={(plateHeight) => replaceSill({ plateHeight })} />
-                <StoryDimensionInput signed key={`${selected.id}:ss:${selected.sill.exteriorSetback}`} label="Exterior setback" value={selected.sill.exteriorSetback} onChange={(exteriorSetback) => replaceSill({ exteriorSetback })} />
-                <label className="story-field"><span>Foundation sill plates</span><input type="number" min={1} max={4} step={1} value={selected.sill.foundationPlateCount} onChange={(event) => replaceSill({ foundationPlateCount: Number(event.target.value) })} /></label>
-                <label className="story-field"><span>Framed-Wall bottom plates</span><input type="number" min={0} max={2} step={1} value={selected.sill.upperWallBottomPlateCount} onChange={(event) => replaceSill({ upperWallBottomPlateCount: Number(event.target.value) })} /></label>
-                <label className="story-field"><span>Foundation plate stack</span><output className="room-output">{formatArchitectural(plateStackHeight)}</output></label>
-              </div>
-              <p>Changing the condition applies the reviewed residential plate ownership: Standard and Interior Mudsill use two foundation-hosted plates; Dropped, Garage, and Slab Walk-out use one foundation sill plus the framed Wall bottom plate.</p>
-            </section>
-          </main>
-          <aside className="foundation-section-preview" aria-label="Foundation Wall section preview">
-            <header><strong>Editable Support Section</strong><span>Proportional component preview · exterior at left</span></header>
-            <div className="foundation-preview-canvas"><FoundationSectionDiagram type={selected} onWallHeightChange={(wallHeight) => replaceSelected({ wallHeight })} onWallWidthChange={(wallWidth) => replaceSelected({ wallWidth })} onFootingChange={replaceFooting} onSillChange={replaceSill} /></div>
-            <dl><div><dt>Condition</dt><dd>{FOUNDATION_CONDITION_LABELS[selected.condition]}</dd></div><div><dt>Concrete top</dt><dd>{formatSignedArchitectural(selected.topOffset)}</dd></div><div><dt>Sill edge</dt><dd>{selected.sill.exteriorSetback === 0 ? "Flush to Main exterior" : `${formatSignedArchitectural(selected.sill.exteriorSetback)} setback`}</dd></div><div><dt>Plate ownership</dt><dd>{ownershipLabel}</dd></div></dl>
-          </aside>
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>{draft.foundationWallTypes.length} reusable Foundation Wall type{draft.foundationWallTypes.length === 1 ? "" : "s"} · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Foundation Types</button></div></footer>
-      </section>
-    </div>
-  );
-}
-
-function nextWallOpeningTypeId(building: BuildingStructure, kind: WallOpeningKind): string {
-  const prefix = kind === "door" ? "door-type" : "window-type";
-  const ids = new Set(building.openingTypes.map((type) => type.id));
-  let number = 1;
-  while (ids.has(`${prefix}-${String(number).padStart(2, "0")}`)) number += 1;
-  return `${prefix}-${String(number).padStart(2, "0")}`;
-}
-
-function nextWallOpeningTypeName(building: BuildingStructure, sourceName: string): string {
-  const names = new Set(building.openingTypes.map((type) => type.name.trim().toLocaleLowerCase()));
-  const baseName = `${sourceName.trim()} Copy`;
-  if (!names.has(baseName.toLocaleLowerCase())) return baseName;
-  let number = 2;
-  while (names.has(`${baseName} ${number}`.toLocaleLowerCase())) number += 1;
-  return `${baseName} ${number}`;
-}
-
-function availableWallOpeningTypeName(building: BuildingStructure, sourceName: string): string {
-  const names = new Set(building.openingTypes.map((type) => type.name.trim().toLocaleLowerCase()));
-  const baseName = sourceName.trim();
-  if (!names.has(baseName.toLocaleLowerCase())) return baseName;
-  let number = 2;
-  while (names.has(`${baseName} ${number}`.toLocaleLowerCase())) number += 1;
-  return `${baseName} ${number}`;
-}
-
-function nextOpeningComponentId(type: WallOpeningType): string {
-  const ids = new Set(type.components.map((component) => component.id));
-  let number = 1;
-  while (ids.has(`component-${String(number).padStart(2, "0")}`)) number += 1;
-  return `component-${String(number).padStart(2, "0")}`;
-}
-
-function nextOpeningComponentName(type: WallOpeningType, sourceName = "Component"): string {
-  const names = new Set(type.components.map((component) => component.name.trim().toLocaleLowerCase()));
-  if (!names.has(sourceName.toLocaleLowerCase())) return sourceName;
-  let number = 2;
-  while (names.has(`${sourceName} ${number}`.toLocaleLowerCase())) number += 1;
-  return `${sourceName} ${number}`;
-}
-
-function nextWallHeaderTypeId(building: BuildingStructure): string {
-  const ids = new Set(building.headerTypes.map((type) => type.id));
-  let number = 1;
-  while (ids.has(`header-type-${String(number).padStart(2, "0")}`)) number += 1;
-  return `header-type-${String(number).padStart(2, "0")}`;
-}
-
-function nextWallHeaderTypeName(building: BuildingStructure, sourceName: string): string {
-  const names = new Set(building.headerTypes.map((type) => type.name.trim().toLocaleLowerCase()));
-  const baseName = `${sourceName.trim()} Copy`;
-  if (!names.has(baseName.toLocaleLowerCase())) return baseName;
-  let number = 2;
-  while (names.has(`${baseName} ${number}`.toLocaleLowerCase())) number += 1;
-  return `${baseName} ${number}`;
-}
-
-function nextWallHeaderScheduleMark(building: BuildingStructure): string {
-  const marks = new Set(building.headerTypes.map((type) => type.scheduleMark.toUpperCase()));
-  let number = 1;
-  while (marks.has(`H${number}`)) number += 1;
-  return `H${number}`;
-}
-
-const OPENING_PREVIEW_ROLE_COLORS: Record<OpeningAssemblyComponent["role"], string> = {
-  frame: "#7591a5",
-  glazing: "#9fc9d8",
-  hardware: "#b7a27d",
-  jamb: "#806f5e",
-  mullion: "#d6e1e7",
-  panel: "#a98b67",
-  sash: "#607f94",
-  threshold: "#8a7b6a",
-  trim: "#c4ced4",
-};
-
-function OpeningTypePreview({ openingType, wallType }: { openingType: WallOpeningType; wallType: LayeredAssembly }) {
-  const margin = Math.max(8, openingType.roughWidth * 0.18);
-  const headerBottomHeight = openingType.kind === "door" ? openingType.roughHeight : openingType.defaultHeaderBottomHeight;
-  const roughBottom = openingType.kind === "door" ? 0 : headerBottomHeight - openingType.roughHeight;
-  const lineLength = openingType.roughWidth + margin * 2;
-  const opening: WallOpening = {
-    centerOffset: lineLength / 2,
-    componentOverrides: [],
-    headerBottomHeight,
-    headerTypeIdOverride: null,
-    id: "opening-type-preview",
-    kind: openingType.kind,
-    layerId: openingType.kind === "door" ? "layer-doors" : "layer-windows",
-    name: `${openingType.name} Preview`,
-    roughHeight: openingType.roughHeight,
-    roughWidth: openingType.roughWidth,
-    unitHeight: openingType.unitHeight,
-    unitWidth: openingType.unitWidth,
-    wallOpeningTypeId: openingType.id,
-  };
-  const line: LineObject = {
-    architecturalRole: "wall",
-    end: { x: lineLength, y: 0, z: 0 },
-    foundationSupportWallId: null,
-    foundationWallTypeId: null,
-    id: "opening-type-preview-wall",
-    layerId: "layer-default",
-    locked: false,
-    name: "Opening Type Preview Wall",
-    start: { x: 0, y: 0, z: 0 },
-    storyId: "story-preview",
-    type: "line",
-    wallEndJoinMode: "square",
-    wallExteriorSide: "left",
-    wallJoinPriority: 0,
-    wallOpenings: [opening],
-    wallReferenceLine: "center-main",
-    wallStartJoinMode: "square",
-    wallTypeId: wallType.id,
-  };
-  const solids = wallOpeningComponentSolids(line, wallType, new Map([[openingType.id, openingType]]));
-  const maximumHeight = Math.max(headerBottomHeight, roughBottom + openingType.unitOffsetZ + openingType.unitHeight);
-  const verticalMargin = Math.max(10, maximumHeight * 0.16);
-  const canvasHeight = maximumHeight + verticalMargin * 2;
-  const roughLeft = opening.centerOffset - openingType.roughWidth / 2;
-  const unitLeft = opening.centerOffset + openingType.unitOffsetX - openingType.unitWidth / 2;
-  const unitBottom = roughBottom + openingType.unitOffsetZ;
-  return (
-    <aside className="opening-type-preview" aria-label="Door or Window product preview">
-      <header><strong>Live Product Preview</strong><span>Exterior elevation · updates with the Type</span></header>
-      <div className="opening-preview-canvas">
-        <svg viewBox={`0 0 ${lineLength} ${canvasHeight}`} role="img" aria-label={`${openingType.name} exterior elevation preview`}>
-          <rect className="opening-preview-rough" x={roughLeft} y={canvasHeight - headerBottomHeight} width={openingType.roughWidth} height={openingType.roughHeight} />
-          <rect className="opening-preview-unit" x={unitLeft} y={canvasHeight - unitBottom - openingType.unitHeight} width={openingType.unitWidth} height={openingType.unitHeight} />
-          {solids.map((solid, index) => {
-            const xValues = [solid.startExterior.x, solid.startInterior.x, solid.endExterior.x, solid.endInterior.x];
-            const left = Math.min(...xValues);
-            const right = Math.max(...xValues);
-            return <rect key={`${solid.componentId}:${index}`} x={left} y={canvasHeight - solid.baseHeight - solid.height} width={right - left} height={solid.height} fill={OPENING_PREVIEW_ROLE_COLORS[solid.role]} className={`opening-preview-component opening-preview-${solid.role}`}><title>{solid.componentName} · {solid.material}</title></rect>;
-          })}
-          <text className="opening-preview-dimension" x={opening.centerOffset} y={verticalMargin * 0.62} textAnchor="middle">ROUGH {formatArchitectural(openingType.roughWidth)} × {formatArchitectural(openingType.roughHeight)}</text>
-          <text className="opening-preview-dimension" x={opening.centerOffset} y={canvasHeight - verticalMargin * 0.45} textAnchor="middle">UNIT {formatArchitectural(openingType.unitWidth)} × {formatArchitectural(openingType.unitHeight)}</text>
-        </svg>
-      </div>
-      <dl className="opening-preview-facts">
-        <div><dt>Family</dt><dd>{openingType.kind === "door" ? "Door" : "Window"}</dd></div>
-        <div><dt>Header bottom</dt><dd>{formatArchitectural(headerBottomHeight)}</dd></div>
-        <div><dt>Assembly</dt><dd>{openingType.components.length} editable parts</dd></div>
-        <div><dt>Source</dt><dd>{openingType.productSource ? `${openingType.productSource.manufacturer} · ${openingType.productSource.modelNumber}` : "Model Builder parametric"}</dd></div>
-      </dl>
-      <section className="opening-import-readiness">
-        <strong>Manufacturer Product Package</strong>
-        <p>Native catalog packages preserve the original source record and editable Model Builder opening and framing data. Reviewed SVG and GLB assets are the next package extension.</p>
-        <span>Current: validated metadata + native parametric components</span>
-      </section>
-    </aside>
-  );
-}
-
-function OpeningTypeManagerDialog({
-  document,
-  onCancel,
-  onSave,
-}: {
-  document: ModelDocument;
-  onCancel: () => void;
-  onSave: (building: BuildingStructure) => boolean;
-}) {
-  const [draft, setDraft] = useState(() => cloneBuildingStructure(document.building));
-  const [selectedId, setSelectedId] = useState(document.building.activeDoorTypeId);
-  const [selectedComponentId, setSelectedComponentId] = useState(document.building.openingTypes.find((type) => type.id === document.building.activeDoorTypeId)?.components[0]?.id ?? "");
-  const [error, setError] = useState("");
-  const [productImport, setProductImport] = useState<{ fileName: string; openingType: WallOpeningType; product: ManufacturerProductSource } | null>(null);
-  const productFileInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (productImport) {
-        setProductImport(null);
-        return;
-      }
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel, productImport]);
-  const selected = draft.openingTypes.find((type) => type.id === selectedId) ?? draft.openingTypes[0];
-  const selectedComponent = selected.components.find((component) => component.id === selectedComponentId) ?? selected.components[0];
-  const activeWallType = draft.wallTypes.find((type) => type.id === draft.activeWallTypeId) ?? draft.wallTypes[0];
-  const selectedHeader = draft.headerTypes.find((type) => type.id === (selected.headerTypeId ?? wallDefaultHeaderTypeId(activeWallType))) ?? draft.headerTypes[0];
-  const usageCount = document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.wallOpeningTypeId === selected.id).length, 0);
-  const headerUsageCount = draft.openingTypes.filter((type) => type.headerTypeId === selectedHeader.id).length +
-    draft.wallTypes.filter((type) => wallDefaultHeaderTypeId(type) === selectedHeader.id).length +
-    document.lines.reduce((count, line) => count + line.wallOpenings.filter((opening) => opening.headerTypeIdOverride === selectedHeader.id).length, 0);
-  const kindCount = draft.openingTypes.filter((type) => type.kind === selected.kind).length;
-  const replaceSelected = (change: Partial<WallOpeningType>) => {
-    setDraft((current) => ({ ...cloneBuildingStructure(current), openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), ...change } : cloneWallOpeningType(type)) }));
-    setError("");
-  };
-  const replaceSelectedComponent = (change: Partial<OpeningAssemblyComponent>) => {
-    setDraft((current) => ({
-      ...cloneBuildingStructure(current),
-      openingTypes: current.openingTypes.map((type) => type.id === selected.id ? {
-        ...cloneWallOpeningType(type),
-        components: type.components.map((component) => component.id === selectedComponent.id ? { ...component, ...change } : { ...component }),
-      } : cloneWallOpeningType(type)),
-    }));
-    setError("");
-  };
-  const addComponent = () => {
-    if (selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT) return;
-    const id = nextOpeningComponentId(selected);
-    const component: OpeningAssemblyComponent = {
-      depth: 1.5,
-      depthAnchor: "center",
-      depthOffset: 0,
-      divisionCount: 1,
-      geometry: "perimeter",
-      id,
-      inset: 0,
-      material: "Wood",
-      name: nextOpeningComponentName(selected),
-      parentComponentId: null,
-      profileWidth: 1.5,
-      role: "frame",
-      visible: true,
-    };
-    replaceSelected({ components: [...selected.components.map((candidate) => ({ ...candidate })), component] });
-    setSelectedComponentId(id);
-  };
-  const duplicateComponent = () => {
-    if (selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT) return;
-    const id = nextOpeningComponentId(selected);
-    const copy = { ...selectedComponent, id, name: nextOpeningComponentName(selected, `${selectedComponent.name} Copy`), parentComponentId: selectedComponent.parentComponentId };
-    replaceSelected({ components: [...selected.components.map((candidate) => ({ ...candidate })), copy] });
-    setSelectedComponentId(id);
-  };
-  const deleteComponent = () => {
-    if (selected.components.length <= 1 || selected.components.some((candidate) => candidate.parentComponentId === selectedComponent.id)) return;
-    const remaining = selected.components.filter((candidate) => candidate.id !== selectedComponent.id).map((candidate) => ({ ...candidate }));
-    replaceSelected({ components: remaining });
-    setSelectedComponentId(selectedComponent.parentComponentId ?? remaining[0].id);
-  };
-  const componentParentOptions = selected.components.filter((candidate) => {
-    if (candidate.id === selectedComponent.id) return false;
-    let parentId = candidate.parentComponentId;
-    while (parentId !== null) {
-      if (parentId === selectedComponent.id) return false;
-      parentId = selected.components.find((item) => item.id === parentId)?.parentComponentId ?? null;
-    }
-    return true;
-  });
-  const replaceSelectedHeader = (change: Partial<WallHeaderType>) => {
-    setDraft((current) => ({ ...cloneBuildingStructure(current), headerTypes: current.headerTypes.map((type) => type.id === selectedHeader.id ? { ...cloneWallHeaderType(type), ...change } : cloneWallHeaderType(type)) }));
-    setError("");
-  };
-  const duplicateHeaderType = () => {
-    if (draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT) return;
-    const id = nextWallHeaderTypeId(draft);
-    const copy = { ...cloneWallHeaderType(selectedHeader), id, name: nextWallHeaderTypeName(draft, selectedHeader.name), scheduleMark: nextWallHeaderScheduleMark(draft) };
-    setDraft((current) => ({
-      ...cloneBuildingStructure(current),
-      headerTypes: [...current.headerTypes.map(cloneWallHeaderType), copy],
-      openingTypes: current.openingTypes.map((type) => type.id === selected.id ? { ...cloneWallOpeningType(type), headerTypeId: id } : cloneWallOpeningType(type)),
-    }));
-    setError("");
-  };
-  const duplicateType = () => {
-    if (draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT) return;
-    const id = nextWallOpeningTypeId(draft, selected.kind);
-    const copy = { ...cloneWallOpeningType(selected), id, name: nextWallOpeningTypeName(draft, selected.name) };
-    setDraft((current) => ({
-      ...cloneBuildingStructure(current),
-      [selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId"]: id,
-      openingTypes: [...current.openingTypes.map(cloneWallOpeningType), copy],
-    }));
-    setSelectedId(id);
-  };
-  const deleteType = () => {
-    if (kindCount <= 1 || usageCount > 0) return;
-    const remaining = draft.openingTypes.filter((type) => type.id !== selected.id).map(cloneWallOpeningType);
-    const activeKey = selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId";
-    const nextActive = draft[activeKey] === selected.id ? remaining.find((type) => type.kind === selected.kind)!.id : draft[activeKey];
-    setDraft((current) => ({ ...cloneBuildingStructure(current), [activeKey]: nextActive, openingTypes: remaining }));
-    setSelectedId(nextActive);
-  };
-  const importProductFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (file.size > MAXIMUM_PRODUCT_PACKAGE_BYTES) {
-      setError("This product package is larger than the supported 2 MB native-package limit.");
-      return;
-    }
-    try {
-      const result = parseProductPackage(await file.text());
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      setProductImport({ fileName: file.name, openingType: result.openingType, product: result.product });
-      setError("");
-    } catch {
-      setError("Model Builder could not read this product package.");
-    }
-  };
-  const confirmProductImport = () => {
-    if (!productImport || draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT) return;
-    const id = nextWallOpeningTypeId(draft, productImport.openingType.kind);
-    const imported = {
-      ...cloneWallOpeningType(productImport.openingType),
-      headerTypeId: null,
-      id,
-      name: availableWallOpeningTypeName(draft, productImport.openingType.name),
-      productSource: { ...productImport.product },
-    };
-    const activeKey = imported.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId";
-    setDraft((current) => ({
-      ...cloneBuildingStructure(current),
-      [activeKey]: id,
-      openingTypes: [...current.openingTypes.map(cloneWallOpeningType), imported],
-    }));
-    setSelectedId(id);
-    setSelectedComponentId(imported.components[0]?.id ?? "");
-    setProductImport(null);
-    setError("");
-  };
-  const makeActive = () => setDraft((current) => ({ ...cloneBuildingStructure(current), [selected.kind === "door" ? "activeDoorTypeId" : "activeWindowTypeId"]: selected.id }));
-  const activeId = selected.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId;
-  const doorPanelLayout = doorPanelLayoutForType(selected);
-  const windowSashArrangement = windowSashArrangementForType(selected);
-  const windowLitePattern = windowLitePatternForType(selected);
-  const save = () => {
-    const next = cloneBuildingStructure(draft);
-    if (!buildingStructureIsValid(next)) {
-      setError("Check names, dimensions, framing counts, unique header schedule marks, and Wall compatibility. Unit size must fit inside the rough opening, and every project needs at least one Door and one Window type.");
-      return;
-    }
-    if (!onSave(next)) {
-      setError("This header assembly is wider than the Main layer of at least one Wall where the Door or Window type is already placed. Choose a thinner assembly, duplicate the opening type, or use a thicker host Wall.");
-    }
-  };
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager wall-type-manager opening-type-manager" role="dialog" aria-modal="true" aria-labelledby="opening-type-manager-title">
-        <header className="story-manager-header"><div><strong id="opening-type-manager-title">Door &amp; Window Type Manager</strong><span>Reusable units, rough openings, finish returns, and shared structural header assemblies.</span></div><button type="button" onClick={onCancel} aria-label="Close Door and Window Type Manager">×</button></header>
-        <div className="story-manager-body">
-          <aside className="story-list">
-            <header><strong>Component Types</strong><span>{draft.openingTypes.length} defined</span></header>
-            {draft.openingTypes.map((type) => {
-              const isActive = type.id === (type.kind === "door" ? draft.activeDoorTypeId : draft.activeWindowTypeId);
-              return <button type="button" key={type.id} className={type.id === selected.id ? "is-selected" : ""} onClick={() => { setSelectedId(type.id); setSelectedComponentId(type.components[0]?.id ?? ""); }}><strong>{type.name}</strong><span>{type.kind === "door" ? "Door" : "Window"} · {formatArchitectural(type.unitWidth)} × {formatArchitectural(type.unitHeight)} · {type.components.length} parts</span>{isActive ? <small>ACTIVE {type.kind.toUpperCase()}</small> : null}</button>;
-            })}
-            <div className="story-list-actions opening-type-list-actions"><button type="button" onClick={() => productFileInputRef.current?.click()} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>Import Product…</button><button type="button" onClick={duplicateType} disabled={draft.openingTypes.length >= MAXIMUM_WALL_OPENING_TYPE_COUNT}>＋ Duplicate</button><button type="button" onClick={deleteType} disabled={kindCount <= 1 || usageCount > 0}>Delete</button></div>
-            <input ref={productFileInputRef} className="project-file-input" type="file" accept={`${PRODUCT_PACKAGE_EXTENSION},application/json`} onChange={importProductFile} />
-          </aside>
-          <main className="story-editor opening-type-editor">
-            <section className="story-editor-summary foundation-editor-summary">
-              <label><span>Type name</span><input value={selected.name} maxLength={100} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
-              <label><span>Component family</span><output className="room-output">{selected.kind === "door" ? "Door" : "Window"}</output></label>
-              <button type="button" className={selected.id === activeId ? "is-anchor" : ""} onClick={makeActive}>{selected.id === activeId ? `Active ${selected.kind} type` : `Make active ${selected.kind}`}</button>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Unit &amp; Rough Opening</strong><span>The product size and the structural cut remain separate.</span></div><output>{usageCount} placed</output></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`${selected.id}:uw:${selected.unitWidth}`} label="Unit width" value={selected.unitWidth} onChange={(unitWidth) => replaceSelected({ unitWidth })} />
-                <StoryDimensionInput key={`${selected.id}:uh:${selected.unitHeight}`} label="Unit height" value={selected.unitHeight} onChange={(unitHeight) => replaceSelected({ unitHeight })} />
-                <StoryDimensionInput key={`${selected.id}:rw:${selected.roughWidth}`} label="Rough width" value={selected.roughWidth} onChange={(roughWidth) => replaceSelected({ roughWidth })} />
-                <StoryDimensionInput key={`${selected.id}:rh:${selected.roughHeight}`} label="Rough height" value={selected.roughHeight} onChange={(roughHeight) => replaceSelected({ roughHeight, ...(selected.kind === "door" ? { defaultHeaderBottomHeight: roughHeight } : {}) })} />
-                <StoryDimensionInput signed key={`${selected.id}:uox:${selected.unitOffsetX}`} label="Unit horizontal offset" value={selected.unitOffsetX} onChange={(unitOffsetX) => replaceSelected({ unitOffsetX })} />
-                <StoryDimensionInput allowZero key={`${selected.id}:uoz:${selected.unitOffsetZ}`} label="Unit bottom above rough" value={selected.unitOffsetZ} onChange={(unitOffsetZ) => replaceSelected({ unitOffsetZ })} />
-                {selected.kind === "window" ? <StoryDimensionInput key={`${selected.id}:hh:${selected.defaultHeaderBottomHeight}`} label="Default header bottom" value={selected.defaultHeaderBottomHeight} onChange={(defaultHeaderBottomHeight) => replaceSelected({ defaultHeaderBottomHeight })} /> : <label className="story-field"><span>Header bottom</span><output className="room-output">Matches rough height</output></label>}
-              </div>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Manufacturer Product</strong><span>Identity and source provenance stay attached to this reusable Type.</span></div><output>{selected.productSource ? "Catalog product" : "Native generic"}</output></header>
-              {selected.productSource ? <div className="manufacturer-product-record">
-                <dl>
-                  <div><dt>Manufacturer</dt><dd>{selected.productSource.manufacturer}</dd></div>
-                  <div><dt>Product line</dt><dd>{selected.productSource.productLine || "Not supplied"}</dd></div>
-                  <div><dt>Model number</dt><dd>{selected.productSource.modelNumber}</dd></div>
-                  <div><dt>Revision</dt><dd>{selected.productSource.revision || "Not supplied"}</dd></div>
-                  <div><dt>Original source</dt><dd>{selected.productSource.sourceFileName}</dd></div>
-                  <div><dt>Source format</dt><dd>{selected.productSource.sourceFormat.toUpperCase()}</dd></div>
-                  <div><dt>Source URL</dt><dd>{selected.productSource.sourceUrl || "Not supplied"}</dd></div>
-                  <div><dt>Verified</dt><dd>{selected.productSource.verifiedAt ? new Date(selected.productSource.verifiedAt).toLocaleDateString() : "Not supplied"}</dd></div>
-                </dl>
-                <p>The imported source record is preserved while unit, rough-opening, and native component settings remain editable.</p>
-              </div> : <p className="opening-type-note manufacturer-product-empty">This Type was created in Model Builder and does not claim a manufacturer identity. Use Import Product to add a validated catalog package.</p>}
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Product Layout Generator</strong><span>Build familiar residential product geometry from editable components.</span></div><output>Parametric</output></header>
-              <div className="foundation-field-grid">
-                {selected.kind === "door" ? <label className="story-field"><span>Door panel layout</span><select value={doorPanelLayout ?? "custom"} onChange={(event) => { const configured = configureDoorPanelLayout(selected, event.target.value as DoorPanelLayout); if (configured) replaceSelected(configured); }}><option value="custom" disabled>Custom component layout</option>{DOOR_PANEL_LAYOUTS.map((layout) => <option key={layout} value={layout}>{layout === "flush" ? "Flush slab" : titleCase(layout)}</option>)}</select></label> : <>
-                  <label className="story-field"><span>Sash arrangement</span><select value={windowSashArrangement ?? "custom"} onChange={(event) => { const configured = configureWindowSashArrangement(selected, event.target.value as WindowSashArrangement); if (configured) replaceSelected(configured); }}><option value="custom" disabled>Custom component layout</option>{WINDOW_SASH_ARRANGEMENTS.map((arrangement) => <option key={arrangement} value={arrangement}>{titleCase(arrangement)}</option>)}</select></label>
-                  <label className="story-field"><span>Divided-lite pattern</span><select value={windowLitePattern ?? "custom"} onChange={(event) => { const configured = configureWindowLitePattern(selected, event.target.value as WindowLitePattern); if (configured) replaceSelected(configured); }}><option value="custom" disabled>Custom component layout</option>{WINDOW_LITE_PATTERNS.map((pattern) => <option key={pattern} value={pattern}>{pattern === "none" ? "None" : titleCase(pattern)}</option>)}</select></label>
-                </>}
-              </div>
-              <p className="opening-type-note">Generators create ordinary, editable assembly components: raised Door panel fields, fixed or operable Window sash sets, and equal, colonial, or prairie grille patterns. Product identity and manufacturer-specific profile libraries remain separate so generic geometry is never presented as a certified manufacturer model.</p>
-            </section>
-            <section className="foundation-setting-section opening-component-section">
-              <header><div><strong>3D Assembly Components</strong><span>Joined parametric parts generated inside the independent rough opening.</span></div><output>{selected.components.length} parts</output></header>
-              <div className="opening-component-toolbar">
-                <label className="story-field"><span>Selected component</span><select value={selectedComponent.id} onChange={(event) => setSelectedComponentId(event.target.value)}>{selected.components.map((component) => <option key={component.id} value={component.id}>{component.name} · {component.role}</option>)}</select></label>
-                <button type="button" onClick={addComponent} disabled={selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT}>＋ Add</button>
-                <button type="button" onClick={duplicateComponent} disabled={selected.components.length >= MAXIMUM_OPENING_COMPONENT_COUNT}>Duplicate</button>
-                <button type="button" onClick={deleteComponent} disabled={selected.components.length <= 1 || selected.components.some((candidate) => candidate.parentComponentId === selectedComponent.id)}>Delete</button>
-              </div>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Component name</span><input value={selectedComponent.name} maxLength={100} onChange={(event) => replaceSelectedComponent({ name: event.target.value })} /></label>
-                <label className="story-field"><span>Role</span><select value={selectedComponent.role} onChange={(event) => replaceSelectedComponent({ role: event.target.value as OpeningAssemblyComponent["role"] })}>{OPENING_COMPONENT_ROLES.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</select></label>
-                <label className="story-field"><span>Geometry</span><select value={selectedComponent.geometry} onChange={(event) => replaceSelectedComponent({ geometry: event.target.value as OpeningAssemblyComponent["geometry"] })}>{OPENING_COMPONENT_GEOMETRIES.map((geometry) => <option key={geometry} value={geometry}>{titleCase(geometry)}</option>)}</select></label>
-                <label className="story-field"><span>Joined inside</span><select value={selectedComponent.parentComponentId ?? ""} onChange={(event) => replaceSelectedComponent({ parentComponentId: event.target.value || null })}><option value="">Unit rectangle</option>{componentParentOptions.map((component) => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label>
-                <label className="story-field"><span>Material</span><input value={selectedComponent.material} maxLength={120} onChange={(event) => replaceSelectedComponent({ material: event.target.value })} /></label>
-                <label className="story-field"><span>Display</span><span className="room-checkbox-field"><input type="checkbox" checked={selectedComponent.visible} onChange={(event) => replaceSelectedComponent({ visible: event.target.checked })} /> Visible in model</span></label>
-                <StoryDimensionInput signed key={`${selected.id}:${selectedComponent.id}:inset:${selectedComponent.inset}`} label="Inset from parent" value={selectedComponent.inset} onChange={(inset) => replaceSelectedComponent({ inset })} />
-                <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:profile:${selectedComponent.profileWidth}`} label={selectedComponent.geometry === "panel-grid" ? "Panel gap" : selectedComponent.geometry.includes("divider") ? "Divider width" : "Profile width"} value={selectedComponent.profileWidth} onChange={(profileWidth) => replaceSelectedComponent({ profileWidth })} />
-                <StoryDimensionInput key={`${selected.id}:${selectedComponent.id}:depth:${selectedComponent.depth}`} label="Component depth" value={selectedComponent.depth} onChange={(depth) => replaceSelectedComponent({ depth })} />
-                <label className="story-field"><span>Depth anchor</span><select value={selectedComponent.depthAnchor} onChange={(event) => replaceSelectedComponent({ depthAnchor: event.target.value as OpeningAssemblyComponent["depthAnchor"] })}>{OPENING_COMPONENT_DEPTH_ANCHORS.map((anchor) => <option key={anchor} value={anchor}>{titleCase(anchor)} face</option>)}</select></label>
-                <StoryDimensionInput allowZero key={`${selected.id}:${selectedComponent.id}:do:${selectedComponent.depthOffset}`} label="Depth offset" value={selectedComponent.depthOffset} onChange={(depthOffset) => replaceSelectedComponent({ depthOffset })} />
-                {selectedComponent.geometry.includes("divider") || selectedComponent.geometry === "panel-grid" ? <label className="story-field"><span>{selectedComponent.geometry === "panel-grid" ? "Panel count" : "Divider count"}</span><select value={selectedComponent.divisionCount} onChange={(event) => replaceSelectedComponent({ divisionCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
-              </div>
-              <p className="opening-type-note">Each part keeps a stable identity for future schedules and placed-object overrides. A child uses its parent&apos;s clear opening, so changing the frame, sash, glass, panel, mullion, jamb, or trim dimensions rebuilds the joined 3D object without changing the structural rough opening.</p>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Finish Returns</strong><span>Generate jamb, head, and Window sill finish geometry inside the rough opening.</span></div></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput allowZero key={`${selected.id}:er:${selected.exteriorReturnDepth}`} label="Exterior return depth" value={selected.exteriorReturnDepth} onChange={(exteriorReturnDepth) => replaceSelected({ exteriorReturnDepth })} />
-                <StoryDimensionInput allowZero key={`${selected.id}:ir:${selected.interiorReturnDepth}`} label="Interior return depth" value={selected.interiorReturnDepth} onChange={(interiorReturnDepth) => replaceSelected({ interiorReturnDepth })} />
-              </div>
-              <p className="opening-type-note">Each nonzero depth generates returns from that Wall face. If their combined depth exceeds a thinner Wall, the two sides meet without overlapping. Structural framing will use the rough opening, not the unit size.</p>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Opening Framing</strong><span>Define the repeatable framing package generated with this component type.</span></div></header>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Header source</span><select value={selected.headerTypeId ?? ""} onChange={(event) => replaceSelected({ headerTypeId: event.target.value || null })}><option value="">Automatic from host Wall Type</option>{draft.headerTypes.map((type) => <option key={type.id} value={type.id}>{type.scheduleMark} · {type.name}</option>)}</select></label>
-                {selectedHeader.layout === "flat-stack" ? <label className="story-field"><span>Generated header depth</span><output className="room-output">{formatArchitectural(selectedHeader.plyCount * selectedHeader.plyThickness)}</output></label> : <StoryDimensionInput key={`${selected.id}:hd:${selected.headerDepth}`} label="Header depth" value={selected.headerDepth} onChange={(headerDepth) => replaceSelected({ headerDepth })} />}
-                <label className="story-field"><span>King studs per side</span><select value={selected.kingStudCountPerSide} onChange={(event) => replaceSelected({ kingStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-                <label className="story-field"><span>Jack studs per side</span><select value={selected.jackStudCountPerSide} onChange={(event) => replaceSelected({ jackStudCountPerSide: Number(event.target.value) })}>{[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-                {selected.kind === "window" ? <label className="story-field"><span>Rough-sill plates</span><select value={selected.windowSillPlateCount} onChange={(event) => replaceSelected({ windowSillPlateCount: Number(event.target.value) })}>{[0, 1, 2].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : <label className="story-field"><span>Rough sill</span><output className="room-output">Not used for Doors</output></label>}
-              </div>
-              <p className="opening-type-note">These are explicit drafting and modeling rules, not an engineered span calculation. Header depth is limited by the available space below the top plates; sizing and support counts must be selected for the project&apos;s loads, span, material, and code requirements.</p>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Header Assembly Definition</strong><span>{selected.headerTypeId === null ? `Previewing the ${activeWallType.name} default; ` : ""}shared by {headerUsageCount} Wall or opening type{headerUsageCount === 1 ? "" : "s"}.</span></div><button type="button" onClick={duplicateHeaderType} disabled={draft.headerTypes.length >= MAXIMUM_WALL_HEADER_TYPE_COUNT}>Duplicate &amp; Assign</button></header>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Assembly name</span><input value={selectedHeader.name} maxLength={100} onChange={(event) => replaceSelectedHeader({ name: event.target.value })} /></label>
-                <label className="story-field"><span>Schedule mark</span><input value={selectedHeader.scheduleMark} maxLength={16} onChange={(event) => replaceSelectedHeader({ scheduleMark: event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") })} /></label>
-                <label className="story-field"><span>Layout</span><select value={selectedHeader.layout} onChange={(event) => { const layout = event.target.value as WallHeaderType["layout"]; replaceSelectedHeader({ layout, ...(layout === "on-edge" ? {} : { alignment: "center", fillMethod: "none" }) }); }}><option value="on-edge">Built-up on edge</option><option value="flat-stack">Members on flat</option><option value="solid">Full Main depth</option></select></label>
-                <label className="story-field"><span>Structural material</span><input value={selectedHeader.plyMaterial} maxLength={120} onChange={(event) => replaceSelectedHeader({ plyMaterial: event.target.value })} /></label>
-                {selectedHeader.layout !== "solid" ? <label className="story-field"><span>{selectedHeader.layout === "flat-stack" ? "Flat courses" : "Structural plies"}</span><select value={selectedHeader.plyCount} onChange={(event) => replaceSelectedHeader({ plyCount: Number(event.target.value) })}>{[1, 2, 3, 4, 5, 6].map((count) => <option key={count} value={count}>{count}</option>)}</select></label> : null}
-                {selectedHeader.layout !== "solid" ? <StoryDimensionInput key={`${selectedHeader.id}:pt:${selectedHeader.plyThickness}`} label={selectedHeader.layout === "flat-stack" ? "Course thickness" : "Ply thickness"} value={selectedHeader.plyThickness} onChange={(plyThickness) => replaceSelectedHeader({ plyThickness })} /> : null}
-                {selectedHeader.layout === "on-edge" ? <label className="story-field"><span>Fill method</span><select value={selectedHeader.fillMethod} onChange={(event) => { const fillMethod = event.target.value as WallHeaderType["fillMethod"]; replaceSelectedHeader({ fillMethod, ...(fillMethod === "interior-insulation" ? { alignment: "exterior" } : {}) }); }}><option value="none">None</option><option value="interior-insulation">Rigid insulation at interior</option><option value="between-plies">Spacers between plies</option></select></label> : null}
-                {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod !== "none" ? <label className="story-field"><span>{selectedHeader.fillMethod === "interior-insulation" ? "Insulation material" : "Spacer material"}</span><input value={selectedHeader.fillMaterial} maxLength={120} onChange={(event) => replaceSelectedHeader({ fillMaterial: event.target.value })} /></label> : null}
-                {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod === "between-plies" ? <StoryDimensionInput key={`${selectedHeader.id}:st:${selectedHeader.spacerThickness}`} label="Spacer thickness" value={selectedHeader.spacerThickness} onChange={(spacerThickness) => replaceSelectedHeader({ spacerThickness })} /> : null}
-                {selectedHeader.layout === "on-edge" && selectedHeader.fillMethod !== "interior-insulation" ? <label className="story-field"><span>Across-wall alignment</span><select value={selectedHeader.alignment} onChange={(event) => replaceSelectedHeader({ alignment: event.target.value as WallHeaderType["alignment"] })}><option value="exterior">Exterior</option><option value="center">Centered</option><option value="interior">Interior</option></select></label> : null}
-                <label className="story-field"><span>Main thickness required</span><output className="room-output">{wallHeaderTypeRequiredMainThickness(selectedHeader) === 0 ? "Adapts to Wall" : formatArchitectural(wallHeaderTypeRequiredMainThickness(selectedHeader))}</output></label>
-                <label className="story-field"><span>Engineering review</span><span className="room-checkbox-field"><input type="checkbox" checked={selectedHeader.engineeringRequired} onChange={(event) => replaceSelectedHeader({ engineeringRequired: event.target.checked })} /> Required</span></label>
-              </div>
-              <p className="opening-type-note">On-edge plies and spacers are modeled across the Wall Main layer. Interior-rigid assemblies place the structural plies at the exterior and fill the remaining interior cavity. Flat members span the Main layer and stack vertically. Steel is supported as a user-defined rectangular material representation; detailed steel profiles can be added later.</p>
-            </section>
-          </main>
-          <OpeningTypePreview openingType={selected} wallType={activeWallType} />
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>{draft.openingTypes.length} opening types · {draft.headerTypes.length} reusable header assemblies · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Opening Types</button></div></footer>
-      </section>
-      {productImport ? <div className="product-import-backdrop" role="presentation" onMouseDown={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) setProductImport(null); }}>
-        <section className="product-import-review" role="dialog" aria-modal="true" aria-labelledby="product-import-review-title">
-          <header><div><strong id="product-import-review-title">Review Manufacturer Product</strong><span>Nothing is added until you confirm this package.</span></div><button type="button" onClick={() => setProductImport(null)} aria-label="Close product import review">×</button></header>
-          <div className="product-import-review-body">
-            <dl>
-              <div><dt>Package</dt><dd>{productImport.fileName}</dd></div>
-              <div><dt>Manufacturer</dt><dd>{productImport.product.manufacturer}</dd></div>
-              <div><dt>Product</dt><dd>{[productImport.product.productLine, productImport.product.modelNumber].filter(Boolean).join(" · ")}</dd></div>
-              <div><dt>Revision</dt><dd>{productImport.product.revision || "Not supplied"}</dd></div>
-              <div><dt>Original source</dt><dd>{productImport.product.sourceFileName} · {productImport.product.sourceFormat.toUpperCase()}</dd></div>
-              <div><dt>Family</dt><dd>{productImport.openingType.kind === "door" ? "Door" : "Window"}</dd></div>
-              <div><dt>Unit size</dt><dd>{formatArchitectural(productImport.openingType.unitWidth)} × {formatArchitectural(productImport.openingType.unitHeight)}</dd></div>
-              <div><dt>Rough opening</dt><dd>{formatArchitectural(productImport.openingType.roughWidth)} × {formatArchitectural(productImport.openingType.roughHeight)}</dd></div>
-              <div><dt>Native components</dt><dd>{productImport.openingType.components.length}</dd></div>
-            </dl>
-            {draft.openingTypes.some((type) => type.productSource?.manufacturer.toLocaleLowerCase() === productImport.product.manufacturer.toLocaleLowerCase() && type.productSource.modelNumber.toLocaleLowerCase() === productImport.product.modelNumber.toLocaleLowerCase() && type.productSource.revision.toLocaleLowerCase() === productImport.product.revision.toLocaleLowerCase()) ? <p className="product-import-warning"><strong>Matching catalog product found.</strong> Confirming will add a separate Type with a unique name; the existing Type and all placed openings remain unchanged.</p> : <p className="product-import-note">Model Builder will create a new Type with a fresh project ID. The package cannot bind itself to a local header assembly; the imported Type will use the host Wall&apos;s header default until you choose an override.</p>}
-            <p className="product-import-boundary"><strong>Native package only.</strong> DWG, RFA, SKP, IFC, and other manufacturer source files still require a reviewed conversion adapter before they can be imported safely.</p>
-          </div>
-          <footer><button type="button" onClick={() => setProductImport(null)}>Cancel</button><button type="button" className="story-save" onClick={confirmProductImport}>Import as New Type</button></footer>
-        </section>
-      </div> : null}
-    </div>
-  );
-}
-
-function WallFramingManagerDialog({
-  building,
-  onCancel,
-  onSave,
-}: {
-  building: BuildingStructure;
-  onCancel: () => void;
-  onSave: (building: BuildingStructure) => void;
-}) {
-  const [draft, setDraft] = useState<WallFramingSettings>(() => ({ ...building.wallFraming }));
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-  const replace = (change: Partial<WallFramingSettings>) => {
-    setDraft((current) => ({ ...current, ...change }));
-    setError("");
-  };
-  const save = () => {
-    if (!wallFramingSettingsAreValid(draft)) {
-      setError("Check the member dimensions, spacing, plate counts, and material name.");
-      return;
-    }
-    const next = cloneBuildingStructure(building);
-    next.wallFraming = { ...draft };
-    onSave(next);
-  };
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager framing-manager" role="dialog" aria-modal="true" aria-labelledby="framing-manager-title">
-        <header className="story-manager-header"><div><strong id="framing-manager-title">Wall Framing Defaults</strong><span>Generate conventional light-frame members from each Wall Main layer and its structural rough openings.</span></div><button type="button" onClick={onCancel} aria-label="Close Wall Framing Defaults">×</button></header>
-        <div className="framing-manager-body">
-          <section className="framing-status-card">
-            <strong>Framing Generation</strong>
-            <label><input type="checkbox" checked={draft.enabled} onChange={(event) => replace({ enabled: event.target.checked, ...(!event.target.checked ? { showInModel: false } : {}) })} /><span>Generate framing from Walls</span></label>
-            <label><input type="checkbox" checked={draft.showInModel} disabled={!draft.enabled} onChange={(event) => replace({ showInModel: event.target.checked })} /><span>Show framing in the 3D model</span></label>
-            <p>Framing remains derived from the host Wall and stays on that Wall&apos;s layer. The 3D framing view fades finish layers so structural members remain readable.</p>
-          </section>
-          <main className="story-editor framing-editor">
-            <section className="story-editor-summary foundation-editor-summary">
-              <label><span>Framing material</span><input value={draft.material} maxLength={120} onChange={(event) => replace({ material: event.target.value })} /></label>
-              <label><span>Layout</span><output className="room-output">{formatArchitectural(draft.studSpacing)} on center</output></label>
-              <label><span>Status</span><output className="room-output">{draft.enabled ? "Generated" : "Disabled"}</output></label>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Stud &amp; Plate Layout</strong><span>The Main-layer thickness supplies member depth.</span></div></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`spacing:${draft.studSpacing}`} label="Stud spacing" value={draft.studSpacing} onChange={(studSpacing) => replace({ studSpacing })} />
-                <StoryDimensionInput key={`stud:${draft.studWidth}`} label="Stud width" value={draft.studWidth} onChange={(studWidth) => replace({ studWidth })} />
-                <StoryDimensionInput key={`plate:${draft.plateHeight}`} label="Plate height" value={draft.plateHeight} onChange={(plateHeight) => replace({ plateHeight })} />
-                <label className="story-field"><span>Bottom plates</span><select value={draft.bottomPlateCount} onChange={(event) => replace({ bottomPlateCount: Number(event.target.value) })}>{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-                <label className="story-field"><span>Top plates</span><select value={draft.topPlateCount} onChange={(event) => replace({ topPlateCount: Number(event.target.value) })}>{[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-              </div>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Junction Framing</strong><span>Automatic Wall joins determine corners and partition intersections.</span></div></header>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Corner method</span><select value={draft.cornerStyle} onChange={(event) => replace({ cornerStyle: event.target.value as WallCornerFramingStyle })}><option value="three-stud">Three-stud conventional</option><option value="two-stud">Two-stud advanced</option></select></label>
-                <label className="story-field"><span>Partition backing</span><select value={draft.partitionBackingStyle} onChange={(event) => replace({ partitionBackingStyle: event.target.value as WallPartitionBackingStyle })}><option value="three-stud">Three-stud backing</option><option value="ladder">Ladder blocking</option><option value="none">None</option></select></label>
-                {draft.partitionBackingStyle === "ladder" ? <StoryDimensionInput key={`ladder:${draft.ladderBlockSpacing}`} label="Ladder block spacing" value={draft.ladderBlockSpacing} onChange={(ladderBlockSpacing) => replace({ ladderBlockSpacing })} /> : null}
-              </div>
-              <p className="opening-type-note">Three-stud corners add one deterministic shared-corner member; the two-stud option leaves one end stud from each participating Wall. Partition backing is generated in the host Wall at resolved T-intersections.</p>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Opening Framing</strong><span>Rough dimensions and bottom-of-header elevations remain authoritative.</span></div></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`header:${draft.headerHeight}`} label="Legacy/custom header depth" value={draft.headerHeight} onChange={(headerHeight) => replace({ headerHeight })} />
-                <label className="story-field"><span>Reusable types</span><output className="room-output">Use type-specific framing</output></label>
-                <label className="story-field"><span>Window support</span><output className="room-output">Type sill + cripples</output></label>
-              </div>
-              <p className="opening-type-note">The fallback applies only to older custom openings without a reusable type. Door and Window types control their own header depth, king studs, jack studs, and Window rough-sill count. Door bottom plates are cut at the rough opening; Window bottom plates remain continuous.</p>
-            </section>
-          </main>
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>Wall framing defaults · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Framing Defaults</button></div></footer>
-      </section>
-    </div>
-  );
-}
-
-function RoofDefaultsDialog({
-  building,
-  onCancel,
-  onSave,
-}: {
-  building: BuildingStructure;
-  onCancel: () => void;
-  onSave: (building: BuildingStructure) => void;
-}) {
-  const [draft, setDraft] = useState<RoofSettings>(() => ({ ...building.roofSettings }));
-  const [roofTypes, setRoofTypes] = useState(() => building.roofTypes.map(cloneLayeredAssembly));
-  const [activeRoofTypeId, setActiveRoofTypeId] = useState(building.activeRoofTypeId);
-  const [referenceRun, setReferenceRun] = useState(144);
-  const [error, setError] = useState("");
-  const activeRoofType = roofTypes.find((roofType) => roofType.id === activeRoofTypeId) ?? roofTypes[0];
-  const activeStory = building.stories.at(-1)!;
-  const topOfPlate = calculateStoryElevations(building).find((item) => item.storyId === activeStory.id)?.roughCeilingElevation ?? 0;
-  const calculation = calculateRoofReferenceDimensions(draft, topOfPlate, referenceRun);
-  const replace = (change: Partial<RoofSettings>) => { setDraft((current) => ({ ...current, ...change })); setError(""); };
-  const replaceRoofType = (roofType: LayeredAssembly) => {
-    setRoofTypes((current) => current.map((candidate) => candidate.id === roofType.id ? cloneLayeredAssembly(roofType) : cloneLayeredAssembly(candidate)));
-    setError("");
-  };
-  const renameRoofType = (name: string) => {
-    if (!activeRoofType) return;
-    replaceRoofType({ ...cloneLayeredAssembly(activeRoofType), name });
-  };
-  const duplicateRoofType = () => {
-    if (!activeRoofType || roofTypes.length >= MAXIMUM_ROOF_TYPE_COUNT) return;
-    const ids = new Set(roofTypes.map((roofType) => roofType.id));
-    let number = 1;
-    while (ids.has(`roof-type-${String(number).padStart(2, "0")}`)) number += 1;
-    const id = `roof-type-${String(number).padStart(2, "0")}`;
-    const names = new Set(roofTypes.map((roofType) => roofType.name.trim().toLowerCase()));
-    let name = `${activeRoofType.name} Copy`;
-    let suffix = 2;
-    while (names.has(name.toLowerCase())) name = `${activeRoofType.name} Copy ${suffix++}`;
-    const copy = { ...cloneLayeredAssembly(activeRoofType), id, name, layers: activeRoofType.layers.map((layer, index) => ({ ...layer, id: `${id}-${String(index + 1).padStart(2, "0")}` })) };
-    setRoofTypes((current) => [...current.map(cloneLayeredAssembly), copy]);
-    setActiveRoofTypeId(id);
-  };
-  const deleteRoofType = () => {
-    if (!activeRoofType || roofTypes.length <= 1) return;
-    const remaining = roofTypes.filter((roofType) => roofType.id !== activeRoofType.id).map(cloneLayeredAssembly);
-    setRoofTypes(remaining);
-    setActiveRoofTypeId(remaining[0].id);
-  };
-
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-
-  const save = () => {
-    if (!roofSettingsAreValid(draft)) {
-      setError("Check the pitch, heel, overhang, framing spacing, member sizes, ridge, birdsmouth, fascia, and subfascia values.");
-      return;
-    }
-    const next = cloneBuildingStructure(building);
-    next.roofSettings = { ...draft };
-    next.roofTypes = roofTypes.map(cloneLayeredAssembly);
-    next.activeRoofTypeId = activeRoofTypeId;
-    if (!buildingStructureIsValid(next)) {
-      setError("Check the Roof Type name, unique layers, layer order, materials, sides, and thicknesses.");
-      return;
-    }
-    onSave(next);
-  };
-
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager roof-defaults-manager" role="dialog" aria-modal="true" aria-labelledby="roof-defaults-title">
-        <header className="story-manager-header"><div><strong id="roof-defaults-title">Roof Design Defaults</strong><span>Establish the exterior heel reference and calculated roof elevations before drawing Roof Planes.</span></div><button type="button" onClick={onCancel} aria-label="Close Roof Design Defaults">×</button></header>
-        <div className="roof-defaults-body">
-          <main className="story-editor roof-defaults-editor">
-            <section className="story-editor-summary foundation-editor-summary">
-              <label><span>Roof-bearing Story</span><output className="room-output">{activeStory.name}</output></label>
-              <label><span>Framing method</span><select value={draft.framingMethod} onChange={(event) => replace({ framingMethod: event.target.value as RoofFramingMethod })}><option value="rafters">Conventional rafters</option><option value="trusses">Roof trusses</option></select></label>
-              <label><span>Pitch</span><output className="room-output">{draft.pitchRise}:12</output></label>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Bearing &amp; Roof Plane</strong><span>The heel is located at the exterior face of the bearing wall or plate.</span></div></header>
-              <div className="foundation-field-grid">
-                <label className="story-field"><span>Top of plate / wall</span><output className="room-output">{formatSignedArchitectural(topOfPlate)}</output></label>
-                <label className="story-field"><span>Roof pitch · rise in 12</span><input type="number" min="0.25" max="24" step="0.0625" value={draft.pitchRise} onChange={(event) => replace({ pitchRise: Number(event.target.value) })} /></label>
-                <StoryDimensionInput key={`heel:${draft.heightAbovePlate}`} label="Height above plate / heel" value={draft.heightAbovePlate} onChange={(heightAbovePlate) => replace({ heightAbovePlate })} />
-                <StoryDimensionInput key={`overhang:${draft.overhang}`} label="Horizontal overhang" allowZero value={draft.overhang} onChange={(overhang) => replace({ overhang })} />
-              </div>
-              <p className="opening-type-note">The underside-of-rafter bearing reference begins at top of plate. Height Above Plate is a separate vertical dimension to the roof-plane heel at the exterior wall face.</p>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Rafter / Truss &amp; Birdsmouth</strong><span>Member defaults support both conventional rafters and trussed roofs.</span></div></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`framing-spacing:${draft.framingSpacing}`} label="On-center spacing" value={draft.framingSpacing} onChange={(framingSpacing) => replace({ framingSpacing })} />
-                <StoryDimensionInput key={`rafter-width:${draft.rafterWidth}`} label="Rafter / top-chord width" value={draft.rafterWidth} onChange={(rafterWidth) => replace({ rafterWidth })} />
-                <StoryDimensionInput key={`rafter-depth:${draft.rafterDepth}`} label="Rafter / top-chord depth" value={draft.rafterDepth} onChange={(rafterDepth) => replace({ rafterDepth })} />
-                <StoryDimensionInput key={`seat:${draft.birdsmouthSeatLength}`} label="Birdsmouth seat" value={draft.birdsmouthSeatLength} onChange={(birdsmouthSeatLength) => replace({ birdsmouthSeatLength })} />
-                <label className="story-field"><span>Maximum notch</span><select value={draft.birdsmouthMaxNotchRatio} onChange={(event) => replace({ birdsmouthMaxNotchRatio: Number(event.target.value) })}><option value={0.2}>20% of member depth</option><option value={0.25}>25% of member depth</option><option value={0.333333}>33⅓% of member depth</option></select></label>
-                <label className="foundation-check" aria-label="Show discrete roof framing in 3D"><input type="checkbox" checked={draft.showFramingInModel} onChange={(event) => replace({ showFramingInModel: event.target.checked })} /><span><strong>Show discrete framing in 3D</strong><small>Fade continuous layers and reveal generated members.</small></span></label>
-              </div>
-              <p className="opening-type-note">Rectangular and ridge-bounded planes generate common rafters or truss top-chord stations. Full truss webs, birdsmouth cuts, and stations ending at hips, valleys, openings, or clipped edges remain explicitly unresolved rather than estimated.</p>
-            </section>
-            <section className="foundation-setting-section">
-              <header><div><strong>Ridge &amp; Fascia Assembly</strong><span>Board sizes are separate from their calculated elevations and gross lengths.</span></div></header>
-              <div className="foundation-field-grid">
-                <StoryDimensionInput key={`ridge-thickness:${draft.ridgeBoardThickness}`} label="Ridge board thickness" value={draft.ridgeBoardThickness} onChange={(ridgeBoardThickness) => replace({ ridgeBoardThickness })} />
-                <StoryDimensionInput key={`ridge-depth:${draft.ridgeBoardDepth}`} label="Ridge board depth" value={draft.ridgeBoardDepth} onChange={(ridgeBoardDepth) => replace({ ridgeBoardDepth })} />
-                <StoryDimensionInput key={`fascia-thickness:${draft.fasciaThickness}`} label="Fascia thickness" value={draft.fasciaThickness} onChange={(fasciaThickness) => replace({ fasciaThickness })} />
-                <StoryDimensionInput key={`fascia-depth:${draft.fasciaDepth}`} label="Fascia board depth" value={draft.fasciaDepth} onChange={(fasciaDepth) => replace({ fasciaDepth })} />
-                <StoryDimensionInput key={`subfascia-thickness:${draft.subfasciaThickness}`} label="Subfascia thickness" value={draft.subfasciaThickness} onChange={(subfasciaThickness) => replace({ subfasciaThickness })} />
-                <StoryDimensionInput key={`subfascia-depth:${draft.subfasciaDepth}`} label="Subfascia board depth" value={draft.subfasciaDepth} onChange={(subfasciaDepth) => replace({ subfasciaDepth })} />
-              </div>
-            </section>
-            {activeRoofType ? <section className="foundation-setting-section roof-type-section">
-              <header><div><strong>Layered Roof Type</strong><span>Build the assembly outward and inward from the structural Roof Plane.</span></div></header>
-              <section className="story-editor-summary foundation-editor-summary">
-                <label><span>Active Roof Type</span><select value={activeRoofType.id} onChange={(event) => setActiveRoofTypeId(event.target.value)}>{roofTypes.map((roofType) => <option key={roofType.id} value={roofType.id}>{roofType.name}</option>)}</select></label>
-                <label><span>Type name</span><input value={activeRoofType.name} onChange={(event) => renameRoofType(event.target.value)} /></label>
-                <button type="button" onClick={duplicateRoofType} disabled={roofTypes.length >= MAXIMUM_ROOF_TYPE_COUNT}>Duplicate Type</button>
-                <button type="button" onClick={deleteRoofType} disabled={roofTypes.length <= 1}>Delete Type</button>
-              </section>
-              <StoryAssemblyEditor key={activeRoofType.id} assembly={activeRoofType} onChange={replaceRoofType} />
-              <p className="opening-type-note">Exterior layers are listed from weather surface toward the structural plane. Interior layers begin at the structural plane and build toward the room. Zero-thickness membranes retain coverage area without creating a false solid thickness.</p>
-            </section> : null}
-          </main>
-          <aside className="roof-reference-panel">
-            <header><strong>Live Roof Reference</strong><span>Exterior is left · schematic section</span></header>
-            <svg viewBox="0 0 420 250" role="img" aria-label="Roof heel, wall bearing, rafter pitch, and fascia reference diagram">
-              <rect x="195" y="134" width="80" height="100" className="roof-diagram-wall" />
-              <rect x="191" y="121" width="88" height="13" className="roof-diagram-plate" />
-              <path d="M 28 166 L 380 46 L 388 64 L 34 184 Z" className="roof-diagram-rafter" />
-              <path d="M 28 166 L 380 46" className="roof-diagram-plane" />
-              <path d="M 32 164 L 32 218" className="roof-diagram-fascia" />
-              <path d="M 48 160 L 48 207" className="roof-diagram-subfascia" />
-              <path d="M 191 121 L 191 134 M 179 121 L 179 84 M 175 84 L 183 84" className="roof-diagram-dimension" />
-              <circle cx="191" cy="121" r="4" className="roof-diagram-point" />
-              <text x="145" y="76">HEIGHT ABOVE PLATE</text>
-              <text x="202" y="116">EXTERIOR HEEL</text>
-              <text x="203" y="151">TOP OF PLATE</text>
-              <text x="287" y="58">{draft.pitchRise}:12 PITCH</text>
-              <text x="12" y="231">FASCIA</text>
-            </svg>
-            <StoryDimensionInput key={`reference-run:${referenceRun}`} label="Calculation preview run" value={referenceRun} onChange={setReferenceRun} />
-            {calculation ? <dl>
-              <div><dt>Top of plate / wall</dt><dd>{formatSignedArchitectural(calculation.topOfPlateElevation)}</dd></div>
-              <div><dt>Underside bearing</dt><dd>{formatSignedArchitectural(calculation.rafterUndersideBearingElevation)}</dd></div>
-              <div><dt>Exterior heel</dt><dd>{formatSignedArchitectural(calculation.heelElevation)}</dd></div>
-              <div><dt>Peak at preview run</dt><dd>{formatSignedArchitectural(calculation.peakElevation)}</dd></div>
-              <div><dt>Fascia top / bottom</dt><dd>{formatSignedArchitectural(calculation.fasciaTopElevation)} / {formatSignedArchitectural(calculation.fasciaBottomElevation)}</dd></div>
-              <div><dt>Subfascia top / bottom</dt><dd>{formatSignedArchitectural(calculation.subfasciaTopElevation)} / {formatSignedArchitectural(calculation.subfasciaBottomElevation)}</dd></div>
-              <div><dt>Maximum notch depth</dt><dd>{formatArchitectural(calculation.birdsmouthMaximumNotchDepth)}</dd></div>
-              <div><dt>Roof angle</dt><dd>{calculation.pitchAngleDegrees.toFixed(2)}°</dd></div>
-            </dl> : <p className="story-manager-error">Enter valid roof values to calculate the section.</p>}
-            <p>Peak height is a result, not a separate default. Each future Roof Plane will calculate it from its actual horizontal run.</p>
-          </aside>
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>Roof design defaults · saved with this project</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Roof Defaults</button></div></footer>
-      </section>
-    </div>
-  );
-}
-
-type RoomAssemblyOverrideKey = "floorStructureOverride" | "floorFinishOverride" | "ceilingStructureOverride" | "ceilingFinishOverride";
-
-function RoomManagerDialog({
-  document,
-  initialRoomId,
-  onCancel,
-  onSave,
-}: {
-  document: ModelDocument;
-  initialRoomId?: string | null;
-  onCancel: () => void;
-  onSave: (document: ModelDocument) => void;
-}) {
-  const [draft, setDraft] = useState(() => cloneDocument(document));
-  const initialRoom = document.rooms.find((room) => room.id === initialRoomId);
-  const [selectedStoryId, setSelectedStoryId] = useState(initialRoom?.storyId ?? document.building.activeStoryId);
-  const [selectedRoomId, setSelectedRoomId] = useState(initialRoom?.id ?? document.rooms.find((room) => room.storyId === document.building.activeStoryId)?.id ?? null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-  const story = draft.building.stories.find((candidate) => candidate.id === selectedStoryId) ?? draft.building.stories[0];
-  const rooms = draft.rooms.filter((room) => room.storyId === story.id);
-  const selected = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
-  const storyElevation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id)?.roughFloorElevation ?? 0;
-  const effective = selected ? effectiveRoomSettings(selected, story, storyElevation) : null;
-  const generatedPlatforms = selected ? roomHorizontalPlatformSolution(draft, selected) : null;
-  const annotations = selected ? draft.roomAnnotations.filter((annotation) => annotation.roomId === selected.id) : [];
-  const perimeterFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "perimeter-main-exterior").length ?? 0;
-  const foundationFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "foundation-sill-exterior").length ?? 0;
-  const sharedFloorEdgeCount = generatedPlatforms?.floorEdgeConditions.filter((edge) => edge.rule === "shared-wall-reference").length ?? 0;
-  const formatRoomArea = (room: RoomObject) => `${(polylineArea(room.boundary) / 144).toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft`;
-  const roomDimensions = (room: RoomObject) => {
-    const xs = room.boundary.vertices.map((point) => point.x);
-    const ys = room.boundary.vertices.map((point) => point.y);
-    return { width: Math.max(...xs) - Math.min(...xs), depth: Math.max(...ys) - Math.min(...ys) };
-  };
-  const selectStory = (storyId: string) => {
-    setSelectedStoryId(storyId);
-    setSelectedRoomId(draft.rooms.find((room) => room.storyId === storyId)?.id ?? null);
-    setError("");
-  };
-  const replaceSelected = (change: Partial<RoomObject>) => {
-    if (!selected) return;
-    setDraft((current) => ({ ...cloneDocument(current), rooms: current.rooms.map((room) => room.id === selected.id ? { ...room, ...change } : room) }));
-    setError("");
-  };
-  const replaceAnnotation = (kind: RoomAnnotationObject["kind"], change: Partial<Pick<RoomAnnotationObject, "visible">>) => {
-    const annotation = annotations.find((candidate) => candidate.kind === kind);
-    if (!annotation) return;
-    const next = updateRoomAnnotation(draft, annotation.id, change);
-    if (next) setDraft(next);
-  };
-  const detect = () => {
-    const next = refreshRoomsForStory(draft, story.id);
-    if (!next) {
-      setError("Rooms could not be updated. Check that the Story walls form valid closed areas.");
-      return;
-    }
-    const firstRoom = next.rooms.find((room) => room.storyId === story.id) ?? null;
-    setDraft(next);
-    setSelectedRoomId((current) => next.rooms.some((room) => room.id === current) ? current : firstRoom?.id ?? null);
-    setError("");
-  };
-  const setAssemblyOverride = (key: RoomAssemblyOverrideKey, enabled: boolean) => {
-    if (!selected) return;
-    const storyKey = key.replace("Override", "") as "floorStructure" | "floorFinish" | "ceilingStructure" | "ceilingFinish";
-    replaceSelected({ [key]: enabled ? cloneLayeredAssembly(story[storyKey]) : null });
-  };
-  const openingBounds = (opening: PlatformOpening) => {
-    const xs = opening.boundary.vertices.map((point) => point.x);
-    const ys = opening.boundary.vertices.map((point) => point.y);
-    const minimumX = Math.min(...xs);
-    const maximumX = Math.max(...xs);
-    const minimumY = Math.min(...ys);
-    const maximumY = Math.max(...ys);
-    return {
-      centerX: (minimumX + maximumX) / 2,
-      centerY: (minimumY + maximumY) / 2,
-      depth: maximumY - minimumY,
-      width: maximumX - minimumX,
-    };
-  };
-  const replaceOpening = (openingId: string, change: Partial<Omit<PlatformOpening, "id">>) => {
-    if (!selected) return;
-    const next = updatePlatformOpening(draft, selected.id, openingId, change);
-    if (!next) {
-      setError("Platform Openings must remain inside the Room, avoid overlaps, and preserve any connected vertical path.");
-      return;
-    }
-    setDraft(next);
-    setError("");
-  };
-  const replaceOpeningRectangle = (opening: PlatformOpening, change: Partial<{ centerX: number; centerY: number; depth: number; width: number }>) => {
-    const bounds = { ...openingBounds(opening), ...change };
-    const boundary = rectangleFromCorners(
-      { x: bounds.centerX - bounds.width / 2, y: bounds.centerY - bounds.depth / 2 },
-      { x: bounds.centerX + bounds.width / 2, y: bounds.centerY + bounds.depth / 2 },
-      opening.boundary.elevation,
-    );
-    if (boundary) replaceOpening(opening.id, { boundary });
-  };
-  const addOpening = () => {
-    if (!selected) return;
-    const result = addPlatformOpening(draft, selected.id, "stairwell", "both");
-    if (!result) {
-      setError("A centered opening could not fit inside this Room. Adjust the Room shape before adding an opening.");
-      return;
-    }
-    setDraft(result.document);
-    setError("");
-  };
-  const removeOpening = (openingId: string) => {
-    if (!selected) return;
-    const next = deletePlatformOpening(draft, selected.id, openingId);
-    if (next) setDraft(next);
-    setError("");
-  };
-  const continueOpening = (openingId: string, direction: "above" | "below") => {
-    if (!selected) return;
-    const next = continuePlatformOpening(draft, selected.id, openingId, direction);
-    if (!next) {
-      setError(`The opening cannot continue ${direction}. Detect Rooms on the adjacent Story and make sure the same footprint fits fully inside one Room.`);
-      return;
-    }
-    setDraft(next);
-    setError("");
-  };
-  const disconnectOpening = (openingId: string) => {
-    if (!selected) return;
-    const next = disconnectPlatformOpeningContinuity(draft, selected.id, openingId);
-    if (next) setDraft(next);
-    setError("");
-  };
-  const save = () => {
-    const next = cloneDocument(draft);
-    if (next.rooms.some((room) => !roomObjectIsValid(room, next)) || next.roomAnnotations.some((annotation) => !roomAnnotationIsValid(annotation, next)) || !platformOpeningContinuityIsValid(next)) {
-      setError("Check the Room settings and make sure every connected platform opening stays aligned through adjacent Stories.");
-      return;
-    }
-    onSave(next);
-  };
-  const overrideEditor = (key: RoomAssemblyOverrideKey, label: string) => {
-    if (!selected) return null;
-    const assembly = selected[key];
-    return (
-      <section className="room-override-section" key={key}>
-        <label><input type="checkbox" checked={assembly !== null} onChange={(event) => setAssemblyOverride(key, event.target.checked)} /><span>{assembly ? `${label} override` : `Use Story ${label.toLowerCase()}`}</span></label>
-        {assembly ? <StoryAssemblyEditor assembly={assembly} onChange={(next) => replaceSelected({ [key]: next })} /> : null}
-      </section>
-    );
-  };
-  return (
-    <div className="story-manager-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="story-manager room-manager" role="dialog" aria-modal="true" aria-labelledby="room-manager-title">
-        <header className="story-manager-header"><div><strong id="room-manager-title">Room Manager</strong><span>Closed Wall loops create Rooms. Each Room inherits its Story settings until an override is enabled.</span></div><button type="button" onClick={onCancel} aria-label="Close Room Manager">×</button></header>
-        <div className="story-manager-body">
-          <aside className="story-list">
-            <header><strong>{story.name}</strong><span>{rooms.length} detected Room{rooms.length === 1 ? "" : "s"}</span></header>
-            <label className="room-story-picker"><span>Story</span><select value={story.id} onChange={(event) => selectStory(event.target.value)}>{draft.building.stories.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}</select></label>
-            {rooms.map((room) => <button type="button" key={room.id} className={room.id === selected?.id ? "is-selected" : ""} onClick={() => setSelectedRoomId(room.id)}><strong>{room.name}</strong><span>{formatRoomArea(room)} · {room.boundaryWallIds.length} walls · {room.platformOpenings.length} opening{room.platformOpenings.length === 1 ? "" : "s"}</span>{room.roughCeilingHeightOverride !== null || room.roughFloorOffset !== 0 || room.floorStructureOverride || room.floorFinishOverride || room.ceilingStructureOverride || room.ceilingFinishOverride ? <small>OVERRIDES</small> : <small>STORY DEFAULTS</small>}</button>)}
-            <div className="story-list-actions"><button type="button" onClick={detect}>↻ Detect / Update Rooms</button></div>
-          </aside>
-          <main className="story-editor">
-            {selected && effective ? <>
-              <section className="story-editor-summary room-editor-summary">
-                <label><span>Room type</span><select value={selected.roomType} onChange={(event) => replaceSelected({ roomType: event.target.value, name: selected.name === "Unassigned" || ROOM_TYPES.includes(selected.name as (typeof ROOM_TYPES)[number]) ? event.target.value : selected.name })}>{ROOM_TYPES.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
-                <label><span>Room name</span><input value={selected.name} maxLength={120} onChange={(event) => replaceSelected({ name: event.target.value })} /></label>
-                <label><span>Enclosed area</span><output>{formatRoomArea(selected)}</output></label>
-                <label><span>Boundary</span><output>{selected.boundaryWallIds.length} Walls</output></label>
-              </section>
-              <section className="room-annotation-settings" aria-label="Room label and annotation settings">
-                <header><div><strong>Room Label</strong><span>Linked annotations with independent layer controls</span></div></header>
-                <div className="room-annotation-grid">
-                  {(["label", "area", "interior-dimensions", "rough-ceiling-height"] as const).map((kind) => {
-                    const annotation = annotations.find((candidate) => candidate.kind === kind);
-                    const label = kind === "label" ? "Room name" : kind === "area" ? "Standard area" : kind === "interior-dimensions" ? "Interior dimensions" : "Rough ceiling height";
-                    const layer = annotation ? findLayer(draft, annotation.layerId) : null;
-                    return <label key={kind}><input type="checkbox" aria-label={`Show ${label}`} checked={Boolean(annotation?.visible)} onChange={(event) => replaceAnnotation(kind, { visible: event.target.checked })} /><span><strong>{label}</strong><small>{layer?.name ?? "Missing layer"}</small></span></label>;
-                  })}
-                </div>
-                <div className="room-annotation-preview">
-                  <strong>{selected.name}</strong>
-                  <span>{formatRoomArea(selected)}</span>
-                  <span>{formatArchitectural(roomDimensions(selected).width)} × {formatArchitectural(roomDimensions(selected).depth)}</span>
-                  <span>CLG {formatArchitectural(effective.roughCeilingHeight)}</span>
-                </div>
-                <StoryDimensionInput key={`${selected.id}:label-ceiling:${effective.roughCeilingHeight}`} label="Ceiling label value" value={effective.roughCeilingHeight} onChange={(roughCeilingHeightOverride) => replaceSelected({ roughCeilingHeightOverride })} />
-                <p>Editing the ceiling label creates a Room override. Story defaults remain unchanged.</p>
-              </section>
-              <section className="room-height-settings">
-                <StoryDimensionInput signed key={`${selected.id}:floor:${selected.roughFloorOffset}`} label="Rough floor offset" value={selected.roughFloorOffset} onChange={(roughFloorOffset) => replaceSelected({ roughFloorOffset })} />
-                <label className="room-inherit-toggle"><input type="checkbox" checked={selected.roughCeilingHeightOverride !== null} onChange={(event) => replaceSelected({ roughCeilingHeightOverride: event.target.checked ? story.roughCeilingHeight : null })} /><span>{selected.roughCeilingHeightOverride === null ? "Use Story ceiling height" : "Override ceiling height"}</span></label>
-                {selected.roughCeilingHeightOverride !== null ? <StoryDimensionInput key={`${selected.id}:ceiling:${selected.roughCeilingHeightOverride}`} label="Rough ceiling / plate height" value={selected.roughCeilingHeightOverride} onChange={(roughCeilingHeightOverride) => replaceSelected({ roughCeilingHeightOverride })} /> : <label className="story-field"><span>Effective rough ceiling</span><output className="room-output">{formatArchitectural(effective.roughCeilingHeight)}</output></label>}
-              </section>
-              <section className="story-calculated-grid room-calculated-grid" aria-label="Effective Room settings">
-                <div><span>Effective rough floor</span><strong>{formatSignedArchitectural(effective.roughFloorElevation)}</strong></div>
-                <div><span>Effective ceiling height</span><strong>{formatArchitectural(effective.roughCeilingHeight)}</strong></div>
-                <div><span>Floor structure</span><strong>{formatArchitectural(assemblyTotalThickness(effective.floorStructure))}</strong></div>
-                <div><span>Floor finish</span><strong>{formatArchitectural(assemblyTotalThickness(effective.floorFinish))}</strong></div>
-                <div><span>Ceiling structure</span><strong>{formatArchitectural(assemblyTotalThickness(effective.ceilingStructure))}</strong></div>
-                <div><span>Ceiling finish</span><strong>{formatArchitectural(assemblyTotalThickness(effective.ceilingFinish))}</strong></div>
-              </section>
-              <section className="story-calculated-grid room-calculated-grid" aria-label="Generated Room platforms">
-                <div><span>Generated floor structure top</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.roughFloorElevation) : "—"}</strong></div>
-                <div><span>Generated finished floor</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedFloorElevation) : "—"}</strong></div>
-                <div><span>Generated rough ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.roughCeilingElevation) : "—"}</strong></div>
-                <div><span>Generated finished ceiling</span><strong>{generatedPlatforms ? formatSignedArchitectural(generatedPlatforms.finishedCeilingElevation) : "—"}</strong></div>
-              </section>
-              <section className="room-platform-edges" aria-label="Resolved floor platform edges">
-                <header><div><strong>Floor Platform Edges</strong><span>Automatic Wall-aware edge rules</span></div><output>{foundationFloorEdgeCount} foundation · {perimeterFloorEdgeCount} framed · {sharedFloorEdgeCount} shared</output></header>
-                {generatedPlatforms?.floorEdgeConditions.map((edge, index) => {
-                  const wall = edge.wallId ? draft.lines.find((line) => line.id === edge.wallId) : null;
-                  const ruleLabel = edge.rule === "foundation-sill-exterior"
-                    ? "Foundation sill exterior"
-                    : edge.rule === "perimeter-main-exterior"
-                    ? "Exterior face of Main layer"
-                    : edge.rule === "shared-wall-reference"
-                      ? "Shared Room boundary"
-                      : "Room boundary fallback";
-                  return <div className="room-platform-edge" key={`${edge.wallId ?? "fallback"}-${index}`}><span>{wall?.name ?? `Boundary edge ${index + 1}`}</span><strong>{ruleLabel}</strong><small>{Math.abs(edge.offsetFromReference) < 1 / 32 ? "On Wall reference" : `${formatArchitectural(Math.abs(edge.offsetFromReference))} from Wall reference`}</small></div>;
-                })}
-                <p>Where a Foundation Wall aligns with a perimeter edge, its sill exterior edge takes priority. Otherwise the framed Wall Main-layer exterior remains the default. Manual edge offsets remain reserved for exceptional details.</p>
-              </section>
-              <section className="room-platform-openings" aria-label="Platform Openings">
-                <header><div><strong>Platform Openings</strong><span>Hosted cuts for stairs, shafts, and open-below areas</span></div><button type="button" onClick={addOpening}>+ Add Opening</button></header>
-                {selected.platformOpenings.length ? selected.platformOpenings.map((opening) => {
-                  const bounds = openingBounds(opening);
-                  const continuity = platformOpeningContinuity(draft, selected.id, opening.id);
-                  const storyIndex = draft.building.stories.findIndex((candidate) => candidate.id === selected.storyId);
-                  const canContinueBelow = storyIndex > 0 && !continuity?.below;
-                  const canContinueAbove = storyIndex >= 0 && storyIndex < draft.building.stories.length - 1 && !continuity?.above;
-                  const continuityLabel = continuity?.above && continuity.below
-                    ? `Continues below to ${continuity.below.storyName} and above to ${continuity.above.storyName}`
-                    : continuity?.above
-                      ? `Continues above to ${continuity.above.storyName}`
-                      : continuity?.below
-                        ? `Continues below to ${continuity.below.storyName}`
-                        : "Single-Story opening";
-                  return <article className="room-platform-opening" key={opening.id}>
-                    <div className="room-platform-opening-heading">
-                      <label><span>Name</span><input value={opening.name} maxLength={120} onChange={(event) => replaceOpening(opening.id, { name: event.target.value })} /></label>
-                      <label><span>Purpose</span><select value={opening.kind} onChange={(event) => replaceOpening(opening.id, { kind: event.target.value as PlatformOpening["kind"] })}>{PLATFORM_OPENING_KINDS.map((kind) => <option key={kind} value={kind}>{kind === "open-below" ? "Open Below" : kind === "stairwell" ? "Stairwell" : "Shaft"}</option>)}</select></label>
-                      <label><span>Cuts</span><select value={opening.cuts} onChange={(event) => replaceOpening(opening.id, { cuts: event.target.value as PlatformOpening["cuts"] })}>{PLATFORM_OPENING_CUTS.map((cuts) => <option key={cuts} value={cuts}>{cuts === "both" ? "Floor + Ceiling" : cuts === "floor" ? "Floor only" : "Ceiling only"}</option>)}</select></label>
-                      <button type="button" className="room-platform-opening-delete" onClick={() => removeOpening(opening.id)}>Delete</button>
-                    </div>
-                    <div className="room-platform-opening-geometry">
-                      <StoryDimensionInput key={`${opening.id}:w:${bounds.width}`} label="Width" value={bounds.width} onChange={(width) => replaceOpeningRectangle(opening, { width })} />
-                      <StoryDimensionInput key={`${opening.id}:d:${bounds.depth}`} label="Depth" value={bounds.depth} onChange={(depth) => replaceOpeningRectangle(opening, { depth })} />
-                      <StoryDimensionInput signed key={`${opening.id}:x:${bounds.centerX}`} label="Center X" value={bounds.centerX} onChange={(centerX) => replaceOpeningRectangle(opening, { centerX })} />
-                      <StoryDimensionInput signed key={`${opening.id}:y:${bounds.centerY}`} label="Center Y" value={bounds.centerY} onChange={(centerY) => replaceOpeningRectangle(opening, { centerY })} />
-                    </div>
-                    <div className="room-platform-opening-continuity">
-                      <span><strong>Vertical path</strong>{continuityLabel}</span>
-                      <div>
-                        {canContinueBelow ? <button type="button" onClick={() => continueOpening(opening.id, "below")}>Continue Below</button> : null}
-                        {canContinueAbove ? <button type="button" onClick={() => continueOpening(opening.id, "above")}>Continue Above</button> : null}
-                        {continuity?.verticalOpeningId ? <button type="button" onClick={() => disconnectOpening(opening.id)}>Disconnect Path</button> : null}
-                      </div>
-                    </div>
-                  </article>;
-                }) : <p>No platform openings in this Room. Add one when the design needs a stairwell, shaft, or open-below cut.</p>}
-              </section>
-              {overrideEditor("floorStructureOverride", "Floor structure")}
-              {overrideEditor("floorFinishOverride", "Floor finish")}
-              {overrideEditor("ceilingStructureOverride", "Ceiling structure")}
-              {overrideEditor("ceilingFinishOverride", "Ceiling finish")}
-            </> : <section className="room-empty-state"><strong>No enclosed Rooms found on {story.name}</strong><span>Draw connected Walls around each space, then choose Detect / Update Rooms. Open wall networks do not create Rooms.</span><button type="button" onClick={detect}>Detect Rooms</button></section>}
-          </main>
-        </div>
-        {error ? <p className="story-manager-error" role="alert">{error}</p> : null}
-        <footer className="story-manager-footer"><span>{rooms.length} Room{rooms.length === 1 ? "" : "s"} on {story.name} · inherited values remain linked to Story defaults</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="story-save" onClick={save}>Apply Room Settings</button></div></footer>
-      </section>
-    </div>
-  );
-}
-
-type ProjectSetupStep = "project" | "stories" | "defaults" | "review";
-
-const PROJECT_SETUP_STEPS: { id: ProjectSetupStep; label: string; note: string }[] = [
-  { id: "project", label: "Project", note: "Identity and starting point" },
-  { id: "stories", label: "Stories", note: "Levels, heights, and floors" },
-  { id: "defaults", label: "Defaults", note: "Foundation, walls, and openings" },
-  { id: "review", label: "Review", note: "Confirm before drawing" },
-];
-
-function ProjectSetupDialog({
-  document,
-  initialName,
-  mode,
-  onCancel,
-  onOpenAdvanced,
-  onSave,
-}: {
-  document: ModelDocument;
-  initialName: string;
-  mode: "edit" | "new";
-  onCancel: () => void;
-  onOpenAdvanced: (target: "foundation" | "roof" | "stories" | "walls") => void;
-  onSave: (name: string, document: ModelDocument) => void;
-}) {
-  const [draft, setDraft] = useState(() => cloneDocument(document));
-  const [name, setName] = useState(initialName);
-  const [step, setStep] = useState<ProjectSetupStep>("project");
-  const [selectedStoryId, setSelectedStoryId] = useState(document.building.activeStoryId);
-  const [error, setError] = useState("");
-  const selectedStory = draft.building.stories.find((story) => story.id === selectedStoryId) ?? draft.building.stories[0];
-  const selectedCalculation = calculateStoryElevations(draft.building).find((item) => item.storyId === selectedStory.id);
-  const activeFoundation = draft.building.foundationWallTypes.find((type) => type.id === draft.building.activeFoundationWallTypeId) ?? draft.building.foundationWallTypes[0];
-  const activeWall = draft.building.wallTypes.find((type) => type.id === draft.building.activeWallTypeId) ?? draft.building.wallTypes[0];
-  const activeDoor = draft.building.openingTypes.find((type) => type.id === draft.building.activeDoorTypeId);
-  const activeWindow = draft.building.openingTypes.find((type) => type.id === draft.building.activeWindowTypeId);
-  const activeRoofType = draft.building.roofTypes.find((type) => type.id === draft.building.activeRoofTypeId) ?? draft.building.roofTypes[0];
-  const roofBearingStory = draft.building.stories.at(-1)!;
-  const roofBearingCalculation = calculateStoryElevations(draft.building).find((item) => item.storyId === roofBearingStory.id);
-  const roofReference = calculateRoofReferenceDimensions(draft.building.roofSettings, roofBearingCalculation?.roughCeilingElevation ?? 0, 144);
-  const wallTypesForUse = (use: WallUse) => draft.building.wallTypes.filter((type) => wallTypeMatchesUse(type, use));
-  const stepIndex = PROJECT_SETUP_STEPS.findIndex((item) => item.id === step);
-
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-
-  const changeProjectInformation = (change: Partial<ProjectInformation>) => {
-    setDraft((current) => ({
-      ...cloneDocument(current),
-      projectInformation: { ...current.projectInformation, ...change },
-    }));
-    setError("");
-  };
-  const changeBuilding = (building: BuildingStructure) => {
-    setDraft((current) => ({ ...cloneDocument(current), building: cloneBuildingStructure(building) }));
-    setError("");
-  };
-  const changeWallDefault = (use: WallUse, wallTypeId: string) => {
-    const building = cloneBuildingStructure(draft.building);
-    if (!building.wallTypes.some((type) => type.id === wallTypeId && wallTypeMatchesUse(type, use))) return;
-    if (use === "exterior") building.defaultExteriorWallTypeId = wallTypeId;
-    else if (use === "interior-bearing") building.defaultInteriorBearingWallTypeId = wallTypeId;
-    else building.defaultInteriorPartitionWallTypeId = wallTypeId;
-    if (building.activeWallUse === use) building.activeWallTypeId = wallTypeId;
-    changeBuilding(building);
-  };
-  const changeStartingWallUse = (use: WallUse) => {
-    const building = cloneBuildingStructure(draft.building);
-    building.activeWallUse = use;
-    building.activeWallTypeId = defaultWallTypeIdForUse(building, use);
-    changeBuilding(building);
-  };
-  const changeRoofDefaults = (change: Partial<RoofSettings>) => {
-    const building = cloneBuildingStructure(draft.building);
-    building.roofSettings = { ...building.roofSettings, ...change };
-    changeBuilding(building);
-  };
-  const replaceSelectedStory = (change: Partial<typeof selectedStory>) => {
-    const building = cloneBuildingStructure(draft.building);
-    const index = building.stories.findIndex((story) => story.id === selectedStory.id);
-    if (index < 0) return;
-    building.stories[index] = { ...building.stories[index], ...change };
-    changeBuilding(building);
-  };
-  const addStory = (placement: "above" | "below") => {
-    const building = addBuildingStory(draft.building, selectedStory.id, placement);
-    if (!building) return;
-    changeBuilding(building);
-    setSelectedStoryId(building.activeStoryId);
-  };
-  const deleteStory = () => {
-    const building = removeBuildingStory(draft.building, selectedStory.id);
-    if (!building) return;
-    changeBuilding(building);
-    setSelectedStoryId(building.activeStoryId);
-  };
-  const applyTemplate = (template: "one-story" | "basement" | "two-story-basement") => {
-    const next = cloneDocument(NEW_PROJECT_DOCUMENT);
-    next.projectInformation = { ...draft.projectInformation };
-    let building = cloneBuildingStructure(next.building);
-    if (template === "basement" || template === "two-story-basement") {
-      const withBasement = addBuildingStory(building, "story-01", "below");
-      if (withBasement) {
-        building = withBasement;
-        const basementIndex = building.stories.findIndex((story) => story.id === building.activeStoryId);
-        if (basementIndex >= 0) building.stories[basementIndex] = {
-          ...applyFloorStructurePreset(building.stories[basementIndex], "basement-slab"),
-          name: "Basement",
-          purpose: "basement",
-          roughCeilingHeight: 93,
-        };
-      }
-    }
-    if (template === "two-story-basement") {
-      const withSecondFloor = addBuildingStory(building, "story-01", "above");
-      if (withSecondFloor) {
-        building = withSecondFloor;
-        const secondIndex = building.stories.findIndex((story) => story.id === building.activeStoryId);
-        if (secondIndex >= 0) building.stories[secondIndex] = { ...building.stories[secondIndex], name: "Second Floor" };
-      }
-    }
-    building.activeStoryId = "story-01";
-    building.anchorStoryId = "story-01";
-    next.building = building;
-    setDraft(next);
-    setSelectedStoryId("story-01");
-    setError("");
-  };
-  const save = () => {
-    const normalizedName = name.trim();
-    if (!normalizedName || normalizedName.length > 120) {
-      setStep("project");
-      setError("Enter a project name between 1 and 120 characters.");
-      return;
-    }
-    if (!roofSettingsAreValid(draft.building.roofSettings)) {
-      setStep("defaults");
-      setError("Review the Roof pitch, heel, overhang, framing spacing, member sizes, ridge, birdsmouth, fascia, and subfascia values before continuing.");
-      return;
-    }
-    if (!buildingStructureIsValid(draft.building)) {
-      setStep("stories");
-      setError("Review Story names, heights, and assemblies before continuing.");
-      return;
-    }
-    onSave(normalizedName, cloneDocument(draft));
-  };
-  const openAdvanced = (target: "foundation" | "roof" | "stories" | "walls") => {
-    const normalizedName = name.trim();
-    if (!normalizedName || !buildingStructureIsValid(draft.building)) {
-      setError("Complete the required Project and Story settings before opening an advanced manager.");
-      return;
-    }
-    onSave(normalizedName, cloneDocument(draft));
-    onOpenAdvanced(target);
-  };
-  const reviewItems = [
-    { complete: Boolean(name.trim()), label: "Project name", value: name.trim() || "Required" },
-    { complete: draft.building.stories.length > 0, label: "Building Stories", value: `${draft.building.stories.length} configured` },
-    { complete: draft.building.stories.every((story) => story.roughCeilingHeight > 0), label: "Ceiling / plate heights", value: "Set for every Story" },
-    { complete: draft.building.stories.every((story) => story.floorStructure.layers.length > 0), label: "Floor structure", value: "Assembly assigned to every Story" },
-    { complete: Boolean(activeFoundation), label: "Foundation default", value: activeFoundation?.name ?? "Required" },
-    { complete: Boolean(activeWall), label: "Starting Wall use", value: `${WALL_USE_LABELS[draft.building.activeWallUse]} · ${activeWall?.name ?? "Required"}` },
-    { complete: ["exterior", "interior-bearing", "interior-partition"].every((use) => wallTypesForUse(use as WallUse).length > 0), label: "Wall defaults", value: "Exterior, bearing, and partition assigned" },
-    { complete: Boolean(roofReference && activeRoofType), label: "Roof defaults", value: roofReference && activeRoofType ? `${activeRoofType.name} · ${draft.building.roofSettings.pitchRise}:12 · ${formatArchitectural(draft.building.roofSettings.framingSpacing)} O.C.` : "Review required" },
-  ];
-
-  return (
-    <div className="story-manager-backdrop project-setup-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="project-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="project-setup-title">
-        <header className="project-setup-header">
-          <div><strong id="project-setup-title">{mode === "new" ? "New Project Quick Setup" : "Project Setup Center"}</strong><span>{mode === "new" ? "Establish the building before drawing. Everything can be refined later." : "Review the project-wide settings that drive Stories, Rooms, Walls, roofs, and openings."}</span></div>
-          <button type="button" onClick={onCancel} aria-label="Close Project Setup">×</button>
-        </header>
-        <div className="project-setup-layout">
-          <nav className="project-setup-nav" aria-label="Project setup categories">
-            <div className="project-setup-progress"><span>Setup progress</span><strong>{reviewItems.filter((item) => item.complete).length} of {reviewItems.length} ready</strong><i><b style={{ width: `${reviewItems.filter((item) => item.complete).length / reviewItems.length * 100}%` }} /></i></div>
-            {PROJECT_SETUP_STEPS.map((item, index) => <button type="button" key={item.id} className={step === item.id ? "is-active" : ""} onClick={() => { setStep(item.id); setError(""); }}><b>{index + 1}</b><span><strong>{item.label}</strong><small>{item.note}</small></span></button>)}
-            <div className="project-setup-scope"><strong>Advanced managers</strong><span>Detailed assemblies stay in their dedicated editors so this setup remains readable. Current setup changes are applied first.</span>{mode === "edit" ? <><button type="button" onClick={() => openAdvanced("stories")}>Story &amp; Assemblies</button><button type="button" onClick={() => openAdvanced("foundation")}>Foundation Types</button><button type="button" onClick={() => openAdvanced("walls")}>Wall Types</button><button type="button" onClick={() => openAdvanced("roof")}>Roof Design Defaults</button></> : <small>Create the project first, then use the advanced managers when needed.</small>}</div>
-          </nav>
-          <main className="project-setup-content">
-            {step === "project" ? <>
-              <header><span>1 · Project</span><strong>Name the job and choose a sensible starting structure.</strong><p>Only the project name is required. The remaining fields travel with the saved project and can be completed as information becomes available.</p></header>
-              {mode === "new" ? <section className="project-template-grid" aria-label="Starting templates"><button type="button" onClick={() => applyTemplate("one-story")}><b>▱</b><strong>One Story</strong><span>First Floor with a wood-framed floor</span></button><button type="button" onClick={() => applyTemplate("basement")}><b>▤</b><strong>Basement + First Floor</strong><span>Separate Basement Story with a concrete slab</span></button><button type="button" onClick={() => applyTemplate("two-story-basement")}><b>▥</b><strong>Two Stories + Basement</strong><span>Basement, First Floor, and Second Floor</span></button></section> : null}
-              <section className="project-setup-card"><header><strong>Project Information</strong><span>Saved in the .mbproj file</span></header><div className="project-setup-fields">
-                <label className="is-wide"><span>Project name *</span><input value={name} maxLength={120} onChange={(event) => { setName(event.target.value); setError(""); }} /></label>
-                <label><span>Project number</span><input value={draft.projectInformation.projectNumber} maxLength={80} onChange={(event) => changeProjectInformation({ projectNumber: event.target.value })} /></label>
-                <label><span>Project type</span><select value={draft.projectInformation.projectType} onChange={(event) => changeProjectInformation({ projectType: event.target.value as ProjectType })}>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                <label><span>Client</span><input value={draft.projectInformation.clientName} maxLength={120} onChange={(event) => changeProjectInformation({ clientName: event.target.value })} /></label>
-                <label><span>Measurement format</span><output>US Architectural · 1/16&quot;</output></label>
-                <label className="is-wide"><span>Project address</span><input value={draft.projectInformation.address} maxLength={240} onChange={(event) => changeProjectInformation({ address: event.target.value })} /></label>
-              </div><p className="project-setup-note">Metric and additional display precisions are planned. Internal model geometry currently remains inches for dependable architectural input.</p></section>
-            </> : null}
-            {step === "stories" ? <>
-              <header><span>2 · Stories</span><strong>Set the vertical building structure once.</strong><p>Story values establish the defaults. Room settings can override floor and ceiling assemblies or heights only where needed.</p></header>
-              <section className="project-story-workspace"><div className="project-story-table"><header><span>Story</span><span>Type</span><span>Rough floor</span><span>Ceiling</span></header>{[...draft.building.stories].reverse().map((story) => { const calculation = calculateStoryElevations(draft.building).find((item) => item.storyId === story.id); return <button type="button" key={story.id} className={story.id === selectedStory.id ? "is-selected" : ""} onClick={() => setSelectedStoryId(story.id)}><strong>{story.name}</strong><span>{STORY_PURPOSE_LABELS[story.purpose]}</span><span>{calculation ? formatSignedArchitectural(calculation.roughFloorElevation) : "—"}</span><span>{formatArchitectural(story.roughCeilingHeight)}</span></button>; })}<footer><button type="button" onClick={() => addStory("above")}>＋ Above</button><button type="button" onClick={() => addStory("below")}>＋ Below</button><button type="button" onClick={deleteStory} disabled={draft.building.stories.length === 1}>Delete</button></footer></div>
-                <div className="project-story-editor"><header><strong>{selectedStory.name}</strong><span>Defaults for this Story</span></header><div className="project-setup-fields"><label><span>Story name</span><input value={selectedStory.name} maxLength={80} onChange={(event) => replaceSelectedStory({ name: event.target.value })} /></label><label><span>Story type</span><select value={selectedStory.purpose} onChange={(event) => replaceSelectedStory({ purpose: event.target.value as StoryPurpose })}>{Object.entries(STORY_PURPOSE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><StoryDimensionInput key={`${selectedStory.id}:${selectedStory.roughCeilingHeight}`} label="Rough ceiling / plate height" value={selectedStory.roughCeilingHeight} onChange={(roughCeilingHeight) => replaceSelectedStory({ roughCeilingHeight })} /><label><span>Calculated rough floor</span><output>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.roughFloorElevation) : "—"}</output></label></div><div className="project-floor-presets"><span>Floor structure</span>{Object.entries(FLOOR_STRUCTURE_PRESET_LABELS).map(([preset, label]) => <button type="button" key={preset} onClick={() => replaceSelectedStory(applyFloorStructurePreset(selectedStory, preset as FloorStructurePreset))}>{label}</button>)}</div><dl><div><dt>Floor depth</dt><dd>{selectedCalculation ? formatArchitectural(selectedCalculation.floorStructureThickness) : "—"}</dd></div><div><dt>Finished clear height</dt><dd>{selectedCalculation ? formatArchitectural(selectedCalculation.finishedClearHeight) : "—"}</dd></div><div><dt>Finished ceiling</dt><dd>{selectedCalculation ? formatSignedArchitectural(selectedCalculation.finishedCeilingElevation) : "—"}</dd></div></dl></div>
-              </section>
-            </> : null}
-            {step === "defaults" ? <>
-              <header><span>3 · Defaults</span><strong>Choose what the first drafting tools will use.</strong><p>These choices select active reusable Types. Editing the construction layers remains in the detailed managers.</p></header>
-              <section className="project-default-grid">
-                <article><header><b>▰</b><div><strong>Foundation</strong><span>Support, footing, and sill edge</span></div></header><label><span>Active Foundation Wall type</span><select value={draft.building.activeFoundationWallTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeFoundationWallTypeId: event.target.value })}>{draft.building.foundationWallTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Condition</dt><dd>{activeFoundation?.condition.replaceAll("-", " ")}</dd></div><div><dt>Sill plates</dt><dd>{activeFoundation?.sill.foundationPlateCount}</dd></div></dl></article>
-                <article><header><b>▥</b><div><strong>Walls</strong><span>Defaults by drawing use</span></div></header><label><span>Exterior Wall</span><select value={draft.building.defaultExteriorWallTypeId} onChange={(event) => changeWallDefault("exterior", event.target.value)}>{wallTypesForUse("exterior").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Bearing Wall</span><select value={draft.building.defaultInteriorBearingWallTypeId} onChange={(event) => changeWallDefault("interior-bearing", event.target.value)}>{wallTypesForUse("interior-bearing").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Interior Partition</span><select value={draft.building.defaultInteriorPartitionWallTypeId} onChange={(event) => changeWallDefault("interior-partition", event.target.value)}>{wallTypesForUse("interior-partition").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Starting Wall use</span><select value={draft.building.activeWallUse} onChange={(event) => changeStartingWallUse(event.target.value as WallUse)}>{Object.entries(WALL_USE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><dl><div><dt>First Wall Type</dt><dd>{activeWall?.name ?? "—"}</dd></div><div><dt>Total thickness</dt><dd>{activeWall ? formatArchitectural(assemblyTotalThickness(activeWall)) : "—"}</dd></div></dl></article>
-                <article><header><b>▣</b><div><strong>Doors &amp; Windows</strong><span>Reusable opening Types</span></div></header><label><span>Active Door type</span><select value={draft.building.activeDoorTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeDoorTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "door").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Active Window type</span><select value={draft.building.activeWindowTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeWindowTypeId: event.target.value })}>{draft.building.openingTypes.filter((type) => type.kind === "window").map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><dl><div><dt>Door</dt><dd>{activeDoor?.name}</dd></div><div><dt>Window</dt><dd>{activeWindow?.name}</dd></div></dl></article>
-                <article><header><b>⌂</b><div><strong>Roof</strong><span>Assembly, exterior heel, and plane defaults</span></div></header><label><span>Active Roof Type</span><select value={draft.building.activeRoofTypeId} onChange={(event) => changeBuilding({ ...cloneBuildingStructure(draft.building), activeRoofTypeId: event.target.value })}>{draft.building.roofTypes.map((type) => <option value={type.id} key={type.id}>{type.name}</option>)}</select></label><label><span>Framing method</span><select value={draft.building.roofSettings.framingMethod} onChange={(event) => changeRoofDefaults({ framingMethod: event.target.value as RoofFramingMethod })}><option value="rafters">Conventional rafters</option><option value="trusses">Roof trusses</option></select></label><StoryDimensionInput key={`setup-roof-spacing:${draft.building.roofSettings.framingSpacing}`} label="Framing spacing" value={draft.building.roofSettings.framingSpacing} onChange={(framingSpacing) => changeRoofDefaults({ framingSpacing })} /><label><span>Pitch · rise in 12</span><input type="number" min="0.25" max="24" step="0.0625" value={draft.building.roofSettings.pitchRise} onChange={(event) => changeRoofDefaults({ pitchRise: Number(event.target.value) })} /></label><StoryDimensionInput key={`setup-roof-heel:${draft.building.roofSettings.heightAbovePlate}`} label="Height above plate / heel" value={draft.building.roofSettings.heightAbovePlate} onChange={(heightAbovePlate) => changeRoofDefaults({ heightAbovePlate })} /><StoryDimensionInput key={`setup-roof-overhang:${draft.building.roofSettings.overhang}`} label="Horizontal overhang" allowZero value={draft.building.roofSettings.overhang} onChange={(overhang) => changeRoofDefaults({ overhang })} /><dl><div><dt>Assembly depth</dt><dd>{activeRoofType ? formatArchitectural(assemblyTotalThickness(activeRoofType)) : "—"}</dd></div><div><dt>Top of plate</dt><dd>{roofBearingCalculation ? formatSignedArchitectural(roofBearingCalculation.roughCeilingElevation) : "—"}</dd></div><div><dt>Exterior heel</dt><dd>{roofReference ? formatSignedArchitectural(roofReference.heelElevation) : "—"}</dd></div></dl></article>
-              </section><p className="project-setup-note">The Wall tool starts with the selected Wall use. While drawing, switch between Exterior, Interior Bearing, and Interior Partition without reopening Project Setup; each use recalls its assigned default Type.</p>
-            </> : null}
-            {step === "review" ? <>
-              <header><span>4 · Review</span><strong>Confirm the model-driving settings.</strong><p>This is a setup check, not a lock. Every value remains editable from Manage after the project opens.</p></header>
-              <section className="project-review-list">{reviewItems.map((item) => <div key={item.label} className={item.complete ? "is-complete" : "is-required"}><b>{item.complete ? "✓" : "!"}</b><span><strong>{item.label}</strong><small>{item.value}</small></span></div>)}</section>
-              <section className="project-review-summary"><div><span>Project</span><strong>{name.trim() || "Unnamed"}</strong><small>{PROJECT_TYPE_LABELS[draft.projectInformation.projectType]}{draft.projectInformation.projectNumber ? ` · ${draft.projectInformation.projectNumber}` : ""}</small></div><div><span>Building</span><strong>{draft.building.stories.length} Stor{draft.building.stories.length === 1 ? "y" : "ies"}</strong><small>{draft.building.stories.map((story) => story.name).join(" · ")}</small></div><div><span>First tools</span><strong>{activeWall?.name}</strong><small>{activeFoundation?.name}</small></div></section>
-            </> : null}
-          </main>
-        </div>
-        {error ? <p className="project-setup-error" role="alert">{error}</p> : null}
-        <footer className="project-setup-footer"><span>{mode === "new" ? "Creates a blank model in Top view" : "Changes are added to Undo history"}</span><div><button type="button" onClick={onCancel}>Cancel</button><button type="button" onClick={() => setStep(PROJECT_SETUP_STEPS[Math.max(0, stepIndex - 1)].id)} disabled={stepIndex === 0}>Back</button>{stepIndex < PROJECT_SETUP_STEPS.length - 1 ? <button type="button" className="story-save" onClick={() => setStep(PROJECT_SETUP_STEPS[stepIndex + 1].id)}>Next</button> : <button type="button" className="story-save" onClick={save}>{mode === "new" ? "Create Project" : "Apply Project Setup"}</button>}</div></footer>
-      </section>
-    </div>
-  );
-}
-
-function NameEntryDialog({
-  description,
-  initialValue,
-  label,
-  onCancel,
-  onSubmit,
-  submitLabel,
-  title,
-}: {
-  description: string;
-  initialValue: string;
-  label: string;
-  onCancel: () => void;
-  onSubmit: (name: string) => string | null;
-  submitLabel: string;
-  title: string;
-}) {
-  const [draft, setDraft] = useState(initialValue);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onCancel();
-    };
-    window.addEventListener("keydown", closeWithEscape, true);
-    return () => window.removeEventListener("keydown", closeWithEscape, true);
-  }, [onCancel]);
-
-  const submit = () => {
-    const message = onSubmit(draft);
-    if (message) setError(message);
-  };
-
-  return (
-    <div className="story-manager-backdrop name-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <section className="name-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="name-entry-title">
-        <header><div><strong id="name-entry-title">{title}</strong><span>{description}</span></div><button type="button" onClick={onCancel} aria-label={`Close ${title}`}>×</button></header>
-        <form onSubmit={(event) => { event.preventDefault(); submit(); }}>
-          <label><span>{label}</span><input value={draft} maxLength={80} onChange={(event) => { setDraft(event.target.value); setError(""); }} /></label>
-          {error ? <p role="alert">{error}</p> : null}
-          <footer><button type="button" onClick={onCancel}>Cancel</button><button type="submit" className="story-save">{submitLabel}</button></footer>
-        </form>
-      </section>
-    </div>
-  );
-}
-
 export function ModelBuilderApp() {
   const [editor, dispatch] = useReducer(historyReducer, {
     future: [],
@@ -11844,6 +8222,16 @@ export function ModelBuilderApp() {
   const [dragStatus, setDragStatus] = useState<DragStatus | null>(null);
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTab>("Home");
   const [projectSetupMode, setProjectSetupMode] = useState<"edit" | "new" | null>(null);
+  // One value is the source of truth for which tool is running. The individual
+  // flags below are derived from it, so the Viewport and the panels keep reading
+  // the booleans they always read while two tools can no longer be active at once.
+  const [activeTool, setActiveTool] = useState<ActiveTool>(SELECT_TOOL);
+  const {
+    arcMode, boundaryMode, breakMode, chamferMode, circleMode, copyMode, extendMode,
+    filletMode, foundationWallMode, lengthenMode, lineMode, mirrorMode, moveMode,
+    offsetMode, polylineMode, rectangleMode, rotateMode, scaleMode, stretchMode,
+    trimMode, wallMode,
+  } = toolFlags(activeTool);
   const [referenceDisplayOpen, setReferenceDisplayOpen] = useState(false);
   const [storyManagerOpen, setStoryManagerOpen] = useState(false);
   const [foundationManagerOpen, setFoundationManagerOpen] = useState(false);
@@ -11866,36 +8254,19 @@ export function ModelBuilderApp() {
   const [layerFilter, setLayerFilter] = useState("");
   const [fitViewSignal, setFitViewSignal] = useState(0);
   const [viewTarget, setViewTarget] = useState<ViewTarget>(VIEW_PRESETS.top);
-  const [copyMode, setCopyMode] = useState(false);
-  const [moveMode, setMoveMode] = useState(false);
-  const [mirrorMode, setMirrorMode] = useState(false);
   const [mirrorKeepSource, setMirrorKeepSource] = useState(true);
-  const [offsetMode, setOffsetMode] = useState(false);
   const [offsetDistance, setOffsetDistance] = useState(6);
   const [offsetKeepSource, setOffsetKeepSource] = useState(true);
-  const [chamferMode, setChamferMode] = useState(false);
   const [chamferFirstDistance, setChamferFirstDistance] = useState(6);
   const [chamferSecondDistance, setChamferSecondDistance] = useState(6);
   const [chamferStage, setChamferStage] = useState<0 | 1>(0);
   const [chamferDistancePrompt, setChamferDistancePrompt] = useState<0 | 1 | 2>(0);
-  const [breakMode, setBreakMode] = useState<BreakMode | null>(null);
   const [breakStage, setBreakStage] = useState<0 | 1 | 2>(0);
-  const [boundaryMode, setBoundaryMode] = useState(false);
-  const [filletMode, setFilletMode] = useState(false);
   const [filletRadius, setFilletRadius] = useState(6);
   const [filletStage, setFilletStage] = useState<0 | 1>(0);
-  const [lengthenMode, setLengthenMode] = useState(false);
   const [lengthenMethod, setLengthenMethod] = useState<LengthenMethod>("delta");
   const [lengthenValue, setLengthenValue] = useState(6);
-  const [trimMode, setTrimMode] = useState(false);
-  const [extendMode, setExtendMode] = useState(false);
-  const [rotateMode, setRotateMode] = useState(false);
-  const [scaleMode, setScaleMode] = useState(false);
-  const [stretchMode, setStretchMode] = useState(false);
   const [stretchTargets, setStretchTargets] = useState<CadStretchTarget[]>([]);
-  const [lineMode, setLineMode] = useState(false);
-  const [wallMode, setWallMode] = useState(false);
-  const [foundationWallMode, setFoundationWallMode] = useState(false);
   const [lineAnchor, setLineAnchor] = useState<LinePoint | null>(null);
   const [lineCommand, setLineCommand] = useState<LineViewportCommand | null>(null);
   const [arcPoints, setArcPoints] = useState<LinePoint[]>([]);
@@ -11919,13 +8290,9 @@ export function ModelBuilderApp() {
   const [activeElevationError, setActiveElevationError] = useState("");
   const [commandDraft, setCommandDraft] = useState("");
   const [lastCommandName, setLastCommandName] = useState<"arc" | "circle" | "foundation-wall" | "line" | "polyline" | "rectangle" | "wall" | null>(null);
-  const [arcMode, setArcMode] = useState(false);
-  const [circleMode, setCircleMode] = useState(false);
-  const [polylineMode, setPolylineMode] = useState(false);
   const [polylineSegmentMode, setPolylineSegmentMode] = useState<PolylineSegmentMode>("line");
   const [polylineWidth, setPolylineWidth] = useState(0);
   const [polylineWidthDraft, setPolylineWidthDraft] = useState("0");
-  const [rectangleMode, setRectangleMode] = useState(false);
   const [rectangleMethod, setRectangleMethod] = useState<RectangleMethod>("corners");
   const [rectangleCornerStyle, setRectangleCornerStyle] = useState<RectangleCornerStyle>("sharp");
   const [rectangleWidthDimension, setRectangleWidthDimension] = useState(144);
@@ -12282,21 +8649,8 @@ export function ModelBuilderApp() {
     const layer = findLayer(editor.present, line?.layerId ?? null);
     if (line && !layer?.visible) return;
     selectCadEntity(line ? { id: line.id, kind: "line" } : null, additive);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setStretchMode(false);
+    setActiveTool(toolAfterSelection);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setWallMode(false);
-    setFoundationWallMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setShowStartGuide(true);
     setDragStatus(null);
   }, [editor.present, selectCadEntity]);
@@ -12306,19 +8660,7 @@ export function ModelBuilderApp() {
     const layer = findLayer(editor.present, polyline?.layerId ?? null);
     if (polyline && !layer?.visible) return;
     selectCadEntity(polyline ? { id: polyline.id, kind: "polyline" } : null, additive);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setWallMode(false);
-    setFoundationWallMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
+    setActiveTool(toolAfterSelection);
     setDragStatus(null);
   }, [editor.present, selectCadEntity]);
 
@@ -12327,17 +8669,7 @@ export function ModelBuilderApp() {
     const layer = findLayer(editor.present, circle?.layerId ?? null);
     if (circle && !layer?.visible) return;
     selectCadEntity(circle ? { id: circle.id, kind: "circle" } : null, additive);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
+    setActiveTool(toolAfterSelection);
     setDragStatus(null);
   }, [editor.present, selectCadEntity]);
 
@@ -12346,17 +8678,7 @@ export function ModelBuilderApp() {
     const layer = findLayer(editor.present, arc?.layerId ?? null);
     if (arc && !layer?.visible) return;
     selectCadEntity(arc ? { id: arc.id, kind: "arc" } : null, additive);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
+    setActiveTool(toolAfterSelection);
     setDragStatus(null);
   }, [editor.present, selectCadEntity]);
 
@@ -12369,7 +8691,7 @@ export function ModelBuilderApp() {
     faceIndex: number | null,
     additive: boolean,
   ) => {
-    setOffsetMode(false);
+    setActiveTool(toolAfterSelection);
     if (!objectId) {
       if (!additive) setSingleSelection(null);
       return;
@@ -12521,7 +8843,7 @@ export function ModelBuilderApp() {
     });
     if (!next) return false;
     dispatch({ type: "commit", next });
-    setMoveMode(false);
+    setActiveTool(toolAfterSelection);
     setFileNotice({ text: `Moved ${selectedEntityRefs.length} entit${selectedEntityRefs.length === 1 ? "y" : "ies"}.`, tone: "success" });
     return true;
   }, [editor.present, selectedEntityRefs, selectionCanModify]);
@@ -12579,7 +8901,7 @@ export function ModelBuilderApp() {
     const result = mirrorModelEntities(editor.present, selectedEntityRefs, axisStart, axisEnd, mirrorKeepSource);
     if (!result) return false;
     commitMirrorMode(editor.present, result.document, result.refs, mirrorKeepSource);
-    setMirrorMode(false);
+    setActiveTool(toolAfterSelection);
     return true;
   }, [commitMirrorMode, editor.present, mirrorKeepSource, selectedEntityRefs, selectionCanModify]);
 
@@ -12655,7 +8977,7 @@ export function ModelBuilderApp() {
     }
     dispatch({ type: "commit", next: result.document });
     applyCadSelection(result.document, [result.ref], result.ref);
-    setChamferMode(false);
+    setActiveTool(toolAfterSelection);
     setChamferStage(0);
     setChamferDistancePrompt(0);
     setSelectedFaceIndex(null);
@@ -12674,7 +8996,7 @@ export function ModelBuilderApp() {
     }
     dispatch({ type: "commit", next: result.document });
     applyCadSelection(result.document, [result.ref], result.ref);
-    setFilletMode(false);
+    setActiveTool(toolAfterSelection);
     setFilletStage(0);
     setSelectedFaceIndex(null);
     setFileNotice({ text: `Filleted every valid Polyline corner at ${formatArchitectural(radius)}.`, tone: "success" });
@@ -12734,12 +9056,7 @@ export function ModelBuilderApp() {
     const next = setBoxObjectsLocked(editor.present, selectedObjectIds, lockNext);
     if (!next) return;
     dispatch({ type: "commit", next });
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
+    setActiveTool(toolAfterSelection);
     setSelectedFaceIndex(null);
     setFileNotice({
       text: `${lockNext ? "Locked" : "Unlocked"} ${selectedObjectIds.length} object${selectedObjectIds.length === 1 ? "" : "s"}.`,
@@ -12748,62 +9065,33 @@ export function ModelBuilderApp() {
   }, [allSelectedLocked, editor.present, selectedObjectIds]);
 
   const startCopyMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "copy" });
     setBreakStage(0);
     if (!selectionCanModify) return;
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setLengthenMode(false);
     setSelectedFaceIndex(null);
-    setCopyMode(true);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setFileNotice({ text: "Copy active. Click a base point, then click a target point, or enter an exact offset.", tone: "info" });
   }, [selectionCanModify]);
 
   const finishCopyMode = useCallback(() => {
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
+    setActiveTool(SELECT_TOOL);
     setFileNotice({ text: "Copy mode finished.", tone: "info" });
   }, []);
 
+  // Lengthen needs a selection it can act on. It used to also need clearing when
+  // another mode turned on, but two tools can no longer run at once.
   useEffect(() => {
-    if (!lengthenMode) return;
-    if (!selectionCanLengthen || arcMode || breakMode || chamferMode || circleMode || copyMode || extendMode || filletMode || lineMode || mirrorMode || moveMode || offsetMode || polylineMode || rectangleMode || rotateMode || scaleMode || stretchMode || trimMode) {
-      const timeout = window.setTimeout(() => setLengthenMode(false), 0);
-      return () => window.clearTimeout(timeout);
-    }
-  }, [arcMode, breakMode, chamferMode, circleMode, copyMode, extendMode, filletMode, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, scaleMode, selectionCanLengthen, stretchMode, trimMode]);
+    if (!lengthenMode || selectionCanLengthen) return;
+    const timeout = window.setTimeout(() => setActiveTool(SELECT_TOOL), 0);
+    return () => window.clearTimeout(timeout);
+  }, [lengthenMode, selectionCanLengthen]);
 
   const finishModifyMode = useCallback((canceled: boolean) => {
-    setCopyMode(false);
-    setMoveMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     if (canceled) setFileNotice({ text: "Move/Copy canceled.", tone: "info" });
   }, []);
@@ -12826,36 +9114,17 @@ export function ModelBuilderApp() {
 
   const activateSelectMode = useCallback(() => {
     setDragStatus(null);
-    setBreakMode(null);
+    setActiveTool(SELECT_TOOL);
     setBreakStage(0);
-    setBoundaryMode(false);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setFilletMode(false);
     setFilletStage(0);
-    setTrimMode(false);
-    setExtendMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
     setSelectedFaceIndex(null);
   }, []);
 
   const finishBoundaryMode = useCallback((canceled = true) => {
-    setBoundaryMode(false);
+    setActiveTool(SELECT_TOOL);
     setCommandDraft("");
     setDragStatus(null);
     if (canceled) setFileNotice({ text: "Boundary canceled.", tone: "info" });
@@ -12867,30 +9136,12 @@ export function ModelBuilderApp() {
       setFileNotice({ text: "Boundary needs a visible, unlocked current layer for the new Polyline.", tone: "error" });
       return;
     }
-    setBreakMode(null);
+    setActiveTool({ kind: "boundary" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setLengthenMode(false);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
-    setBoundaryMode(true);
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
     setSelectedEntityKeys([]);
@@ -12903,14 +9154,6 @@ export function ModelBuilderApp() {
     setViewTarget(VIEW_PRESETS.top);
     setFileNotice({ text: `Boundary active at ${formatSignedArchitectural(cadDraftingSettings.activeElevation)}. Click inside a closed visible area.`, tone: "info" });
   }, [cadDraftingSettings.activeElevation, editor.present]);
-
-  useEffect(() => {
-    if (!boundaryMode) return;
-    if (arcMode || breakMode || chamferMode || circleMode || copyMode || extendMode || filletMode || lengthenMode || lineMode || mirrorMode || moveMode || offsetMode || polylineMode || rectangleMode || rotateMode || scaleMode || stretchMode || trimMode) {
-      const timeout = window.setTimeout(() => setBoundaryMode(false), 0);
-      return () => window.clearTimeout(timeout);
-    }
-  }, [arcMode, boundaryMode, breakMode, chamferMode, circleMode, copyMode, extendMode, filletMode, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, scaleMode, stretchMode, trimMode]);
 
   const joinSelection = useCallback(() => {
     if (!selectionCanJoin) {
@@ -12967,36 +9210,20 @@ export function ModelBuilderApp() {
   }, [activateSelectMode, applyCadSelection, editor.present, selectedEntityRefs, selectedExplodeHasWidth, selectionCanExplode]);
 
   const finishStretchMode = useCallback((canceled = false) => {
-    setStretchMode(false);
+    setActiveTool(SELECT_TOOL);
     setStretchTargets([]);
     setDragStatus(null);
     if (canceled) setFileNotice({ text: "Stretch canceled.", tone: "info" });
   }, []);
 
   const activateStretchMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "stretch" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
     setDragStatus(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setStretchTargets([]);
-    setStretchMode(true);
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
     setSelectedEntityKeys([]);
@@ -13030,180 +9257,84 @@ export function ModelBuilderApp() {
   }, [commitStretchMode, editor.present, finishStretchMode, stretchMode, stretchTargets]);
 
   const activateMoveMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "move" });
     setBreakStage(0);
     if (!selectionCanModify) return;
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(true);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setFileNotice({ text: "Move active. Click a base point, then click a target point, or enter an exact offset.", tone: "info" });
   }, [selectionCanModify]);
 
   const activateRotateMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "rotate" });
     setBreakStage(0);
     if (!selectionCanModify) return;
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(true);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setFileNotice({ text: "Rotate active. Drag the gold ring; hold Shift for 1° snapping, or enter an exact angle in Properties.", tone: "info" });
   }, [selectionCanModify]);
 
   const activateScaleMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "scale" });
     setBreakStage(0);
     if (!selectionCanModify) return;
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(true);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setFileNotice({ text: "Scale active. Drag the green square, hold Shift for 0.01 precision, or enter an exact factor in Properties.", tone: "info" });
   }, [selectionCanModify]);
 
   const activateMirrorMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "mirror" });
     setBreakStage(0);
     if (!selectionCanModify) return;
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMirrorMode(true);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setViewTarget(VIEW_PRESETS.top);
     setFileNotice({ text: "Mirror active. Pick two snapped points to define the mirror axis.", tone: "info" });
   }, [selectionCanModify]);
 
   const activateOffsetMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "offset" });
     setBreakStage(0);
     if (!selectionCanOffset) {
       setFileNotice({ text: "Select one unlocked Line, Polyline, Rectangle, Circle, or Arc before starting Offset.", tone: "info" });
       return;
     }
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(true);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setViewTarget(VIEW_PRESETS.top);
     setFileNotice({ text: `Offset active at ${formatArchitectural(offsetDistance)}. Click the side for the new entity.`, tone: "info" });
   }, [offsetDistance, selectionCanOffset]);
 
   const activateChamferMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "chamfer" });
     setBreakStage(0);
     setDragStatus(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setFilletMode(false);
     setFilletStage(0);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setChamferMode(true);
     setViewTarget(VIEW_PRESETS.top);
     setCommandDraft("");
     setFileNotice({ text: `Chamfer active at ${formatArchitectural(chamferFirstDistance)} × ${formatArchitectural(chamferSecondDistance)}. Select two Lines, or type P to apply it to the selected Polyline.`, tone: "info" });
@@ -13211,28 +9342,12 @@ export function ModelBuilderApp() {
 
   const activateBreakMode = useCallback((mode: BreakMode) => {
     setDragStatus(null);
-    setBreakMode(mode);
+    setActiveTool({ kind: "break", mode });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setViewTarget(VIEW_PRESETS.top);
     setCommandDraft("");
@@ -13250,92 +9365,43 @@ export function ModelBuilderApp() {
       return;
     }
     setDragStatus(null);
-    setBreakMode(null);
+    setActiveTool({ kind: "lengthen" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setViewTarget(VIEW_PRESETS.top);
     setCommandDraft("");
-    setLengthenMode(true);
     setFileNotice({ text: `Lengthen ${lengthenMethod} active. Pick the selected curve near the endpoint to change.`, tone: "info" });
   }, [lengthenMethod, selectionCanLengthen]);
 
   const activateFilletMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "fillet" });
     setBreakStage(0);
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedFaceIndex(null);
     setFilletStage(0);
-    setFilletMode(true);
     setViewTarget(VIEW_PRESETS.top);
     setCommandDraft("");
     setFileNotice({ text: `Fillet active at ${formatArchitectural(filletRadius)}. Select two Lines or Arcs, or type P to apply it to the selected Polyline.`, tone: "info" });
   }, [filletRadius]);
 
   const activateTrimMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "trim" });
     setBreakStage(0);
     if (!selectionCanTrim) {
       setFileNotice({ text: "Select one unlocked Line, Polyline, Rectangle, Circle, or Arc before starting Trim.", tone: "info" });
       return;
     }
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
-    setExtendMode(false);
-    setTrimMode(true);
-    setStretchMode(false);
     setStretchTargets([]);
     setSelectedFaceIndex(null);
     setViewTarget(VIEW_PRESETS.top);
@@ -13343,32 +9409,16 @@ export function ModelBuilderApp() {
   }, [selectionCanTrim]);
 
   const activateExtendMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "extend" });
     setBreakStage(0);
     if (!selectionCanExtend) {
       setFileNotice({ text: "Select one unlocked Line, Arc, or open Polyline before starting Extend.", tone: "info" });
       return;
     }
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setCopyMode(false);
-    setMoveMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
-    setTrimMode(false);
-    setExtendMode(true);
-    setStretchMode(false);
     setStretchTargets([]);
     setSelectedFaceIndex(null);
     setViewTarget(VIEW_PRESETS.top);
@@ -13376,32 +9426,14 @@ export function ModelBuilderApp() {
   }, [selectionCanExtend]);
 
   const activateLineMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "line", role: null });
     setBreakStage(0);
     setDragStatus(null);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
     setObjectSnapOverride(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(true);
-    setWallMode(false);
-    setFoundationWallMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
     setSelectedEntityKeys([]);
@@ -13420,7 +9452,7 @@ export function ModelBuilderApp() {
 
   const activateWallMode = useCallback(() => {
     activateLineMode();
-    setWallMode(true);
+    setActiveTool({ kind: "line", role: "wall" });
     setLastCommandName("wall");
     setDrawingPlaneFromBuilding(editor.present.building);
     setFileNotice({ text: "Wall active. Draw the exterior face of the Main layer; the exterior defaults to the left of Start → End.", tone: "info" });
@@ -13428,20 +9460,17 @@ export function ModelBuilderApp() {
 
   const activateFoundationWallMode = useCallback(() => {
     activateLineMode();
-    setWallMode(false);
-    setFoundationWallMode(true);
+    setActiveTool({ kind: "line", role: "foundation-wall" });
     setLastCommandName("foundation-wall");
     setDrawingPlaneFromBuilding(editor.present.building);
     setFileNotice({ text: "Foundation Wall active. Draw the exterior face of the concrete Main layer; the exterior defaults to the left of Start → End.", tone: "info" });
   }, [activateLineMode, editor.present.building, setDrawingPlaneFromBuilding]);
 
   const activateArcMode = useCallback((method: ArcMethod = arcMethod) => {
-    setBreakMode(null);
+    setActiveTool({ kind: "arc" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
     const selectedReference: ContinuableEntityReference | null = selectedArc
       ? { id: selectedArc.id, type: "arc" }
@@ -13458,27 +9487,12 @@ export function ModelBuilderApp() {
     arcMethodCommandRef.current = method;
     arcContinueSeedCommandRef.current = continueSeed;
     if (method === "continue" && !continueSeed) {
-      setArcMode(false);
       setFileNotice({ text: "Continue needs a previously drawn or selected line, Arc, or open polyline.", tone: "error" });
       return;
     }
     setDragStatus(null);
     setObjectSnapOverride(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(true);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
     setSelectedEntityKeys([]);
@@ -13497,31 +9511,15 @@ export function ModelBuilderApp() {
   }, [arcMethod, editor.present, selectedArc, selectedLine, selectedPolyline]);
 
   const activateCircleMode = useCallback((method: CircleMethod = circleMethod) => {
-    setBreakMode(null);
+    setActiveTool({ kind: "circle" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
     setDragStatus(null);
     setObjectSnapOverride(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(true);
     setCircleMethod(method);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
     setSelectedEntityKeys([]);
@@ -13540,30 +9538,14 @@ export function ModelBuilderApp() {
   }, [circleMethod]);
 
   const activatePolylineMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "polyline" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
     setDragStatus(null);
     setObjectSnapOverride(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setRectangleMode(false);
-    setPolylineMode(true);
     setPolylineSegmentMode("line");
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
@@ -13633,30 +9615,14 @@ export function ModelBuilderApp() {
   };
 
   const activateRectangleMode = useCallback(() => {
-    setBreakMode(null);
+    setActiveTool({ kind: "rectangle" });
     setBreakStage(0);
-    setChamferMode(false);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
     setDragStatus(null);
     setObjectSnapOverride(null);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setTrimMode(false);
-    setExtendMode(false);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setPolylineMode(false);
-    setRectangleMode(true);
     setSelectedObjectId(null);
     setSelectedObjectIds([]);
     setSelectedEntityKeys([]);
@@ -13675,9 +9641,7 @@ export function ModelBuilderApp() {
   }, [rectangleMethod]);
 
   const finishLineMode = useCallback(() => {
-    setLineMode(false);
-    setWallMode(false);
-    setFoundationWallMode(false);
+    setActiveTool(SELECT_TOOL);
     setLineAnchor(null);
     setObjectSnapOverride(null);
     setCommandDraft("");
@@ -13686,7 +9650,7 @@ export function ModelBuilderApp() {
   }, [foundationWallMode, wallMode]);
 
   const finishArcMode = useCallback(() => {
-    setArcMode(false);
+    setActiveTool(SELECT_TOOL);
     setArcPoints([]);
     setArcCommand(null);
     setArcContinueSeed(null);
@@ -13698,7 +9662,7 @@ export function ModelBuilderApp() {
   }, []);
 
   const finishCircleMode = useCallback(() => {
-    setCircleMode(false);
+    setActiveTool(SELECT_TOOL);
     setCirclePoints([]);
     setCircleCommand(null);
     setObjectSnapOverride(null);
@@ -13708,7 +9672,7 @@ export function ModelBuilderApp() {
   }, []);
 
   const finishPolylineMode = useCallback(() => {
-    setPolylineMode(false);
+    setActiveTool(SELECT_TOOL);
     setPolylineAnchor(null);
     setPolylineCommand(null);
     setObjectSnapOverride(null);
@@ -13718,7 +9682,7 @@ export function ModelBuilderApp() {
   }, []);
 
   const finishRectangleMode = useCallback(() => {
-    setRectangleMode(false);
+    setActiveTool(SELECT_TOOL);
     setRectangleAnchor(null);
     setRectangleCommand(null);
     setObjectSnapOverride(null);
@@ -14364,32 +10328,31 @@ export function ModelBuilderApp() {
   }, [activateArcMode, activateBoundaryMode, activateCircleMode, activateFilletMode, activateFoundationWallMode, activateLineMode, activateMoveMode, activateOffsetMode, activatePolylineMode, activateRectangleMode, activateStretchMode, activateWallMode, arcMode, boundaryMode, breakMode, chamferMode, circleMode, copyMode, explodeSelection, extendMode, filletMode, joinSelection, lastCommandName, lengthenMode, lineMode, mirrorMode, moveMode, offsetMode, polylineMode, rectangleMode, rotateMode, scaleMode, stretchMode, trimMode]);
 
   const finishRotateMode = useCallback(() => {
-    setRotateMode(false);
-    setLineMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     setFileNotice({ text: "Rotate mode finished.", tone: "info" });
   }, []);
 
   const finishScaleMode = useCallback(() => {
-    setScaleMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     setFileNotice({ text: "Scale mode finished.", tone: "info" });
   }, []);
 
   const finishMirrorMode = useCallback(() => {
-    setMirrorMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     setFileNotice({ text: "Mirror canceled.", tone: "info" });
   }, []);
 
   const finishOffsetMode = useCallback(() => {
-    setOffsetMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     setFileNotice({ text: "Offset canceled.", tone: "info" });
   }, []);
 
   const finishChamferMode = useCallback((canceled = true) => {
-    setChamferMode(false);
+    setActiveTool(SELECT_TOOL);
     setChamferStage(0);
     setChamferDistancePrompt(0);
     setDragStatus(null);
@@ -14397,28 +10360,27 @@ export function ModelBuilderApp() {
   }, []);
 
   const finishBreakMode = useCallback((canceled = true) => {
-    setBreakMode(null);
+    setActiveTool(SELECT_TOOL);
     setBreakStage(0);
     setDragStatus(null);
     if (canceled) setFileNotice({ text: "Break canceled.", tone: "info" });
   }, []);
 
   const finishLengthenMode = useCallback((canceled = true) => {
-    setLengthenMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     if (canceled) setFileNotice({ text: "Lengthen canceled.", tone: "info" });
   }, []);
 
   const finishFilletMode = useCallback((canceled = true) => {
-    setFilletMode(false);
+    setActiveTool(SELECT_TOOL);
     setFilletStage(0);
     setDragStatus(null);
     if (canceled) setFileNotice({ text: "Fillet canceled.", tone: "info" });
   }, []);
 
   const finishTrimExtendMode = useCallback(() => {
-    setTrimMode(false);
-    setExtendMode(false);
+    setActiveTool(SELECT_TOOL);
     setDragStatus(null);
     setFileNotice({ text: "Trim/Extend canceled.", tone: "info" });
   }, []);
@@ -14538,8 +10500,7 @@ export function ModelBuilderApp() {
   }, [editor.past.length]);
 
   const addBox = useCallback(() => {
-    setBoundaryMode(false);
-    setChamferMode(false);
+    setActiveTool(toolAfterSelection);
     setChamferStage(0);
     setChamferDistancePrompt(0);
     const result = addBoxObject(editor.present);
@@ -15556,12 +11517,7 @@ export function ModelBuilderApp() {
     }
     dispatch({ type: "commit", next });
     applyCadSelection(next, []);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
+    setActiveTool(toolAfterSelection);
     setFileNotice({ text: `Erased ${count} entit${count === 1 ? "y" : "ies"}.`, tone: "info" });
   }, [applyCadSelection, editor.present, selectedEntityRefs, selectionCanModify]);
 
@@ -15599,27 +11555,11 @@ export function ModelBuilderApp() {
       setSelectionForDocument(nextDocument, null);
       setViewTarget(VIEW_PRESETS.top);
       setFitViewSignal((value) => value + 1);
-      setCopyMode(false);
-      setMoveMode(false);
-      setRotateMode(false);
-      setScaleMode(false);
-      setMirrorMode(false);
-      setOffsetMode(false);
-      setBoundaryMode(false);
-      setChamferMode(false);
+      setActiveTool(SELECT_TOOL);
       setChamferStage(0);
       setChamferDistancePrompt(0);
-      setFilletMode(false);
       setFilletStage(0);
-      setStretchMode(false);
       setStretchTargets([]);
-      setArcMode(false);
-      setCircleMode(false);
-      setLineMode(false);
-      setWallMode(false);
-      setFoundationWallMode(false);
-      setPolylineMode(false);
-      setRectangleMode(false);
       continuableEntityHistoryRef.current = [];
       setRecoveredAt(null);
       setHasActiveProject(true);
@@ -15703,27 +11643,11 @@ export function ModelBuilderApp() {
     setSavedProjectName(project.name);
     setProjectCreatedAt(project.createdAt);
     setSelectionForDocument(openedDocument, firstSelectableObjectId(openedDocument));
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setBoundaryMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setChamferMode(false);
+    setActiveTool(SELECT_TOOL);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setWallMode(false);
-    setFoundationWallMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
     setRecoveredAt(null);
     setHasActiveProject(true);
@@ -15797,27 +11721,11 @@ export function ModelBuilderApp() {
     setSelectionForDocument(NEW_PROJECT_DOCUMENT, null);
     setViewTarget(VIEW_PRESETS.top);
     setFitViewSignal((value) => value + 1);
-    setCopyMode(false);
-    setMoveMode(false);
-    setRotateMode(false);
-    setScaleMode(false);
-    setMirrorMode(false);
-    setOffsetMode(false);
-    setBoundaryMode(false);
-    setChamferMode(false);
+    setActiveTool(SELECT_TOOL);
     setChamferStage(0);
     setChamferDistancePrompt(0);
-    setFilletMode(false);
     setFilletStage(0);
-    setStretchMode(false);
     setStretchTargets([]);
-    setArcMode(false);
-    setCircleMode(false);
-    setLineMode(false);
-    setWallMode(false);
-    setFoundationWallMode(false);
-    setPolylineMode(false);
-    setRectangleMode(false);
     continuableEntityHistoryRef.current = [];
     setRecoveredAt(null);
     setHasActiveProject(true);
@@ -15844,25 +11752,10 @@ export function ModelBuilderApp() {
             const recoveredDocument = projectToDocument(snapshot.currentProject);
             setDrawingPlaneFromBuilding(recoveredDocument.building);
             setSelectionForDocument(recoveredDocument, firstSelectableObjectId(recoveredDocument));
-            setCopyMode(false);
-            setMoveMode(false);
-            setRotateMode(false);
-            setScaleMode(false);
-            setMirrorMode(false);
-            setOffsetMode(false);
-            setBoundaryMode(false);
-            setChamferMode(false);
+            setActiveTool(SELECT_TOOL);
             setChamferStage(0);
             setChamferDistancePrompt(0);
-            setFilletMode(false);
             setFilletStage(0);
-            setArcMode(false);
-            setCircleMode(false);
-            setLineMode(false);
-            setWallMode(false);
-            setFoundationWallMode(false);
-            setPolylineMode(false);
-            setRectangleMode(false);
             continuableEntityHistoryRef.current = [];
             setHasActiveProject(true);
             setRecoveredAt(new Date(snapshot.autosavedAt).toLocaleString());
@@ -15915,45 +11808,20 @@ export function ModelBuilderApp() {
     };
   }, [persistRecovery, recoveryReady]);
 
+  // Escape cancels a running transform tool. One table replaces nine near-identical
+  // branches; a tool absent from the table is one Escape does not cancel here.
   useEffect(() => {
-    if (!copyMode && !extendMode && !mirrorMode && !moveMode && !offsetMode && !rotateMode && !scaleMode && !stretchMode && !trimMode) return;
+    const notice = ESCAPE_CANCEL_NOTICES[activeTool.kind];
+    if (!notice) return;
     const finishToolWithEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (copyMode) {
-        setCopyMode(false);
-        setFileNotice({ text: "Copy mode finished.", tone: "info" });
-      }
-      setMoveMode(false);
-      if (mirrorMode) {
-        setMirrorMode(false);
-        setFileNotice({ text: "Mirror canceled.", tone: "info" });
-      }
-      if (offsetMode) {
-        setOffsetMode(false);
-        setFileNotice({ text: "Offset canceled.", tone: "info" });
-      }
-      if (trimMode || extendMode) {
-        setTrimMode(false);
-        setExtendMode(false);
-        setFileNotice({ text: `${trimMode ? "Trim" : "Extend"} canceled.`, tone: "info" });
-      }
-      if (rotateMode) {
-        setRotateMode(false);
-        setFileNotice({ text: "Rotate mode finished.", tone: "info" });
-      }
-      if (scaleMode) {
-        setScaleMode(false);
-        setFileNotice({ text: "Scale mode finished.", tone: "info" });
-      }
-      if (stretchMode) {
-        setStretchMode(false);
-        setStretchTargets([]);
-        setFileNotice({ text: "Stretch canceled.", tone: "info" });
-      }
+      if (activeTool.kind === "stretch") setStretchTargets([]);
+      setActiveTool(SELECT_TOOL);
+      setFileNotice({ text: notice, tone: "info" });
     };
     window.addEventListener("keydown", finishToolWithEscape);
     return () => window.removeEventListener("keydown", finishToolWithEscape);
-  }, [copyMode, extendMode, mirrorMode, moveMode, offsetMode, rotateMode, scaleMode, stretchMode, trimMode]);
+  }, [activeTool]);
 
   useEffect(() => {
     const handleHistoryShortcut = (event: KeyboardEvent) => {
