@@ -106,8 +106,8 @@ test("keeps product code separate from the removed starter preview", async () =>
   assert.match(page, /<ModelBuilderApp \/>/);
   assert.match(layout, /title:\s*"Slater Woods Omni Design"/);
   assert.match(component, /"use client"/);
-  assert.match(component, /from "@\/features\/products\/product-library-dialog"/);
-  assert.match(component, /from "@\/features\/products\/product-representation-renderer"/);
+  assert.match(ui, /from "@\/features\/products\/product-library-dialog"/);
+  assert.match(ui, /from "@\/features\/products\/product-representation-renderer"/);
   assert.doesNotMatch(component, /function ProductLibraryDialog/);
   assert.match(productLibraryDialog, /export function ProductLibraryDialog/);
   assert.match(productLibraryDialog, /Representation Alignment/);
@@ -395,8 +395,11 @@ test("keeps product code separate from the removed starter preview", async () =>
 
 test("the interface stays split into feature modules", async () => {
   const component = await readFile(new URL("../app/model-builder-app.tsx", import.meta.url), "utf8");
+  const ui = [component, ...(await readFeatureSources())].join("\n");
 
-  // Panels and dialogs live in their own modules and are imported by the shell.
+  // Panels, dialogs and the viewport live in their own modules. Assert the module
+  // exists rather than that the shell imports it: some are imported by another
+  // feature module instead, which is equally good evidence the split holds.
   for (const specifier of [
     "@/features/properties/property-fields",
     "@/features/properties/naming-fields",
@@ -414,8 +417,17 @@ test("the interface stays split into feature modules", async () => {
     "@/features/dialogs/reference-display-dialog",
     "@/features/dialogs/project-setup-dialog",
     "@/features/tools/tool-types",
+    "@/features/viewport/viewport",
+    "@/features/viewport/viewport-types",
+    "@/features/interface-theme",
   ]) {
-    assert.ok(component.includes(`from "${specifier}"`), `the app shell should import ${specifier}`);
+    const path = new URL(`../${specifier.replace("@/", "")}`, import.meta.url);
+    const found = await Promise.any([
+      access(new URL(`${path.pathname}.ts`, import.meta.url)),
+      access(new URL(`${path.pathname}.tsx`, import.meta.url)),
+    ]).then(() => true, () => false);
+    assert.ok(found, `${specifier} should exist as its own module`);
+    assert.ok(ui.includes(`from "${specifier}"`), `${specifier} should be imported by the interface`);
   }
 
   // Those declarations must not have come back into the shell.
@@ -428,6 +440,12 @@ test("the interface stays split into feature modules", async () => {
     "function ProjectSetupDialog",
     "function MoveObjectControl",
     "function WallOpeningsControl",
+    // The viewport moved out whole: the shell must not declare it or its scene helpers.
+    "function Viewport(",
+    "function NavigationCube",
+    "function createWallView",
+    "function updateWallView",
+    "new THREE.",
   ]) {
     assert.ok(!component.includes(declaration), `${declaration} should live in a feature module, not the app shell`);
   }

@@ -25,6 +25,22 @@ const eslintConfig = defineConfig([
   jsxA11y.flatConfigs.recommended,
   next.configs["core-web-vitals"],
   {
+    // The React Compiler rules that eslint-plugin-react-hooks v7 enables run the
+    // compiler's own analysis over each component. On ModelBuilderApp, which is
+    // still around 5,000 lines with roughly 195 callbacks in one scope, that
+    // analysis exhausts the V8 heap and no rule runs on the file at all.
+    // Scoping them off here is what lets every other rule lint this file today.
+    // Remove this block once the shell is decomposed into hooks: every other
+    // module, including the 7,400-line viewport, passes with these rules on.
+    files: ["app/model-builder-app.tsx"],
+    rules: Object.fromEntries([
+      "static-components", "use-memo", "void-use-memo", "preserve-manual-memoization",
+      "incompatible-library", "immutability", "globals", "refs", "set-state-in-effect",
+      "error-boundaries", "purity", "set-state-in-render", "unsupported-syntax",
+      "config", "gating",
+    ].map((rule) => [`react-hooks/${rule}`, "off"])),
+  },
+  {
     // Cloudflare bindings are declared by merging into the global `Cloudflare`
     // namespace, which is the pattern `wrangler types` itself generates. The
     // exception lives in config rather than as an inline disable so application
